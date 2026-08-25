@@ -197,6 +197,7 @@ Agent 将围绕明确目标自主调用高层工具：
 - [`docs/baselines/2026-08-25-clean-clone-audit.md`](docs/baselines/2026-08-25-clean-clone-audit.md)：全新目录构建、smoke 与跨平台哈希复现；
 - [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md)：公开仓库与 Demo 的发布阻断项；
 - [`docs/security/SECRET_SCAN_REPORT.md`](docs/security/SECRET_SCAN_REPORT.md)：脱敏与秘密扫描结果；
+- [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)：MIT 适用范围、游戏数据与第三方来源边界；
 - [`backend/PERF.md`](backend/PERF.md)：模拟器性能记录；
 - [`部署与运维手册.md`](部署与运维手册.md)：参数化本地/公网部署流程。
 
@@ -204,4 +205,4 @@ Agent 将围绕明确目标自主调用高层工具：
 
 本仓库用于展示个人在战斗策划、系统策划、数值分析、Game AI 和工程部署方面的实践。项目中的游戏名称、技能名称与相关知识产权归原权利方所有；本项目与游戏官方及其关联公司无隶属或背书关系。
 
-当前尚未添加开源许可证。在许可证明确前，公开可读不等于授权复制、分发或商用。
+本项目原创程序源码、测试、脚本与原创文档采用 [MIT License](LICENSE)。游戏名称、客户端导出/派生数据、图标及第三方来源内容不在 MIT 授权范围内，详见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。

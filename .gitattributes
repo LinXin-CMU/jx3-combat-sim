@@ -3,6 +3,7 @@
 .gitattributes text eol=lf
 .gitignore text eol=lf
 .env.example text eol=lf
+LICENSE text eol=lf
 
 # Cross-platform source and data files
 *.rs text eol=lf
