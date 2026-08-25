@@ -1,0 +1,16 @@
+id   = 41902
+name = "盾击·地坼"
+description = "陷阵奇穴触发：盾击命中后形成地震波向外扩散，连发两次独立伤害（视为盾击，享受盾击秘籍与无视防御）。15 秒内置 CD。"
+passive = true
+
+requires_talent = 41834
+
+# name 前缀 "盾击·" 让 collect_recipes 按 base_name "盾击" 匹配到所有盾击秘籍
+# 脚本 dun_ji::cast_skill 里 em.emit("地坼", 41902, t) 让 timeline 显示"地坼"
+
+[[ranks]]
+rank         = 1
+name         = "盾击·地坼"
+base_damage  = 0
+attack_coeff = 4.8375
+weapon_coeff = 0

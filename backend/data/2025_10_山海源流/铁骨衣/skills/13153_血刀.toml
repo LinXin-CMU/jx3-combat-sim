@@ -1,0 +1,25 @@
+id   = 13153
+name = "血刀"
+description = "奇穴 / 擎刀 / 消耗10怒气 / 闪刀命中后可施展两次 / 传播流血"
+
+# 奇穴技能（第三重·血刀）
+# 消耗 10 怒气 / "闪刀"命中后可施展两次
+# 12尺范围最多5目标 / 目标有自身流血则传播流血
+
+stance          = "blade"
+rage_cost       = 10
+requires_talent = 13153
+
+[[cooldowns]]
+cd_id    = "gcd_0.5"
+duration = 0.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[ranks]]
+rank           = 1
+name           = "血刀"
+requires_combo = "闪刀_后续"
+base_damage  = 362.0      # (345 + 379) / 2
+attack_coeff = 3.53750
+weapon_coeff = 1.0

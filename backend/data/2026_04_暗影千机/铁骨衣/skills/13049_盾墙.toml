@@ -1,0 +1,42 @@
+﻿id   = 13049
+name = "盾墙"
+
+icon = "https://icon.jx3box.com/icon/6336.png"
+# 防御技 / 擎盾姿态 / 需格挡值>20
+# 消耗15格挡值，受伤-50%，免疫控制，移速-60%
+# 每点身法+0.9招架等级 / 战斗中每秒格挡值-2
+
+stance        = "shield"
+stance_change = "wall"
+
+[[cooldowns]]
+cd_id    = "gcd_1.5"
+duration = 1.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_1.0"
+duration = 1.0
+mode     = "check_only"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_0.5"
+duration = 0.5
+mode     = "check_only"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "yan_shou_share"
+duration = 40.0
+mode     = "check_and_trigger"
+haste    = false
+
+[[ranks]]
+rank         = 1
+name         = "盾墙"
+icon = "https://icon.jx3box.com/icon/6336.png"
+base_damage  = 0
+attack_coeff = 0
+weapon_coeff = 0

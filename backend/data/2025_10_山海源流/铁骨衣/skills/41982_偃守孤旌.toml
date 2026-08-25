@@ -1,0 +1,22 @@
+id   = 41982
+name = "偃守孤旌"
+description = "云城盾解体附于自身9秒，自动切换擎刀，进入战绝状态。与盾墙共享40秒调息。"
+
+stance          = "shield"
+stance_change   = "blade"
+rage_cost       = 0
+requires_talent = 41982
+
+# 偃守孤旌：不检测也不触发任何 GCD（只触发自身共享 CD）
+[[cooldowns]]
+cd_id    = "yan_shou_share"
+duration = 40.0
+mode     = "check_and_trigger"
+haste    = false
+
+[[ranks]]
+rank         = 1
+name         = "偃守孤旌"
+base_damage  = 0
+attack_coeff = 0
+weapon_coeff = 0

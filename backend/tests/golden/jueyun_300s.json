@@ -1,0 +1,11 @@
+{
+  "name": "绝云宏 300s standard",
+  "fingerprint": "9c0b1069c1106484",
+  "dps": 1064542.4936471567,
+  "total_damage": 319429282.0,
+  "skill_count": 1659,
+  "fight_time": 300.0625,
+  "captured_at": "2026-05-01",
+  "captured_after": "Tier 4 simplified (next_decision_time)",
+  "notes": "DPS 与 pre-Tier-4 完全 bit-equal；fingerprint 因为 cast_time 亚帧偏差与原版不同"
+}

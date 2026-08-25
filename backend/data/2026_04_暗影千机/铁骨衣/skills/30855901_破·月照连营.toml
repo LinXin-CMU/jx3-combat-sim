@@ -1,0 +1,11 @@
+id   = 30855901
+name = "破·月照连营"
+passive = true
+damage_kind = "surplus_only"
+description = "月照连营附带的破招伤害（独立显示）"
+
+[[ranks]]
+rank           = 1
+name           = "破·月照连营"
+surplus_coeff  = 11.98997
+defense_ignore = 1.0      # 阵云破招无视100%外功防御

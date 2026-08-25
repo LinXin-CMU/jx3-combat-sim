@@ -1,0 +1,19 @@
+﻿id   = 13071
+name = "盾反"
+
+icon = "https://icon.jx3box.com/icon/6333.png"
+# 攻击技 / "盾壁"消失4秒内可施展
+# 将盾壁化解伤害的80%释放为8尺群伤（动态伤害，非固定系数）
+# 每额外命中1目标：盾壁调息-7秒、无惧调息-1秒、伤害+20%，最多5目标
+
+# ⚠ 暂时屏蔽：盾反依赖盾壁动态伤害，模拟器尚未实现盾壁吸收量追踪
+# passive = true 使其不加入 skill_map（不可主动释放）
+passive = true
+
+[[ranks]]
+rank         = 1
+name         = "盾反"
+icon = "https://icon.jx3box.com/icon/6333.png"
+base_damage  = 0
+attack_coeff = 0
+weapon_coeff = 0

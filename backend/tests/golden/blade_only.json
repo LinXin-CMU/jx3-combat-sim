@@ -1,0 +1,11 @@
+{
+  "name": "纯刀系（起手擎盾，刀系无法施展）",
+  "fingerprint": "cbf29ce484222325",
+  "dps": -0.0,
+  "skill_count": 0,
+  "captured_at": "2026-05-01",
+  "captured_after": "Tier 4 simplified",
+  "notes": "FNV-1a offset basis 值（空 timeline 的 hash），用于验证基础 hash 算法",
+  "total_damage": -0.0,
+  "fight_time": 300.0625
+}

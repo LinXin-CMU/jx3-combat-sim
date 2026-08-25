@@ -1,0 +1,2676 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>剑网3 苍云PVE循环模拟器</title>
+  <link rel="icon" href="favicon.ico" type="image/x-icon">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <!-- ═══════ 共享输入栏（PR 1 新增）═══════ -->
+    <div class="top-bar">
+      <div class="tb-brand" title="分山劲伤害计算器 · 苍云 · 外功 · 130级">
+        <span class="tb-brand-name tb-brand-shimmer" data-text="苍云器灵">苍云器灵</span>
+        <span class="tb-brand-tag">v2.0.6-20260501</span>
+      </div>
+      <button class="tb-btn" id="btn_mount_picker" title="切换心法 / 武学版本">
+        <span class="tb-label">心法</span>
+        <span class="tb-summary" id="tb_summary_mount">分山劲</span>
+        <span class="tb-caret">▾</span>
+      </button>
+      <button class="tb-btn" data-tb-panel="attrs">
+        <span class="tb-label">属性</span>
+        <span class="tb-caret">▾</span>
+      </button>
+      <div class="tb-inline" id="tb_slot_target">
+        <span class="tb-label">目标</span>
+      </div>
+      <button class="tb-btn" data-tb-panel="talents">
+        <span class="tb-label">奇穴</span>
+        <span class="tb-summary" id="tb_summary_talents">—</span>
+        <span class="tb-caret">▾</span>
+      </button>
+      <button class="tb-btn" data-tb-panel="recipes">
+        <span class="tb-label">秘籍</span>
+        <span class="tb-summary" id="tb_summary_recipes">—</span>
+        <span class="tb-caret">▾</span>
+      </button>
+      <div class="tb-inline" id="tb_slot_delay">
+        <span class="tb-label">延迟</span>
+      </div>
+      <div class="tb-spacer"></div>
+      <button class="tb-btn tb-right" id="tb_resume" style="display:none"
+        title="跳到上次工作流的当前步骤">上次 ▸</button>
+      <button class="tb-btn tb-right" id="tb_home"
+        title="返回主页">🏠 主页</button>
+      <div class="tb-inline" id="tb_quick_switch" title="快速切换到其他工具">
+        <span class="tb-label">跳转</span>
+        <div class="sim-field sim-dropdown">
+          <span class="sim-input sim-dropdown-trigger" id="tb_quick_label">—</span>
+          <div class="sim-dropdown-menu">
+            <div class="sim-dropdown-item" data-quick-page="page-hub">🎯 主页</div>
+            <div class="sim-dropdown-item" data-quick-page="page-basic" style="display:none">📊 技能数值</div>
+            <div class="sim-dropdown-item" data-quick-page="page-sim">📊 循环模拟</div>
+            <div class="sim-dropdown-item" data-quick-page="page-equip">⚔️ 配装器</div>
+            <div class="sim-dropdown-item" data-quick-page="page-wizard-c">🔍 配装搜索</div>
+            <div class="sim-dropdown-item" data-quick-page="page-plaza">🏟️ 战斗广场</div>
+          </div>
+        </div>
+      </div>
+      <button class="tb-icon-btn" id="btn_settings" title="界面设置" aria-label="设置">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06a1.65 1.65 0 001.82.33h0a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51h0a1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82v0a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/>
+        </svg>
+      </button>
+    </div>
+
+    <!-- 弹窗面板（只有属性一个走模态；目标/延迟在顶栏内联，奇穴/秘籍直接用既有模态）-->
+    <div class="tb-panels">
+      <div class="tb-panel" id="tb-panel-attrs"></div>
+    </div>
+
+    <!-- 阵法 + 团队增益弹窗 -->
+    <div id="team_buffs_modal" class="modal-overlay" style="display:none">
+      <div class="modal-panel team-buffs-panel">
+        <div class="modal-header">
+          <span id="team_buffs_title">团队增益设置</span>
+          <div class="tb-view-switch" id="tb_view_switch">
+            <button type="button" class="tb-view-btn active" data-view="table" title="按分类列表勾选 buff">表格</button>
+            <button type="button" class="tb-view-btn" data-view="timeline" title="按时间轴查看已启用 buff 的释放时序（v0 只读）">时间轴</button>
+          </div>
+          <button class="modal-close" id="team_buffs_close" title="关闭">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="tb-tabs" id="team_buffs_tabs"></div>
+          <div class="tb-list" id="team_buffs_list"><div class="tb-empty">加载中…</div></div>
+          <div class="tb-timeline-view" id="team_buffs_timeline_view" style="display:none"></div>
+          <div class="tb-actions">
+            <!-- 作用域：当前分类（本页精调，最常用） -->
+            <button class="sim-btn" id="team_buffs_enable_tab" type="button" title="启用当前分类的项（互斥组取数值更高的）">本页启用</button>
+            <button class="sim-btn" id="team_buffs_disable_tab" type="button" title="禁用当前分类的项">本页禁用</button>
+            <button class="sim-btn" id="team_buffs_reset_defaults" type="button" title="按 toml 默认值重置当前分类的层数/周期/持续（不动启用状态）">本页重置数值</button>
+            <span class="tb-actions-divider"></span>
+            <!-- 作用域：按 side 预设（旗舰 / 无界 一键切换） -->
+            <button class="sim-btn" id="team_buffs_enable_qijian" type="button" title="只启用「旗舰」+「通用」项（互斥组取数值更高的；不影响范围外的已启用项）">仅启用旗舰</button>
+            <button class="sim-btn" id="team_buffs_enable_wujie" type="button" title="只启用「无界」+「通用」项（互斥组取数值更高的；不影响范围外的已启用项）">仅启用无界</button>
+            <span class="tb-actions-divider"></span>
+            <!-- 作用域：全局（极端清空 / 全启用，远离手指） -->
+            <button class="sim-btn" id="team_buffs_enable_all" type="button" title="启用所有 entry，互斥组保留数值更高的一项">全部启用</button>
+            <button class="sim-btn" id="team_buffs_disable_all" type="button" title="禁用所有 entry">全部禁用</button>
+            <span class="tb-actions-divider"></span>
+            <!-- 团辅独立导入导出（含时间轴 release_times）；与方案级 import/export 互不影响 -->
+            <button class="sim-btn" id="team_buffs_export" type="button" title="把当前所有团辅设置（含时间轴）下载成 JSON 文件">导出 JSON</button>
+            <button class="sim-btn" id="team_buffs_import" type="button" title="从 JSON 文件导入；可选仅导入增益或导入全部方案">导入</button>
+            <span class="tb-spacer"></span>
+            <span class="tb-conflict-hint" id="team_buffs_conflict_hint"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 页面切换标签（PR 2 选项 A：UI 上隐藏；DOM 保留供既有 .tab[data-page=…].click() 调用）-->
+    <nav class="tab-bar" style="display:none">
+      <button class="tab active" data-page="page-hub">🎯 Hub</button>
+      <button class="tab" data-page="page-basic">技能数值</button>
+      <button class="tab" data-page="page-sim">循环模拟</button>
+      <button class="tab" data-page="page-opt">宏优化器</button>
+      <button class="tab" data-page="page-rl">RL 训练</button>
+      <button class="tab" data-page="page-rlana">RL 分析</button>
+      <button class="tab" data-page="page-rlrun">RL 回放</button>
+      <button class="tab" data-page="page-wizard-a">循环蒸馏</button>
+      <button class="tab" data-page="page-equip">配装器</button>
+      <button class="tab" data-page="page-wizard-c">配装搜索</button>
+      <button class="tab" data-page="page-plaza">战斗广场</button>
+    </nav>
+
+    <!-- ═══════ Hub 页面（默认落地，PR 1 新增）═══════ -->
+    <div id="page-hub" class="page active">
+      <div class="hub-container">
+        <h1 class="hub-title">🎯 选一个工作流开始</h1>
+        <div class="hub-cards">
+          <div class="hub-card" data-hub-action="workflow-a">
+            <div class="hub-card-icon">📝</div>
+            <h2 class="hub-card-title">循环蒸馏</h2>
+            <p class="hub-card-desc">从手动序列或现有宏跑出的 timeline 蒸馏出新宏</p>
+            <div class="hub-card-badge" id="hub_badge_a" style="display:none"></div>
+            <button class="hub-card-btn">开始 →</button>
+          </div>
+          <div class="hub-card" data-hub-action="workflow-b" style="display:none">
+            <div class="hub-card-icon">⚙️</div>
+            <h2 class="hub-card-title">宏优化</h2>
+            <p class="hub-card-desc">在多目标（稳定性 / 保真度 / 输出）下优化现有宏参数</p>
+            <div class="hub-card-badge" id="hub_badge_b" style="display:none"></div>
+            <button class="hub-card-btn">开始 →</button>
+          </div>
+          <div class="hub-card" data-hub-action="workflow-d">
+            <div class="hub-card-icon">📊</div>
+            <h2 class="hub-card-title">循环模拟</h2>
+            <p class="hub-card-desc">编序列或宏，跑一次模拟看 DPS / 时间轴；可发送到蒸馏或存为方案</p>
+            <button class="hub-card-btn">开始 →</button>
+          </div>
+          <div class="hub-card" data-hub-action="workflow-c">
+            <div class="hub-card-icon">🏟️</div>
+            <h2 class="hub-card-title">战斗广场</h2>
+            <p class="hub-card-desc">把不同配装+奇穴秘籍+循环放在一起对比 DPS</p>
+            <div class="hub-card-badge" id="hub_badge_c" style="display:none"></div>
+            <button class="hub-card-btn">开始 →</button>
+          </div>
+          <div class="hub-card" data-hub-action="workflow-equip-search">
+            <div class="hub-card-icon">🔎</div>
+            <h2 class="hub-card-title">配装搜索</h2>
+            <p class="hub-card-desc">枚举候选装备组合，按当前循环跑模拟，找出最优配装</p>
+            <button class="hub-card-btn">开始 →</button>
+          </div>
+        </div>
+        <div class="hub-tools">
+          <div class="hub-tools-title">独立工具</div>
+          <div class="hub-tools-row">
+            <button class="hub-tool" data-hub-goto="page-equip">⚔️ 配装器</button>
+            <button class="hub-tool" id="hub_macro_settings">📝 宏设置</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════ 战斗广场 · 向导 shell（固定顶/底悬浮栏，仅 body.wizard-mode 时可见）═══════ -->
+    <div id="wizard-shell" class="wizard-shell" aria-hidden="true">
+      <div class="wizard-shell-top">
+        <button class="wz-exit-btn" id="ws_exit" title="取消并返回广场">✕</button>
+        <div class="wizard-shell-title">
+          <span class="wizard-shell-label">编辑方案</span>
+          <span class="wizard-shell-name" id="ws_name_label">方案N</span>
+        </div>
+        <div class="wizard-shell-progress" id="ws_progress">
+          <div class="ws-step" data-step="1"><span class="ws-num">1</span><span class="ws-lbl">奇穴秘籍</span></div>
+          <div class="ws-bar"></div>
+          <div class="ws-step" data-step="2"><span class="ws-num">2</span><span class="ws-lbl">配装</span></div>
+          <div class="ws-bar"></div>
+          <div class="ws-step" data-step="3"><span class="ws-num">3</span><span class="ws-lbl">循环</span></div>
+          <div class="ws-bar"></div>
+          <div class="ws-step" data-step="4"><span class="ws-num">4</span><span class="ws-lbl">概览</span></div>
+        </div>
+        <div class="wizard-shell-mount" id="ws_mount_label">—</div>
+      </div>
+      <div class="wizard-shell-bottom">
+        <button class="sim-btn" id="ws_prev">← 上一步</button>
+        <button class="sim-btn" id="ws_cancel">取消</button>
+        <span class="wizard-shell-status" id="ws_status">第 1 步 / 共 4 步</span>
+        <button class="sim-btn primary" id="ws_next">下一步 →</button>
+      </div>
+    </div>
+
+    <!-- ═══════ 战斗广场 · 步骤 2 · 奇穴秘籍 ═══════ -->
+    <div id="page-plaza-step2" class="page">
+      <div class="hub-container">
+        <div class="pc2-section">
+          <div class="pc2-section-title">奇穴</div>
+          <div class="pc2-row">
+            <button class="sim-btn primary" id="pc2_talents_btn">选择奇穴…</button>
+            <span class="pc2-summary" id="pc2_talents_summary">已选 0 个</span>
+          </div>
+          <div class="pc2-chips" id="pc2_talents_chips"></div>
+        </div>
+
+        <div class="pc2-section">
+          <div class="pc2-section-title">秘籍</div>
+          <div class="pc2-row">
+            <button class="sim-btn primary" id="pc2_recipes_btn">选择秘籍…</button>
+            <span class="pc2-summary" id="pc2_recipes_summary">已选 0 条</span>
+          </div>
+          <div class="pc2-chips" id="pc2_recipes_chips"></div>
+        </div>
+
+        <div class="pc2-section">
+          <div class="pc2-section-title">团辅</div>
+          <div class="pc2-row">
+            <button class="sim-btn primary" id="pc2_team_buffs_btn">设置团辅…</button>
+            <span class="pc2-summary" id="pc2_team_buffs_summary">已启用 0 条</span>
+          </div>
+        </div>
+
+        <div class="pc2-section">
+          <div class="pc2-section-title">目标 + 延迟</div>
+          <div class="pc2-aux-row">
+            <div class="pc2-field">
+              <span class="pc2-field-label">目标等级</span>
+              <div class="sim-field sim-dropdown pc2-hover-dd">
+                <span class="sim-input sim-dropdown-trigger" id="pc2_target_label">—</span>
+                <div class="sim-dropdown-menu" id="pc2_target_menu"></div>
+              </div>
+            </div>
+            <div class="pc2-field">
+              <span class="pc2-field-label">网络延迟</span>
+              <div class="sim-field sim-dropdown pc2-hover-dd">
+                <span class="sim-input sim-dropdown-trigger" id="pc2_delay_label">—</span>
+                <div class="sim-dropdown-menu" id="pc2_delay_menu">
+                  <div class="sim-dropdown-item" data-value="0">理论(0ms)</div>
+                  <div class="sim-dropdown-item" data-value="23">低(1-45ms)</div>
+                  <div class="sim-dropdown-item" data-value="60">中(46-75ms)</div>
+                  <div class="sim-dropdown-item" data-value="90">高(76-105ms)</div>
+                  <div class="sim-dropdown-item" data-value="120">超高(&gt;105ms)</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <p class="pc2-hint">选完后点底栏 <span style="color:var(--gold)">下一步</span> 继续。这些设置会随方案一起保存。</p>
+      </div>
+    </div>
+
+    <!-- ═══════ 战斗广场 · 步骤 4 · 概览与保存 ═══════ -->
+    <div id="page-plaza-step4" class="page">
+      <div class="hub-container">
+        <div class="pc4-name-row">
+          <label class="pc4-name-label">方案名称</label>
+          <input type="text" id="pc4_name_input" class="pc4-name-input" placeholder="方案N" maxlength="40">
+        </div>
+
+        <div class="pc4-grid">
+          <section class="pc4-card">
+            <div class="pc4-card-title">⚔️ 配装</div>
+            <div class="pc4-card-body" id="pc4_equipment"></div>
+          </section>
+          <section class="pc4-card">
+            <div class="pc4-card-title">🧠 奇穴秘籍 / 目标 / 延迟</div>
+            <div class="pc4-card-body" id="pc4_talents_recipes"></div>
+          </section>
+          <section class="pc4-card">
+            <div class="pc4-card-title">🔁 循环</div>
+            <div class="pc4-card-body" id="pc4_rotation"></div>
+          </section>
+          <section class="pc4-card pc4-card-dps">
+            <div class="pc4-card-title">📊 模拟结果
+              <button class="sim-btn sim-btn-xs" id="pc4_rerun">重算</button>
+            </div>
+            <div class="pc4-card-body" id="pc4_snapshot"></div>
+          </section>
+          <section class="pc4-card pc4-card-stats">
+            <div class="pc4-card-title">🔥 战斗统计（按技能伤害）</div>
+            <div class="pc4-card-body" id="pc4_stats"></div>
+          </section>
+        </div>
+
+        <div class="pc4-actions">
+          <button class="sim-btn" id="pc4_send_a" title="用当前方案的环境进入循环蒸馏工作流">📝 发送到循环蒸馏</button>
+          <span class="pc4-actions-hint">环境直接带入 A-4 载入步，蒸馏出新宏后可回写到原方案。</span>
+        </div>
+
+        <p class="pc4-hint">点底栏 <span style="color:var(--gold)">保存方案</span> 以落盘。保存前可随时返回上一步修改。</p>
+      </div>
+    </div>
+
+    <!-- ═══════ 配装搜索（工作流 D：自动配装枚举搜索）═══════ -->
+    <div id="page-wizard-c" class="page">
+      <div class="wzc-shell">
+        <div class="wzc-header">
+          <h1 class="wzc-title">⚔ 配装搜索</h1>
+          <div class="wzc-subtitle">枚举候选装备组合，按当前循环跑模拟，找出最优配装</div>
+        </div>
+
+        <section class="wzc-section">
+          <h2 class="wzc-h2">1. 环境</h2>
+          <div class="wzc-env-grid">
+            <div><span class="wzc-label">心法</span><span class="wzc-val" id="wzc_mount_label">—</span></div>
+
+            <div>
+              <span class="wzc-label">目标等级</span>
+              <select class="wzc-select" id="wzc_target_level">
+                <option value="131">131级</option>
+                <option value="132">132级</option>
+                <option value="133">133级</option>
+                <option value="134" selected>134级</option>
+              </select>
+            </div>
+
+            <div>
+              <span class="wzc-label">循环来源</span>
+              <span class="wzc-env-inline">
+                <span class="wzc-val" id="wzc_source_label">跟随循环模拟</span>
+                <button class="sim-btn wzc-mini-btn" id="wzc_import_pick">📂 导入存档…</button>
+                <button class="sim-btn wzc-mini-btn" id="wzc_import_clear" style="display:none">↺ 取消导入</button>
+              </span>
+            </div>
+
+            <div>
+              <span class="wzc-label">模拟时长</span>
+              <span class="wzc-env-inline">
+                <input type="number" class="wzc-input wzc-input-sm" id="wzc_duration" min="1" max="3600" value="300">
+                <span class="unit">秒</span>
+                <span class="wzc-dur-quick">
+                  <button type="button" class="wzc-dur-btn" data-dur-add="15">+15</button>
+                  <button type="button" class="wzc-dur-btn" data-dur-add="30">+30</button>
+                  <button type="button" class="wzc-dur-btn" data-dur-add="60">+60</button>
+                  <button type="button" class="wzc-dur-btn wzc-dur-btn-minus" data-dur-add="-15">−15</button>
+                  <button type="button" class="wzc-dur-btn wzc-dur-btn-minus" data-dur-add="-30">−30</button>
+                  <button type="button" class="wzc-dur-btn wzc-dur-btn-minus" data-dur-add="-60">−60</button>
+                </span>
+              </span>
+            </div>
+
+            <div>
+              <span class="wzc-label">奇穴 / 秘籍</span>
+              <span class="wzc-env-inline">
+                <span class="wzc-val" id="wzc_tr_label">—</span>
+                <button class="sim-btn wzc-mini-btn" id="wzc_open_talents">奇穴</button>
+                <button class="sim-btn wzc-mini-btn" id="wzc_open_recipes">秘籍</button>
+              </span>
+            </div>
+
+            <div>
+              <span class="wzc-label">团队增益</span>
+              <span class="wzc-env-inline">
+                <span class="wzc-val" id="wzc_tb_label">—</span>
+                <button class="sim-btn wzc-mini-btn" id="wzc_open_team_buffs">团辅</button>
+              </span>
+            </div>
+
+            <div>
+              <span class="wzc-label">镶嵌</span>
+              <span class="wzc-segmented" id="wzc_embed_radios">
+                <input type="radio" name="wzc_embed" id="wzc_embed_6" value="6" checked><label for="wzc_embed_6">6</label>
+                <input type="radio" name="wzc_embed" id="wzc_embed_7" value="7"><label for="wzc_embed_7">7</label>
+                <input type="radio" name="wzc_embed" id="wzc_embed_8" value="8"><label for="wzc_embed_8">8</label>
+              </span>
+            </div>
+          </div>
+        </section>
+
+        <section class="wzc-section">
+          <h2 class="wzc-h2">2. 加速档位</h2>
+          <div class="wzc-haste-slider">
+            <div class="wzc-haste-ticks-rows">
+              <!-- 选中区间色块层（绝对定位横跨三行 chip + sync row，z-index 0 在 chip 之下） -->
+              <div class="wzc-haste-range-fills"></div>
+              <div class="wzc-haste-tick-row" data-base-frames="24"><span class="wzc-haste-row-label">1.5s</span><div class="wzc-haste-tick-line" data-row="24"></div></div>
+              <div class="wzc-haste-tick-row" data-base-frames="16"><span class="wzc-haste-row-label">1.0s</span><div class="wzc-haste-tick-line" data-row="16"></div></div>
+              <div class="wzc-haste-tick-row" data-base-frames="8"><span class="wzc-haste-row-label">0.5s</span><div class="wzc-haste-tick-line" data-row="8"></div></div>
+              <!-- 多轴共享 haste 临界点的同步按钮行：仅在 ≥2 轴共享的 haste 位置有按钮 -->
+              <div class="wzc-haste-sync-row"><span class="wzc-haste-row-label">同步</span><div class="wzc-haste-sync-line"></div></div>
+            </div>
+            <div class="wzc-haste-actions">
+              <button class="sim-btn wzc-mini-btn" id="wzc_haste_select_all">全选</button>
+              <button class="sim-btn wzc-mini-btn" id="wzc_haste_clear_all">全不选</button>
+              <div class="wzc-haste-vals">加速值区间：<span id="wzc_haste_segments">—</span></div>
+            </div>
+            <ul class="wzc-hint wzc-haste-hint">
+              <li>加速档位筛选：三行 = 同一加速值轴在 1.5s / 1.0s / 0.5s GCD 下的视图（例：1.5s 2 段 = 加速值让 1.5 秒 GCD 降两帧）。</li>
+              <li>点击段位刻度即可选 / 取消，可多选；相邻段位自动合并，不相邻段位保留为多个独立搜索区间一并提交。</li>
+              <li>↕（仅在多轴共享的加速值位置出现）：一键把该加速值在三行上对应的所有段位全选 / 全取消。</li>
+              <li>全选 / 全不选：对所有段位批量操作。</li>
+            </ul>
+          </div>
+        </section>
+
+        <section class="wzc-section">
+          <h2 class="wzc-h2">3. 候选池</h2>
+          <div class="wzc-cands-toolbar">
+            <span class="wzc-hint">每部位"锁定"用当前装备，或"枚举"按筛选条件出候选。锁定的部位不参与搜索。</span>
+            <div style="margin-left:auto">
+              <button class="sim-btn wzc-mini-btn" id="wzc_clear_overrides" style="display:none" title="清空所有手动切换的"当前装备"，全部恢复主源">↺ 清空覆盖</button>
+              <button class="sim-btn wzc-mini-btn" id="wzc_all_lock">全部锁定</button>
+              <button class="sim-btn wzc-mini-btn" id="wzc_all_enum">全部枚举</button>
+              <button class="sim-btn wzc-mini-btn" id="wzc_all_refresh">全部刷新候选</button>
+            </div>
+          </div>
+          <div class="wzc-cands-layout">
+            <div class="wzc-cands-table-wrap">
+              <table class="wzc-cands-table">
+                <thead>
+                  <tr><th>部位</th><th>当前装备</th><th>模式</th><th>筛选</th><th>候选</th></tr>
+                </thead>
+                <tbody id="wzc_cands_body"></tbody>
+              </table>
+              <div class="wzc-hint" id="wzc_combo_summary">总组合：—</div>
+            </div>
+            <aside class="wzc-attr-preview" id="wzc_attr_preview">
+              <div class="wzc-attr-preview-title">当前配置属性</div>
+              <div class="wzc-attr-preview-body">
+                <div class="wzc-hint">点击候选池里"全部刷新"或单部位「筛选」后会重算</div>
+              </div>
+            </aside>
+          </div>
+        </section>
+
+        <section class="wzc-section">
+          <h2 class="wzc-h2">4. 搜索</h2>
+          <div class="wzc-run-row">
+            <button class="sim-btn wzc-run-btn" id="wzc_run">🔍 开始搜索</button>
+            <button class="sim-btn" id="wzc_pause" style="display:none">⏸ 暂停</button>
+            <button class="sim-btn" id="wzc_cancel" style="display:none">⏹ 终止</button>
+            <!-- 隐藏的高级开关：保持 input 在 DOM 中（JS 仍读取 .checked / .value），但不向用户展示 -->
+            <label class="wzc-check" hidden><input type="checkbox" id="wzc_use_pareto" checked>Pareto 剪枝</label>
+            <label class="wzc-check" hidden>
+              <input type="checkbox" id="wzc_inherit_enchants" checked>继承附魔
+            </label>
+            <label class="wzc-check" hidden>
+              数值 bucket
+              <input type="number" class="sim-input" id="wzc_bucket_size" min="0" max="5000" step="50" value="500" style="width:60px;">
+            </label>
+          </div>
+          <!-- 四段式进度区：装备组合 / 候选筛选 / DPS 测算 / 附魔挑选，每段独立进度条 + ETA -->
+          <div id="wzc_pbox" style="margin-top:12px;display:none;">
+            <div class="wzc-phases">
+              <div class="wzc-phase" data-phase="enumerate">
+                <div class="wzc-phase-head">
+                  <span class="wzc-phase-icon">○</span>
+                  <span class="wzc-phase-name">装备组合</span>
+                  <span class="wzc-phase-time">—</span>
+                </div>
+                <div class="wzc-phase-bar"><div class="wzc-phase-fill"></div></div>
+                <div class="wzc-phase-detail">等待开始</div>
+              </div>
+              <div class="wzc-phase-arrow">›</div>
+              <div class="wzc-phase" data-phase="pareto">
+                <div class="wzc-phase-head">
+                  <span class="wzc-phase-icon">○</span>
+                  <span class="wzc-phase-name">候选筛选</span>
+                  <span class="wzc-phase-time">—</span>
+                </div>
+                <div class="wzc-phase-bar"><div class="wzc-phase-fill"></div></div>
+                <div class="wzc-phase-detail">等待</div>
+              </div>
+              <div class="wzc-phase-arrow">›</div>
+              <div class="wzc-phase" data-phase="rank">
+                <div class="wzc-phase-head">
+                  <span class="wzc-phase-icon">○</span>
+                  <span class="wzc-phase-name">属性预筛</span>
+                  <span class="wzc-phase-time">—</span>
+                </div>
+                <div class="wzc-phase-bar"><div class="wzc-phase-fill"></div></div>
+                <div class="wzc-phase-detail">等待</div>
+              </div>
+              <div class="wzc-phase-arrow">›</div>
+              <div class="wzc-phase" data-phase="simulate">
+                <div class="wzc-phase-head">
+                  <span class="wzc-phase-icon">○</span>
+                  <span class="wzc-phase-name">DPS 测算</span>
+                  <span class="wzc-phase-time">—</span>
+                </div>
+                <div class="wzc-phase-bar"><div class="wzc-phase-fill"></div></div>
+                <div class="wzc-phase-detail">等待</div>
+              </div>
+              <div class="wzc-phase-arrow">›</div>
+              <div class="wzc-phase" data-phase="phase_b">
+                <div class="wzc-phase-head">
+                  <span class="wzc-phase-icon">○</span>
+                  <span class="wzc-phase-name">附魔挑选</span>
+                  <span class="wzc-phase-time">—</span>
+                </div>
+                <div class="wzc-phase-bar"><div class="wzc-phase-fill"></div></div>
+                <div class="wzc-phase-detail">等待</div>
+              </div>
+            </div>
+            <div class="wzc-phase-summary" id="wzc_phase_summary">—</div>
+          </div>
+        </section>
+
+        <section class="wzc-section" id="wzc_result_wrap" style="display:none">
+          <h2 class="wzc-h2">5. 结果</h2>
+          <div class="wzc-summary" id="wzc_summary"></div>
+          <div class="wzc-top-cards" id="wzc_top_body"></div>
+          <details class="wzc-stats-details">
+            <summary>统计 / 耗时</summary>
+            <pre class="wzc-stats" id="wzc_stats"></pre>
+          </details>
+        </section>
+      </div>
+
+      <!-- 当前装备切换 picker（点击候选池表第二列触发，单选切换该部位"当前装备"覆盖） -->
+      <div id="wzc_picker_modal" class="modal-overlay" style="display:none">
+        <div class="modal-panel wzc-fm-panel">
+          <div class="modal-header">
+            <span>🔁 切换当前装备 · <b id="wzc_pk_pos_label">—</b></span>
+            <button class="modal-close" id="wzc_pk_close" title="关闭">×</button>
+          </div>
+          <div class="modal-body">
+            <div class="wzc-fm-row">
+              <label>品级</label>
+              <div class="eq-range">
+                <div class="eq-range-track">
+                  <div class="eq-range-fill" id="wzc_pk_range_fill"></div>
+                  <input type="range" id="wzc_pk_min_level" min="22000" max="44000" step="100" value="35000">
+                  <input type="range" id="wzc_pk_max_level" min="22000" max="44000" step="100" value="44000">
+                </div>
+                <div class="eq-range-vals">
+                  <span id="wzc_pk_min_level_val">35000</span>
+                  <span>~</span>
+                  <span id="wzc_pk_max_level_val">44000</span>
+                </div>
+              </div>
+              <button class="sim-btn wzc-mini-btn" id="wzc_pk_filter_all" title="激活所有筛选 chip（门派/心法/属性/战斗/类型）">全选</button>
+              <button class="sim-btn wzc-mini-btn" id="wzc_pk_filter_none" title="清空所有筛选 chip">全不选</button>
+            </div>
+            <div class="wzc-fm-row">
+              <label>门派</label>
+              <div class="wzc-chip-group" id="wzc_pk_schools"></div>
+            </div>
+            <div class="wzc-fm-row">
+              <label>心法</label>
+              <div class="wzc-chip-group" id="wzc_pk_kinds"></div>
+            </div>
+            <div class="wzc-fm-row">
+              <label>属性标签</label>
+              <div class="wzc-chip-group" id="wzc_pk_attrs">
+                <button class="eq-chip" data-attr="招架">招架</button>
+                <button class="eq-chip" data-attr="会心">会心</button>
+                <button class="eq-chip" data-attr="无双">无双</button>
+                <button class="eq-chip" data-attr="破防">破防</button>
+                <button class="eq-chip" data-attr="破招">破招</button>
+                <button class="eq-chip" data-attr="加速">加速</button>
+                <button class="eq-chip" data-attr="全能">全能</button>
+              </div>
+            </div>
+            <div class="wzc-fm-row">
+              <label>战斗</label>
+              <div class="wzc-chip-group" id="wzc_pk_battle">
+                <button class="eq-chip" data-battle="PVE">PVE</button>
+                <button class="eq-chip" data-battle="PVP">PVP</button>
+                <button class="eq-chip" data-battle="PVX">PVX</button>
+              </div>
+            </div>
+            <div class="wzc-fm-row">
+              <label>类型</label>
+              <div class="wzc-chip-group" id="wzc_pk_categories">
+                <button class="eq-chip" data-cat="无修">无修</button>
+                <button class="eq-chip" data-cat="散件">散件</button>
+                <button class="eq-chip" data-cat="切糕">切糕</button>
+                <button class="eq-chip" data-cat="普通精简">普通精简</button>
+                <button class="eq-chip" data-cat="黄字精简">黄字精简</button>
+                <button class="eq-chip" data-cat="橙武">橙武</button>
+                <button class="eq-chip" data-cat="紫武">紫武</button>
+                <button class="eq-chip" data-cat="橙坠">橙坠</button>
+                <button class="eq-chip" data-cat="紫坠">紫坠</button>
+              </div>
+            </div>
+            <div class="wzc-fm-row">
+              <label>关键字</label>
+              <input type="text" class="sim-input wzc-fm-keyword" id="wzc_pk_keyword" placeholder="按装备名 / 套装名实时过滤已加载列表">
+              <label class="wzc-check"><input type="checkbox" id="wzc_pk_only_set">🛡 只看套装件</label>
+              <label class="wzc-check"><input type="checkbox" id="wzc_pk_only_orange">🟠 只看橙装</label>
+            </div>
+            <div class="wzc-fm-preview-wrap">
+              <div class="wzc-fm-preview-head">
+                <span>📋 候选列表（点击即切换）</span>
+                <span class="wzc-hint" id="wzc_pk_count">—</span>
+              </div>
+              <div class="wzc-pk-list-wrap" id="wzc_pk_list">
+                <table class="eq-list-table wzc-pk-table" id="wzc_pk_table" style="display:none">
+                  <thead>
+                    <tr>
+                      <th style="width:30%" data-sort-key="name"          title="点击按装备名排序">装备名称</th>
+                      <th style="width:24%" data-sort-key="magic_type"    title="点击按属性类型排序">属性类型</th>
+                      <th style="width:9%"  data-sort-key="belong_school" title="点击按门派排序">门派</th>
+                      <th style="width:11%" data-sort-key="set_name"      title="点击按套装名排序">套装</th>
+                      <th style="width:11%" data-sort-key="level"         title="点击按品级排序">品级</th>
+                      <th style="width:15%" data-sort-key="dps_delta" class="eq-dps-col-head" title="点击按 DPS Δ 排序。基线 = 循环模拟最近一次结果的 DPS；替换该件为基础项后跑 lite 模拟，绿=提升，红=下降。">DPS Δ</th>
+                    </tr>
+                  </thead>
+                  <tbody id="wzc_pk_tbody"></tbody>
+                </table>
+                <div class="wzc-pk-empty wzc-hint" id="wzc_pk_empty">未拉取</div>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <span class="wzc-hint" style="margin-right:auto;color:var(--text-muted);">筛选条件仅用于本 picker，不影响候选池；附魔/镶嵌不会随此切换变化</span>
+            <button class="sim-btn" id="wzc_pk_reset_filter" title="把 picker 筛选重置为本部位候选池的筛选条件">↺ 重置筛选</button>
+            <button class="sim-btn" id="wzc_pk_reset" title="清除该部位的"当前装备"覆盖，恢复主源装备">恢复主源装备</button>
+            <button class="sim-btn" id="wzc_pk_cancel">取消</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 候选筛选 modal（per-slot 编辑筛选条件，类似配装器中栏） -->
+      <div id="wzc_filter_modal" class="modal-overlay" style="display:none">
+        <div class="modal-panel wzc-fm-panel">
+          <div class="modal-header">
+            <span>🔍 筛选 · <b id="wzc_fm_pos_label">—</b></span>
+            <button class="modal-close" id="wzc_fm_close" title="关闭">×</button>
+          </div>
+          <div class="modal-body">
+            <div class="wzc-fm-row">
+              <label>品级</label>
+              <div class="eq-range">
+                <div class="eq-range-track">
+                  <div class="eq-range-fill" id="wzc_fm_range_fill"></div>
+                  <input type="range" id="wzc_fm_min_level" min="22000" max="44000" step="100" value="35000">
+                  <input type="range" id="wzc_fm_max_level" min="22000" max="44000" step="100" value="44000">
+                </div>
+                <div class="eq-range-vals">
+                  <span id="wzc_fm_min_level_val">35000</span>
+                  <span>~</span>
+                  <span id="wzc_fm_max_level_val">44000</span>
+                </div>
+              </div>
+            </div>
+            <div class="wzc-fm-row">
+              <label>门派</label>
+              <div class="wzc-chip-group" id="wzc_fm_schools"></div>
+            </div>
+            <div class="wzc-fm-row">
+              <label>心法</label>
+              <div class="wzc-chip-group" id="wzc_fm_kinds"></div>
+            </div>
+            <div class="wzc-fm-row">
+              <label>属性标签</label>
+              <div class="wzc-chip-group" id="wzc_fm_attrs">
+                <button class="eq-chip" data-attr="招架">招架</button>
+                <button class="eq-chip" data-attr="会心">会心</button>
+                <button class="eq-chip" data-attr="无双">无双</button>
+                <button class="eq-chip" data-attr="破防">破防</button>
+                <button class="eq-chip" data-attr="破招">破招</button>
+                <button class="eq-chip" data-attr="加速">加速</button>
+                <button class="eq-chip" data-attr="全能">全能</button>
+              </div>
+            </div>
+            <div class="wzc-fm-row">
+              <label>战斗</label>
+              <div class="wzc-chip-group" id="wzc_fm_battle">
+                <button class="eq-chip" data-battle="PVE">PVE</button>
+                <button class="eq-chip" data-battle="PVP">PVP</button>
+                <button class="eq-chip" data-battle="PVX">PVX</button>
+              </div>
+            </div>
+            <div class="wzc-fm-row">
+              <label>类型</label>
+              <div class="wzc-chip-group" id="wzc_fm_categories">
+                <button class="eq-chip" data-cat="无修">无修</button>
+                <button class="eq-chip" data-cat="散件">散件</button>
+                <button class="eq-chip" data-cat="切糕">切糕</button>
+                <button class="eq-chip" data-cat="普通精简">普通精简</button>
+                <button class="eq-chip" data-cat="黄字精简">黄字精简</button>
+                <button class="eq-chip" data-cat="橙武">橙武</button>
+                <button class="eq-chip" data-cat="紫武">紫武</button>
+                <button class="eq-chip" data-cat="橙坠">橙坠</button>
+                <button class="eq-chip" data-cat="紫坠">紫坠</button>
+              </div>
+            </div>
+            <div class="wzc-fm-row">
+              <label>关键字</label>
+              <input type="text" class="sim-input wzc-fm-keyword" id="wzc_fm_keyword" placeholder="搜索 装备名 / magic_type">
+            </div>
+            <div class="wzc-fm-row">
+              <label></label>
+              <label class="wzc-check"><input type="checkbox" id="wzc_fm_only_set">🛡 只看套装件</label>
+            </div>
+            <div class="wzc-fm-preview-wrap">
+              <div class="wzc-fm-preview-head">
+                <span>📋 候选预览</span>
+                <span class="wzc-hint" id="wzc_fm_preview_count">—</span>
+              </div>
+              <div class="wzc-fm-preview-list" id="wzc_fm_preview_list">未拉取</div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <span class="wzc-hint" style="margin-right:auto;color:var(--text-muted);">条件改动自动保存</span>
+            <button class="sim-btn" id="wzc_fm_filter_all" title="激活所有筛选 chip（门派/心法/属性/战斗/类型）">全选</button>
+            <button class="sim-btn" id="wzc_fm_filter_none" title="清空所有筛选 chip">全不选</button>
+            <button class="sim-btn" id="wzc_fm_reset" title="恢复该部位的默认筛选条件 + 清空剔除">↺ 重置默认</button>
+            <button class="sim-btn" id="wzc_fm_apply_all" title="把当前 filter 同步到所有 12 个部位（剔除列表不下发）">📋 同步到所有部位</button>
+            <button class="sim-btn primary" id="wzc_fm_apply" title="关闭并刷新本部位候选">✓ 完成</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════ 战斗广场（工作流 C）═══════ -->
+    <div id="page-plaza" class="page">
+      <div class="hub-container plaza-container">
+        <div class="plaza-header">
+          <button class="wz-exit-btn" id="plaza_back_hub" title="返回 Hub">←</button>
+          <h1 class="hub-title plaza-title">🏟️ 战斗广场</h1>
+          <div class="plaza-mount-tag" id="plaza_mount_label">—</div>
+        </div>
+        <div class="plaza-hint" id="plaza_hint">
+          把不同配装+奇穴秘籍+循环保存为方案，横向对比 DPS。
+          <span class="plaza-hint-dim">跨心法方案灰显，只读快照。</span>
+        </div>
+        <div class="plaza-toolbar" id="plaza_toolbar" style="display:none">
+          <label class="plaza-sort-lbl">排序</label>
+          <select id="plaza_sort" class="plaza-sort-sel">
+            <option value="updated">最近修改</option>
+            <option value="dps">DPS 降序</option>
+            <option value="name">名称</option>
+            <option value="mount">心法</option>
+          </select>
+          <label class="plaza-sort-check"><input type="checkbox" id="plaza_hide_diff_mount"> 隐藏跨心法</label>
+          <span class="plaza-toolbar-spacer"></span>
+        </div>
+        <div class="plaza-cards" id="plaza_cards">
+          <!-- 方案卡片 + 末尾一个 + 添加卡 -->
+        </div>
+        <div class="plaza-footer" id="plaza_footer" style="display:none">
+          <span class="plaza-footer-count" id="plaza_count">共 0 个方案</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════ PR 19: 历史库 ═══════ -->
+    <div id="page-history" class="page">
+      <div class="hub-container">
+        <h1 class="hub-title">📚 历史库（userdata/loops/）</h1>
+        <div class="wz-sec wz-tl-actions">
+          <button class="sim-btn" id="hist_refresh">刷新</button>
+          <button class="sim-btn" id="hist_open_dir">打开 userdata/loops/</button>
+          <span class="wz-hint" id="hist_status"></span>
+        </div>
+        <div class="wz-sec" style="margin-top:12px;display:grid;grid-template-columns:340px 1fr;gap:14px;align-items:start;">
+          <div>
+            <div class="wz-sec-title">循环列表</div>
+            <div id="hist_list" class="wz-iter-history"></div>
+          </div>
+          <div>
+            <div class="wz-sec-title" id="hist_preview_title">预览</div>
+            <div class="wz-tl-info" id="hist_preview_info" style="min-height:60px;"></div>
+            <div class="opt-macro-wrap" style="height:260px;margin-top:8px;">
+              <pre class="opt-macro-hl" id="hist_preview_hl" aria-hidden="true"></pre>
+              <textarea class="opt-macro" id="hist_preview_macro" spellcheck="false" readonly></textarea>
+            </div>
+            <div class="wz-sec wz-tl-actions" style="margin-top:8px;">
+              <button class="sim-btn primary" id="hist_apply" disabled>应用到循环模拟</button>
+              <button class="sim-btn" id="hist_to_b" disabled style="display:none">送入工作流 B</button>
+              <button class="sim-btn" id="hist_delete" disabled style="margin-left:auto;color:#f85149;border-color:#f85149;">删除</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════ PR 2: 工作流 A Wizard 骨架 ═══════ -->
+    <div id="page-wizard-a" class="page">
+      <div class="wizard">
+        <div class="wizard-header">
+          <div class="wizard-title-row">
+            <button class="wz-exit-btn" id="wz_exit_hub" title="返回 Hub">←</button>
+            <div class="wizard-title">🎯 循环蒸馏</div>
+            <div class="wz-header-spacer"></div>
+            <label class="wz-v2-toggle" title="启用 v2 算法：开场裁剪 + 精细阈值 + 批量验证">
+              <input type="checkbox" id="wz_use_v2">
+              <span class="wz-v2-slider"></span>
+              <span class="wz-v2-label">v2</span>
+            </label>
+            <div class="wz-header-hint">完成步骤会自动保存到本地</div>
+          </div>
+          <div class="wizard-progress">
+            <div class="wz-prog-step" data-step="1"><span class="wz-prog-num">1</span><span>奇穴秘籍</span></div>
+            <div class="wz-prog-bar"></div>
+            <div class="wz-prog-step" data-step="2"><span class="wz-prog-num">2</span><span>配装</span></div>
+            <div class="wz-prog-bar"></div>
+            <div class="wz-prog-step" data-step="3"><span class="wz-prog-num">3</span><span>循环</span></div>
+            <div class="wz-prog-bar"></div>
+            <div class="wz-prog-step" data-step="4"><span class="wz-prog-num">4</span><span>载入</span></div>
+            <div class="wz-prog-bar"></div>
+            <div class="wz-prog-step" data-step="5"><span class="wz-prog-num">5</span><span>生成</span></div>
+            <div class="wz-prog-bar"></div>
+            <div class="wz-prog-step" data-step="6"><span class="wz-prog-num">6</span><span>迭代</span></div>
+            <div class="wz-prog-bar"></div>
+            <div class="wz-prog-step" data-step="7"><span class="wz-prog-num">7</span><span>输出</span></div>
+          </div>
+        </div>
+
+        <div class="wizard-body">
+          <main class="wizard-content">
+            <!-- ① 奇穴 / 秘籍 / 目标 / 延迟 -->
+            <div class="wz-step-panel" data-step="1">
+              <h2 class="wz-step-title">① 奇穴 / 秘籍 / 目标 / 延迟</h2>
+              <div class="wz-hint wz-hint-inline" style="margin-bottom:10px;">
+                这些设置会影响 timeline 的基础 DPS 与宏条件计算。修改后需要重跑模拟才能反映到后续步骤。
+              </div>
+              <div class="pc2-section">
+                <div class="pc2-section-title">奇穴</div>
+                <div class="pc2-row">
+                  <button class="sim-btn primary" id="wza1_talents_btn">选择奇穴…</button>
+                  <span class="pc2-summary" id="wza1_talents_summary">已选 0 个</span>
+                </div>
+                <div class="pc2-chips" id="wza1_talents_chips"></div>
+              </div>
+              <div class="pc2-section">
+                <div class="pc2-section-title">秘籍</div>
+                <div class="pc2-row">
+                  <button class="sim-btn primary" id="wza1_recipes_btn">选择秘籍…</button>
+                  <span class="pc2-summary" id="wza1_recipes_summary">已选 0 条</span>
+                </div>
+                <div class="pc2-chips" id="wza1_recipes_chips"></div>
+              </div>
+              <div class="pc2-section">
+                <div class="pc2-section-title">目标 + 延迟</div>
+                <div class="pc2-aux-row">
+                  <div class="pc2-field">
+                    <span class="pc2-field-label">目标等级</span>
+                    <div class="sim-field sim-dropdown pc2-hover-dd">
+                      <span class="sim-input sim-dropdown-trigger" id="wza1_target_label">—</span>
+                      <div class="sim-dropdown-menu" id="wza1_target_menu"></div>
+                    </div>
+                  </div>
+                  <div class="pc2-field">
+                    <span class="pc2-field-label">网络延迟</span>
+                    <div class="sim-field sim-dropdown pc2-hover-dd">
+                      <span class="sim-input sim-dropdown-trigger" id="wza1_delay_label">—</span>
+                      <div class="sim-dropdown-menu" id="wza1_delay_menu">
+                        <div class="sim-dropdown-item" data-value="0">理论(0ms)</div>
+                        <div class="sim-dropdown-item" data-value="23">低(1-45ms)</div>
+                        <div class="sim-dropdown-item" data-value="60">中(46-75ms)</div>
+                        <div class="sim-dropdown-item" data-value="90">高(76-105ms)</div>
+                        <div class="sim-dropdown-item" data-value="120">超高(&gt;105ms)</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- ② 配装 -->
+            <div class="wz-step-panel" data-step="2">
+              <h2 class="wz-step-title">② 配装</h2>
+              <div class="wz-hint wz-hint-inline" style="margin-bottom:10px;">
+                配装影响面板属性，进而影响 timeline 基线 DPS。Step 3 循环跑模拟时会用当前配装。
+              </div>
+              <div class="pc2-section">
+                <div class="pc2-section-title">装备概要</div>
+                <div class="pc2-chips" id="wza2_equip_chips"></div>
+                <div class="pc2-row" style="margin-top:12px;">
+                  <button class="sim-btn primary" id="wza2_go_equip">打开配装器 →</button>
+                  <button class="sim-btn" id="wza2_refresh">刷新</button>
+                  <span class="wz-hint" id="wza2_hint"></span>
+                </div>
+              </div>
+            </div>
+
+            <!-- ③ 循环（嵌入循环模拟，编序列/宏 + 跑一次模拟） -->
+            <div class="wz-step-panel" data-step="3">
+              <h2 class="wz-step-title">③ 循环（手动序列 / 宏）</h2>
+              <div class="wz-hint wz-hint-inline" style="margin-bottom:10px;">
+                在下方循环模拟里编序列或宏，跑一次模拟。结果会自动捕获到 Step 4 的 timeline。
+              </div>
+              <div class="wz-sim-slot" id="wz_sim_slot">
+                <!-- #page-sim 会被 JS 动态塞进来 -->
+              </div>
+            </div>
+
+            <!-- ④ 载入 timeline -->
+            <div class="wz-step-panel" data-step="4">
+              <h2 class="wz-step-title">④ 载入 timeline</h2>
+              <div class="wz-hint wz-hint-inline" style="margin-bottom:10px;">
+                从 Step 3 的模拟结果载入 timeline；也可以用已保存的 JSON 文件代替。
+              </div>
+              <div class="wz-sec wz-tl-actions">
+                <button class="sim-btn primary" id="wz_tl_use_sim">✓ 使用上次模拟结果</button>
+                <button class="sim-btn" id="wz_tl_use_json">从 JSON 导入</button>
+                <input type="file" id="wz_tl_file" accept=".json" style="display:none">
+                <button class="sim-btn" id="wz_tl_clear" disabled>清除已载入</button>
+                <span class="wz-hint" id="wz_tl_status" style="margin-left:10px;"></span>
+              </div>
+              <div class="wz-tl-info" id="wz_tl_info" style="display:none"></div>
+            </div>
+
+            <!-- ⑤ 生成 + 配置（原 Step 2）-->
+            <div class="wz-step-panel" data-step="5">
+              <h2 class="wz-step-title">⑤ 生成 + 配置</h2>
+              <div class="wz-hint wz-hint-inline" style="margin-bottom:10px;">
+                当前已经根据默认参数进行了「生成宏」。可以在下方查看宏文本 / 规则诊断，不满意再展开「生成选项」微调重跑。
+              </div>
+
+              <details class="wz-collapse" id="wz_opts_section">
+                <summary>
+                  <span>生成选项</span>
+                  <span class="wz-hint-inline">改选项后点"生成宏"按新选项重跑</span>
+                </summary>
+                <div class="wz-collapse-body">
+                  <div class="wz-form">
+                    <label class="wz-field">单条 AND 最多原子数
+                      <input type="number" id="wz_max_terms" value="2" min="1" max="8">
+                    </label>
+                    <label class="wz-field">OR 最多子句数
+                      <input type="number" id="wz_max_clauses" value="3" min="1" max="6">
+                    </label>
+                    <label class="wz-field">单原子最低 F1
+                      <input type="number" id="wz_min_gain" value="0.05" step="0.01" min="0" max="1">
+                    </label>
+                    <label class="wz-field">低覆盖剔除阈值 %
+                      <input type="number" id="wz_min_cover" value="1.0" step="0.5" min="0">
+                    </label>
+                    <label class="wz-field">单页字数上限
+                      <input type="number" id="wz_max_chars" value="128" min="32" max="512">
+                    </label>
+                  </div>
+
+                  <details class="wz-collapse wz-collapse-nested" style="margin-top:12px;">
+                    <summary>
+                      <span>一致性敏感技能</span>
+                      <span class="wz-hint-inline">严格模式：门槛 × 倍率、不允许部分覆盖降级</span>
+                    </summary>
+                    <div class="wz-collapse-body">
+                      <div class="wz-cb-grid" id="wz_consistency_grid"></div>
+                    </div>
+                  </details>
+
+                  <details class="wz-collapse wz-collapse-nested" style="margin-top:10px;">
+                    <summary><span>高级参数</span></summary>
+                    <div class="wz-collapse-body">
+                      <div class="wz-form">
+                        <label class="wz-field">一致性 min_gain 倍率
+                          <input type="number" id="wz_cons_gain_mult" value="3.0" step="0.1" min="1.0">
+                        </label>
+                        <label class="wz-field">一致性 max_terms 增量
+                          <input type="number" id="wz_cons_terms_bonus" value="2" min="0" max="4">
+                        </label>
+                        <label class="wz-field">一致性 cast-diff 优先级
+                          <input type="number" id="wz_cons_priority" value="5.0" step="0.5" min="1.0">
+                        </label>
+                        <label class="wz-field-checkbox">
+                          <input type="checkbox" id="wz_use_copeland" checked>
+                          启用 Copeland 优先级排序
+                        </label>
+                        <label class="wz-field-checkbox">
+                          <input type="checkbox" id="wz_use_off_gcd" checked>
+                          off-GCD 技能（盾飞/盾回/血怒）特殊处理
+                        </label>
+                      </div>
+                    </div>
+                  </details>
+                </div>
+              </details>
+
+              <div class="wz-sec wz-tl-actions">
+                <button class="sim-btn primary" id="wz_gen_run">生成宏</button>
+                <button class="sim-btn" id="wz_gen_copy" disabled>复制宏文本</button>
+                <span class="wz-hint" id="wz_gen_status"></span>
+              </div>
+
+              <!-- 左右并列：左 = 宏文本/字数/统计/丢弃；右 = 规则诊断 -->
+              <div class="wz-step2-grid">
+                <div class="wz-step2-left">
+                  <div class="wz-sec" id="wz_gen_macro_wrap" style="display:none">
+                    <div class="wz-sec-title wz-title-row">
+                      <span>宏文本（可编辑）</span>
+                      <span class="wz-chars-inline" id="wz_gen_chars_inline"></span>
+                    </div>
+                    <div class="opt-macro-wrap">
+                      <pre class="opt-macro-hl" id="wz_gen_macro_hl" aria-hidden="true"></pre>
+                      <textarea class="opt-macro" id="wz_gen_macro" spellcheck="false"></textarea>
+                    </div>
+                  </div>
+                  <div class="wz-sec" id="wz_gen_stats_wrap" style="display:none">
+                    <div class="wz-sec-title">统计</div>
+                    <div id="wz_gen_stats" class="wz-tl-info"></div>
+                  </div>
+                  <div class="wz-sec" id="wz_gen_dropped_wrap" style="display:none">
+                    <div class="wz-sec-title">丢弃规则</div>
+                    <div id="wz_gen_dropped"></div>
+                  </div>
+                </div>
+                <div class="wz-step2-right">
+                  <div class="wz-sec" id="wz_gen_diag_wrap" style="display:none">
+                    <div class="wz-sec-title">规则诊断</div>
+                    <div class="wz-diag-hint wz-hint-inline">点行展开：候选原子池（top 12）</div>
+                    <div class="wz-diag-scroll">
+                      <table class="wz-diag-table" id="wz_gen_diag"></table>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- ⑥ 迭代 + 验证（两段并列；迭代在左，验证在右，自然左→右流水）-->
+            <div class="wz-step-panel" data-step="6">
+              <h2 class="wz-step-title">⑥ 迭代 + 验证</h2>
+              <div class="wz-hint wz-hint-inline" style="margin-bottom:10px;">
+                建议反复优化到无可用策略，或 DPS 下降幅度明显之前。
+              </div>
+
+              <!-- ── 迭代 ── -->
+              <section class="wz-part">
+                <div class="wz-part-title">迭代</div>
+                <div class="wz-sec wz-tl-actions">
+                  <button class="sim-btn" id="wz_it_castdiff">cast-diff 反馈</button>
+                  <button class="sim-btn" id="wz_it_swap">swap 搜索</button>
+                  <button class="sim-btn" id="wz_it_prune">冗余剪枝</button>
+                  <button class="sim-btn" id="wz_it_tighten">条件收紧</button>
+                  <button class="sim-btn primary" id="wz_it_auto">一键迭代</button>
+                  <button class="sim-btn" id="wz_it_reset" disabled>重置</button>
+                  <span class="wz-hint" id="wz_it_status"></span>
+                </div>
+                <div class="wz-sec" id="wz_it_result_wrap" style="display:none">
+                  <div id="wz_it_stats" class="wz-tl-info" style="margin-bottom:8px;"></div>
+                  <div class="wz-sec-title wz-title-row" style="font-size:12px;">
+                    <span>优化后宏文本（Step 7 将使用此版本）</span>
+                    <span class="wz-chars-inline" id="wz_it_chars_inline"></span>
+                  </div>
+                  <div class="opt-macro-wrap" style="height:220px;">
+                    <pre class="opt-macro-hl" id="wz_it_macro_hl" aria-hidden="true"></pre>
+                    <textarea class="opt-macro" id="wz_it_macro" spellcheck="false" readonly></textarea>
+                  </div>
+                  <div id="wz_it_history_wrap" style="margin-top:10px;display:none;">
+                    <div class="wz-sec-title" style="font-size:12px;">迭代历史</div>
+                    <div id="wz_it_history" class="wz-iter-history"></div>
+                  </div>
+                  <details class="wz-collapse" style="margin-top:10px;">
+                    <summary><span>迭代日志</span></summary>
+                    <div class="wz-collapse-body">
+                      <div id="wz_it_log" class="wz-iter-log"></div>
+                    </div>
+                  </details>
+                </div>
+              </section>
+
+              <!-- ── 验证 ── -->
+              <section class="wz-part">
+                <div class="wz-part-title">验证</div>
+                <div class="wz-sec wz-tl-actions">
+                  <button class="sim-btn primary" id="wz_ver_quick">快速验证</button>
+                  <button class="sim-btn" id="wz_ver_full">多场景完整验证</button>
+                  <span class="wz-hint" id="wz_ver_status"></span>
+                </div>
+                <details class="wz-collapse" id="wz_scenarios_section">
+                  <summary>
+                    <span>多场景配置</span>
+                    <span class="wz-hint-inline">笛卡尔积：勾选的每个组合会单独跑一次 simulate</span>
+                  </summary>
+                  <div class="wz-collapse-body">
+                    <div class="wz-form">
+                      <div class="wz-field">
+                        <span>延迟档 (ms)</span>
+                        <div class="wz-cb-grid" id="wz_sc_delays"></div>
+                      </div>
+                      <div class="wz-field">
+                        <span>初始怒气</span>
+                        <div class="wz-cb-grid" id="wz_sc_rages"></div>
+                      </div>
+                      <div class="wz-field">
+                        <span>战斗时长 (s)</span>
+                        <div class="wz-cb-grid" id="wz_sc_durations"></div>
+                      </div>
+                    </div>
+                    <div class="wz-hint" id="wz_sc_count" style="margin-top:6px;"></div>
+                  </div>
+                </details>
+                <div class="wz-sec" id="wz_ver_result_wrap" style="display:none">
+                  <div id="wz_ver_summary"></div>
+                  <div id="wz_ver_per_scenario"></div>
+                  <div id="wz_ver_cast_diff" style="margin-top:12px;"></div>
+                </div>
+              </section>
+
+            </div>
+
+            <!-- ⑦ 输出 -->
+            <div class="wz-step-panel" data-step="7">
+              <h2 class="wz-step-title">⑦ 输出</h2>
+              <section class="wz-part">
+                <div class="wz-part-title">最终宏</div>
+                <div class="wz-sec" id="wz_out_summary" style="margin-bottom:10px;"></div>
+                <div class="wz-sec-title wz-title-row" style="font-size:12px;">
+                  <span>宏文本</span>
+                  <span class="wz-chars-inline" id="wz_out_chars_inline"></span>
+                </div>
+                <div class="opt-macro-wrap" style="height:220px;">
+                  <pre class="opt-macro-hl" id="wz_out_macro_hl" aria-hidden="true"></pre>
+                  <textarea class="opt-macro" id="wz_out_macro" spellcheck="false" readonly></textarea>
+                </div>
+              </section>
+              <section class="wz-part">
+                <div class="wz-part-title">动作</div>
+                <div class="wz-sec wz-tl-actions">
+                  <button class="sim-btn primary" id="wz_out_to_loop">写入循环模拟</button>
+                  <button class="sim-btn" id="wz_out_save_userdata">保存到 userdata/loops</button>
+                  <button class="sim-btn" id="wz_out_copy">复制宏文本</button>
+                  <span class="wz-hint" id="wz_out_status"></span>
+                </div>
+              </section>
+              <section class="wz-part">
+                <div class="wz-part-title">保存到战斗广场</div>
+                <div class="wz-sec wz-tl-actions">
+                  <button class="sim-btn" id="wz_out_save_new" title="把当前环境（奇穴/秘籍/配装/目标/延迟）+ 新宏打包为新方案，保存到战斗广场">另存为新方案</button>
+                  <button class="sim-btn" id="wz_out_update_origin" disabled title="仅当从某个方案进入本次蒸馏时可用：只更新原方案的宏文本">更新原方案</button>
+                  <span class="wz-hint" id="wz_out_plaza_status"></span>
+                </div>
+              </section>
+              <section class="wz-part" style="display:none">
+                <div class="wz-part-title">继续优化</div>
+                <button class="hub-card wz-next-card" id="wz_out_to_b" type="button" title="把当前最终宏带到 Workflow B">
+                  <div class="hub-card-title">前往宏优化继续</div>
+                  <div class="hub-card-desc">把最终宏送进 Workflow B：结构邻域搜索（Step 3）+ GA 参数精调（Step 4）+ 多场景稳定性评估。</div>
+                </button>
+              </section>
+            </div>
+          </main>
+        </div>
+
+        <!-- 底部固定栏（PR A/B 统一形式） -->
+        <div class="wizard-bottom-bar">
+          <button class="sim-btn" id="wz_prev" disabled>← 上一步</button>
+          <span class="wizard-bottom-bar-status" id="wz_status">第 1 步 / 共 7 步</span>
+          <button class="sim-btn primary" id="wz_next">下一步 →</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════ PR 13: 工作流 B Wizard 骨架（宏精调） ═══════ -->
+    <div id="page-wizard-b" class="page">
+      <div class="wizard">
+        <div class="wizard-header">
+          <div class="wizard-title-row">
+            <button class="wz-exit-btn" id="wzb_exit_hub" title="返回 Hub">←</button>
+            <div class="wizard-title">⚙️ 宏优化</div>
+            <div class="wz-header-spacer"></div>
+            <div class="wz-header-hint">完成步骤会自动保存到本地</div>
+          </div>
+          <div class="wizard-progress">
+            <div class="wz-prog-step" data-step="1"><span class="wz-prog-num">1</span><span>载入宏</span></div>
+            <div class="wz-prog-bar"></div>
+            <div class="wz-prog-step" data-step="2"><span class="wz-prog-num">2</span><span>目标配置</span></div>
+            <div class="wz-prog-bar"></div>
+            <div class="wz-prog-step" data-step="3"><span class="wz-prog-num">3</span><span>结构搜索</span></div>
+            <div class="wz-prog-bar"></div>
+            <div class="wz-prog-step" data-step="4"><span class="wz-prog-num">4</span><span>参数精调</span></div>
+            <div class="wz-prog-bar"></div>
+            <div class="wz-prog-step" data-step="5"><span class="wz-prog-num">5</span><span>输出</span></div>
+          </div>
+        </div>
+
+        <div class="wizard-body">
+          <main class="wizard-content">
+
+            <!-- ① 载入宏 -->
+            <div class="wz-step-panel" data-step="1">
+              <h2 class="wz-step-title">① 载入宏</h2>
+              <div class="wz-hint wz-hint-inline" style="margin-bottom:10px;">
+                选一个来源：工作流 A 的输出 / userdata/loops 里保存的循环 / 手动粘贴宏文本。
+              </div>
+              <div class="wz-sec wz-tl-actions">
+                <button class="sim-btn" id="wzb_src_from_a">从工作流 A 输出载入</button>
+                <button class="sim-btn" id="wzb_src_from_saved">从已保存的默认宏载入</button>
+                <select id="wzb_src_preset_sel" class="loop-cfg-input" style="max-width:220px;"><option value="">-- 预设宏 --</option></select>
+                <select id="wzb_src_loop_sel" class="loop-cfg-input" style="max-width:260px;"><option value="">-- userdata/loops 选择 --</option></select>
+                <button class="sim-btn" id="wzb_src_refresh">刷新</button>
+                <span class="wz-hint" id="wzb_load_status"></span>
+              </div>
+              <div class="wz-sec" style="margin-top:10px;">
+                <div class="wz-sec-title">宏文本</div>
+                <div class="opt-macro-wrap" style="height:260px;">
+                  <pre class="opt-macro-hl" id="wzb_macro_hl" aria-hidden="true"></pre>
+                  <textarea class="opt-macro" id="wzb_macro" spellcheck="false" placeholder="可从上方来源载入，或直接粘贴宏文本"></textarea>
+                </div>
+                <div class="wz-chars-inline" id="wzb_macro_chars" style="margin-top:6px;"></div>
+              </div>
+            </div>
+
+            <!-- ② 目标配置 -->
+            <div class="wz-step-panel" data-step="2">
+              <h2 class="wz-step-title">② 目标配置</h2>
+              <div class="wz-hint wz-hint-inline" style="margin-bottom:10px;">
+                勾选要优化的目标 + 权重（0 ≤ w ≤ 5）；选一组场景跑基线，作为后续搜索的对照。
+              </div>
+
+              <div class="wzb-step2-grid">
+                <div class="wzb-step2-left">
+                  <section class="wz-part">
+                    <div class="wz-part-title">目标权重</div>
+                    <div class="wzb-obj-row">
+                      <label class="wz-field-checkbox"><input type="checkbox" id="wzb_obj_dps" checked> DPS</label>
+                      <input type="range" id="wzb_obj_dps_r" min="0" max="5" step="0.1" value="0.8">
+                      <input type="number" id="wzb_obj_dps_w" value="0.8" step="0.1" min="0" max="5">
+                    </div>
+                    <div class="wzb-obj-row">
+                      <label class="wz-field-checkbox"><input type="checkbox" id="wzb_obj_robust" checked> 稳定性（最差场景 DPS）</label>
+                      <input type="range" id="wzb_obj_robust_r" min="0" max="5" step="0.1" value="1.5">
+                      <input type="number" id="wzb_obj_robust_w" value="1.5" step="0.1" min="0" max="5">
+                    </div>
+                    <div class="wzb-obj-row">
+                      <label class="wz-field-checkbox"><input type="checkbox" id="wzb_obj_chars"> 字数</label>
+                      <input type="range" id="wzb_obj_chars_r" min="0" max="5" step="0.1" value="0.2">
+                      <input type="number" id="wzb_obj_chars_w" value="0.2" step="0.1" min="0" max="5">
+                    </div>
+                    <div class="wzb-obj-row">
+                      <label class="wz-field-checkbox"><input type="checkbox" id="wzb_obj_fidelity"> 保真度（cast-diff vs 基线）</label>
+                      <input type="range" id="wzb_obj_fidelity_r" min="0" max="5" step="0.1" value="0.3">
+                      <input type="number" id="wzb_obj_fidelity_w" value="0.3" step="0.1" min="0" max="5">
+                    </div>
+                  </section>
+
+                  <section class="wz-part">
+                    <div class="wz-part-title">场景集</div>
+                    <div class="wz-form">
+                      <div class="wz-field"><span>延迟档 (ms)</span><div class="wz-cb-grid" id="wzb_sc_delays"></div></div>
+                      <div class="wz-field"><span>初始怒气</span><div class="wz-cb-grid" id="wzb_sc_rages"></div></div>
+                      <div class="wz-field"><span>战斗时长 (s)</span><div class="wz-cb-grid" id="wzb_sc_durations"></div></div>
+                      <div class="wz-field"><span>随机停手 (s)</span><div class="wz-cb-grid" id="wzb_sc_pauses"></div>
+                        <div class="wz-hint-inline">勾选后，场景笛卡尔积会加入"战斗中段某时刻暂停 N 秒"维度。0 = 不停。</div>
+                      </div>
+                    </div>
+                    <div class="wz-hint" id="wzb_sc_count" style="margin-top:6px;"></div>
+                  </section>
+                </div>
+                <div class="wzb-step2-right">
+                  <section class="wz-part">
+                    <div class="wz-part-title">基线</div>
+                    <div class="wz-sec wz-tl-actions">
+                      <button class="sim-btn primary" id="wzb_baseline_run">跑基线</button>
+                      <span class="wz-hint" id="wzb_baseline_status"></span>
+                    </div>
+                    <div class="wzb-baseline-scroll">
+                      <div class="wz-sec" id="wzb_baseline_result" style="display:none"></div>
+                    </div>
+                  </section>
+                </div>
+              </div>
+            </div>
+
+            <!-- ③ 搜索 -->
+            <div class="wz-step-panel" data-step="3">
+              <h2 class="wz-step-title">③ 结构搜索</h2>
+              <div class="wz-hint wz-hint-inline" style="margin-bottom:10px;">
+                用剪枝 / swap 产生邻居宏，以 Step 2 跑出的基线为对照，搜索更稳 / 更短 / 保真度更高的变体。
+              </div>
+
+              <div class="wzb-step3-grid3">
+                <div class="wzb-step3-col col-left">
+                  <section class="wz-part">
+                    <div class="wz-part-title">搜索</div>
+                    <div class="wzb-compact-form">
+                      <label class="wzb-cf-row"><span>代数</span><input type="number" id="wzb_gen_count" value="15" min="1" max="100"></label>
+                      <label class="wzb-cf-row"><span>邻居/代</span><input type="number" id="wzb_neigh_cap" value="12" min="2" max="60"></label>
+                      <label class="wzb-cf-row wzb-cf-full"><input type="checkbox" id="wzb_stop_no_improve" checked><span>连续 3 代无提升则停止</span></label>
+                      <label class="wzb-cf-row wzb-cf-full"><input type="checkbox" id="wzb_pareto_mode"><span>Pareto 前沿模式</span></label>
+                    </div>
+                    <div class="wz-sec wz-tl-actions">
+                      <button class="sim-btn primary" id="wzb_search_run">开始搜索</button>
+                      <button class="sim-btn" id="wzb_search_stop" disabled>中断</button>
+                      <button class="sim-btn" id="wzb_search_reset" disabled>重置</button>
+                    </div>
+                    <div class="wz-hint" id="wzb_search_status" style="margin-top:4px;"></div>
+                    <div id="wzb_search_progress" class="wz-tl-info" style="margin-top:4px;"></div>
+                  </section>
+
+                  <section class="wz-part">
+                    <div class="wz-part-title">历史迭代</div>
+                    <div class="wz-hint wz-hint-inline">点任意行回滚到该版本。</div>
+                    <div id="wzb_unified_history" class="wz-iter-history" style="height:420px;overflow-y:auto;margin-top:6px;border:1px solid #30363d;border-radius:4px;padding:4px;"></div>
+                  </section>
+                </div>
+
+                <div class="wzb-step3-col col-center">
+                  <section class="wz-part">
+                    <div class="wz-part-title">仪表盘</div>
+                    <div class="wzb-dash-grid" id="wzb_dash">
+                      <div class="wzb-dash-card"><div class="wzb-dash-label">基线均 DPS</div><div class="wzb-dash-value" id="wzb_dash_base_mean">—</div></div>
+                      <div class="wzb-dash-card"><div class="wzb-dash-label">基线最差 DPS</div><div class="wzb-dash-value" id="wzb_dash_base_min">—</div></div>
+                      <div class="wzb-dash-card"><div class="wzb-dash-label">基线 CV</div><div class="wzb-dash-value" id="wzb_dash_base_cv">—</div></div>
+                      <div class="wzb-dash-card"><div class="wzb-dash-label">基线字数</div><div class="wzb-dash-value" id="wzb_dash_base_chars">—</div></div>
+                      <div class="wzb-dash-card highlight"><div class="wzb-dash-label">当前最佳 DPS</div><div class="wzb-dash-value" id="wzb_dash_cur_mean">—</div><div class="wzb-dash-delta" id="wzb_dash_cur_mean_d"></div></div>
+                      <div class="wzb-dash-card highlight"><div class="wzb-dash-label">当前最差 DPS</div><div class="wzb-dash-value" id="wzb_dash_cur_min">—</div><div class="wzb-dash-delta" id="wzb_dash_cur_min_d"></div></div>
+                      <div class="wzb-dash-card highlight"><div class="wzb-dash-label">当前 CV</div><div class="wzb-dash-value" id="wzb_dash_cur_cv">—</div><div class="wzb-dash-delta" id="wzb_dash_cur_cv_d"></div></div>
+                      <div class="wzb-dash-card highlight"><div class="wzb-dash-label">当前字数</div><div class="wzb-dash-value" id="wzb_dash_cur_chars">—</div><div class="wzb-dash-delta" id="wzb_dash_cur_chars_d"></div></div>
+                    </div>
+                  </section>
+                  <section class="wz-part">
+                    <div class="wz-sec-title wz-title-row">
+                      <span>当前最佳宏</span>
+                      <span class="wz-chars-inline" id="wzb_best_chars_inline"></span>
+                    </div>
+                    <div class="wz-hint wz-hint-inline">Step 4 会自动同步此版本到宏优化器</div>
+                    <div class="opt-macro-wrap">
+                      <pre class="opt-macro-hl" id="wzb_best_hl" aria-hidden="true"></pre>
+                      <textarea class="opt-macro" id="wzb_best_macro" spellcheck="false" readonly></textarea>
+                    </div>
+                  </section>
+                </div>
+
+                <div class="wzb-step3-col col-right">
+                  <section class="wz-part">
+                    <div class="wz-part-title">验证</div>
+                    <div class="wz-hint wz-hint-inline">按当前场景集跑最佳宏与基线并列对比。</div>
+                    <div class="wz-sec wz-tl-actions">
+                      <button class="sim-btn primary" id="wzb_verify_run">对比验证</button>
+                      <span class="wz-hint" id="wzb_verify_status"></span>
+                    </div>
+                    <div class="wz-sec" id="wzb_verify_result" style="display:none;margin-top:8px;overflow-y:auto;"></div>
+                  </section>
+                </div>
+              </div>
+            </div>
+
+            <!-- ④ 参数精调（嵌入旧宏优化器 DOM-move）-->
+            <div class="wz-step-panel" data-step="4">
+              <h2 class="wz-step-title">④ 参数精调</h2>
+              <div class="wz-hint wz-hint-inline" style="margin-bottom:10px;">
+                <b>和 Step 3 的区别</b>：Step 3 搜<b>结构</b>（规则/原子/顺序），Step 4 搜<b>参数数值</b>（阈值），算法 GA。时长/采样继承 Step 2。
+              </div>
+              <div id="wzb_opt_slot" class="wzb-opt-slot"></div>
+            </div>
+
+            <!-- 宏文本弹窗（Step 4 点"宏文本"按钮打开）-->
+            <div id="wzb_macro_modal" class="modal-overlay" style="display:none;">
+              <div class="modal-panel" style="max-width:800px;width:90%;">
+                <div class="modal-header">
+                  <span class="modal-title">宏设置</span>
+                  <button class="modal-close" id="wzb_macro_modal_close" title="关闭">&times;</button>
+                </div>
+                <div class="modal-body">
+                  <div class="wz-sec wz-tl-actions" style="margin-bottom:8px;">
+                    <button class="sim-btn" id="wzb_opt_reload">重新载入最新宏</button>
+                    <span class="wz-hint" id="wzb_opt_status"></span>
+                  </div>
+                  <div id="wzb_macro_modal_slot"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- ⑤ 输出 -->
+            <div class="wz-step-panel" data-step="5">
+              <h2 class="wz-step-title">⑤ 输出</h2>
+              <section class="wz-part">
+                <div class="wz-part-title">搜索结果</div>
+                <div class="wz-sec" id="wzb_out_summary" style="margin-bottom:10px;"></div>
+                <div class="wz-sec-title wz-title-row" style="font-size:12px;">
+                  <span>最终宏</span>
+                  <span class="wz-chars-inline" id="wzb_out_chars_inline"></span>
+                </div>
+                <div class="opt-macro-wrap" style="height:220px;">
+                  <pre class="opt-macro-hl" id="wzb_out_macro_hl" aria-hidden="true"></pre>
+                  <textarea class="opt-macro" id="wzb_out_macro" spellcheck="false" readonly></textarea>
+                </div>
+              </section>
+              <section class="wz-part">
+                <div class="wz-part-title">动作</div>
+                <div class="wz-sec wz-tl-actions">
+                  <button class="sim-btn primary" id="wzb_out_to_loop">写入循环模拟</button>
+                  <button class="sim-btn" id="wzb_out_save_macro">保存为默认宏</button>
+                  <button class="sim-btn" id="wzb_out_save_userdata">保存到 userdata/loops</button>
+                  <button class="sim-btn" id="wzb_out_copy">复制宏文本</button>
+                  <span class="wz-hint" id="wzb_out_status"></span>
+                </div>
+              </section>
+            </div>
+
+          </main>
+        </div>
+
+        <!-- 底部固定栏（PR A/B 统一形式） -->
+        <div class="wizard-bottom-bar">
+          <button class="sim-btn" id="wzb_prev" disabled>← 上一步</button>
+          <span class="wizard-bottom-bar-status" id="wzb_status">第 1 步 / 共 5 步</span>
+          <button class="sim-btn primary" id="wzb_next">下一步 →</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════ 页面：技能数值（原"基础设置"）═══════ -->
+    <!-- 属性输入面板和目标配置的 DOM 会在 app.js 初始化时移入顶部共享栏 -->
+    <div id="page-basic" class="page">
+      <div class="panel-grid">
+        <!-- 属性输入面板 -->
+        <section class="panel attr-panel">
+
+          <div class="attr-form">
+
+            <div class="attr-group">
+              <label class="attr-label" for="li_dao">力道</label>
+              <input class="attr-input" type="number" id="li_dao" min="0" step="1" value="44">
+            </div>
+
+            <div class="attr-group">
+              <label class="attr-label" for="shen_fa">身法</label>
+              <input class="attr-input" type="number" id="shen_fa" min="0" step="1" value="10769">
+            </div>
+
+            <div class="attr-group vitality-field" style="display:none">
+              <label class="attr-label" for="vitality">体质</label>
+              <input class="attr-input" type="number" id="vitality" min="0" step="1" value="45">
+            </div>
+
+            <div class="attr-divider"></div>
+
+            <div class="attr-group">
+              <label class="attr-label" for="base_attack">基础攻击</label>
+              <input class="attr-input" type="number" id="base_attack" min="0" step="1" value="33458">
+            </div>
+
+            <div class="attr-group">
+              <label class="attr-label" for="weapon_damage">武器伤害</label>
+              <input class="attr-input" type="number" id="weapon_damage" min="0" step="1" value="6886">
+            </div>
+
+            <div class="attr-group">
+              <label class="attr-label" for="surplus_value">破招值</label>
+              <input class="attr-input" type="number" id="surplus_value" min="0" step="1" value="38745">
+            </div>
+
+            <div class="attr-divider"></div>
+
+            <div class="attr-group">
+              <label class="attr-label" for="crit_level">会心等级</label>
+              <input class="attr-input" type="number" id="crit_level" min="0" step="1" value="55914">
+            </div>
+
+            <div class="attr-group">
+              <label class="attr-label" for="crit_effect_level">会心效果等级</label>
+              <input class="attr-input" type="number" id="crit_effect_level" min="0" step="1" value="7571">
+            </div>
+
+            <div class="attr-divider"></div>
+
+            <div class="attr-group">
+              <label class="attr-label" for="overcome_level">破防等级</label>
+              <input class="attr-input" type="number" id="overcome_level" min="0" step="1" value="30561">
+            </div>
+
+            <div class="attr-group">
+              <label class="attr-label" for="strain_level">无双等级</label>
+              <input class="attr-input" type="number" id="strain_level" min="0" step="1" value="71124">
+            </div>
+
+            <div class="attr-group">
+              <label class="attr-label" for="haste_level">加速等级</label>
+              <input class="attr-input" type="number" id="haste_level" min="0" step="1" value="2300">
+            </div>
+
+            <div class="attr-divider" id="parry_divider" style="display:none"></div>
+
+            <div class="attr-group parry-field" style="display:none">
+              <label class="attr-label" for="parry_value">拆招值</label>
+              <input class="attr-input" type="number" id="parry_value" min="0" step="1" value="15085">
+            </div>
+
+            <div class="attr-group parry-field" style="display:none">
+              <label class="attr-label" for="parry_level">招架等级</label>
+              <input class="attr-input" type="number" id="parry_level" min="0" step="1" value="6522">
+            </div>
+
+            <div class="attr-save-row">
+              <select class="attr-io-btn" id="attrs_profile_select" title="选择配置" style="min-width:80px">
+                <option value="">默认</option>
+              </select>
+              <button class="attr-io-btn" id="btn_attrs_profile_save" title="另存为命名配置">另存为</button>
+              <button class="attr-io-btn" id="btn_attrs_profile_del" title="删除当前配置">删除</button>
+              <button class="attr-io-btn" id="btn_attrs_import" title="粘贴 JSON 自动解析属性">导入</button>
+              <span class="attr-io-status" id="attrs_io_status"></span>
+            </div>
+          </div>
+        </section>
+
+        <!-- 战斗属性结果面板 -->
+        <section class="panel result-panel">
+          <h2 class="panel-title">战斗属性</h2>
+          <div class="result-list">
+            <div class="result-item">
+              <span class="result-label">身法</span>
+              <span class="result-value" id="r_shen_fa">—</span>
+            </div>
+            <div class="result-item">
+              <span class="result-label">最终攻击</span>
+              <span class="result-value" id="r_panel_attack">—</span>
+            </div>
+            <div class="result-sub" id="r_attack_breakdown"></div>
+            <div class="result-item">
+              <span class="result-label">会心率</span>
+              <span class="result-value" id="r_crit_rate">—</span>
+            </div>
+            <div class="result-item">
+              <span class="result-label">会心效果</span>
+              <span class="result-value" id="r_crit_effect">—</span>
+            </div>
+            <div class="result-item">
+              <span class="result-label">破防</span>
+              <span class="result-value" id="r_overcome">—</span>
+            </div>
+            <div class="result-item">
+              <span class="result-label">无双</span>
+              <span class="result-value" id="r_strain">—</span>
+            </div>
+            <div class="result-item">
+              <span class="result-label">破招值</span>
+              <span class="result-value" id="r_surplus_value">—</span>
+            </div>
+            <div class="result-item">
+              <span class="result-label">加速率</span>
+              <span class="result-value" id="r_haste_rate">—</span>
+            </div>
+          </div>
+          <p class="note" id="calc-note"></p>
+        </section>
+      </div>
+
+      <!-- 技能伤害块 -->
+      <section class="panel skill-panel">
+        <div class="skill-panel-header">
+          <h2 class="panel-title" style="border:none;margin:0;padding:0">技能伤害</h2>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <button class="calc-btn" onclick="calculate()" style="padding:6px 14px;">计算战斗属性</button>
+            <button class="reload-btn" id="reload-btn" onclick="reloadSkills()">刷新技能配置</button>
+          </div>
+        </div>
+
+        <!-- 目标配置 -->
+        <div class="target-config">
+          <div class="target-item">
+            <label class="attr-label" for="target_level">目标等级</label>
+            <select class="attr-input" id="target_level" onchange="calculate()">
+              <option value="131">131级</option>
+              <option value="132">132级</option>
+              <option value="133">133级</option>
+              <option value="134" selected>134级</option>
+            </select>
+          </div>
+          <div class="target-item">
+            <label class="attr-label" for="target_defense_bonus">防御等级加成</label>
+            <input class="attr-input" type="number" id="target_defense_bonus" min="0" step="0.1" value="0">
+            <span class="unit">%</span>
+          </div>
+          <div class="target-item">
+            <label class="attr-label">目标防御率</label>
+            <span class="result-value" id="r_defense_rate">—</span>
+          </div>
+          <div class="target-item">
+            <label class="attr-label">等级压制</label>
+            <span class="result-value" id="r_level_suppression">—</span>
+          </div>
+        </div>
+
+        <table class="skill-table">
+          <thead>
+            <tr>
+              <th>技能</th>
+              <th>系数伤害</th>
+              <th>普通伤害</th>
+              <th>会心伤害</th>
+              <th>会心率</th>
+              <th>破防</th>
+              <th>无双</th>
+              <th>防御减伤</th>
+            </tr>
+          </thead>
+          <tbody id="skill-tbody">
+            <!-- 由 JS 渲染 -->
+          </tbody>
+        </table>
+      </section>
+    </div>
+
+    <!-- ═══════ 页面2：循环模拟 ═══════ -->
+    <div id="page-sim" class="page">
+
+      <!-- 顶部工具栏 -->
+      <input type="hidden" id="sim_haste" value="0">
+      <input type="hidden" id="sim_init_rage" value="0">
+      <div class="sim-toolbar">
+        <!-- 1. 文本按钮：导入/导出（均弹格式选择） -->
+        <button class="sim-btn" id="btn_import_loop" title="导入循环">导入</button>
+        <button class="sim-btn" id="btn_export_loop" title="导出循环">导出</button>
+        <span class="sim-toolbar-sep"></span>
+        <!-- 2. 参数下拉（2 字 label）：起手 / 目标 / 延迟 -->
+        <div class="sim-field sim-dropdown" id="sim_rage_dd" title="设置起始怒气（测试不同怒气段伤害）">
+          <label>起手</label>
+          <span class="sim-input sim-dropdown-trigger" id="btn_admin">0 怒</span>
+          <div class="sim-dropdown-menu">
+            <div class="sim-dropdown-item active" data-rage="">默认 0</div>
+            <div class="sim-dropdown-item" data-rage="25">25 怒</div>
+            <div class="sim-dropdown-item" data-rage="35">35 怒</div>
+            <div class="sim-dropdown-item" data-rage="45">45 怒</div>
+            <div class="sim-dropdown-item" data-rage="55">55 怒</div>
+            <div class="sim-dropdown-item" data-rage="65">65 怒</div>
+            <div class="sim-dropdown-item" data-rage="100">100 怒</div>
+            <div class="sim-dropdown-item sim-dropdown-custom" data-rage="__custom__">自定义…</div>
+          </div>
+        </div>
+        <!-- 目标 inline 在 JS 启动时由 initTopBar 从全局顶栏搬到这里 -->
+        <span id="sim_target_anchor"></span>
+        <div class="sim-field sim-dropdown">
+          <label>延迟</label>
+          <span class="sim-input sim-dropdown-trigger" id="sim_delay_label">理论(0ms)</span>
+          <input type="hidden" id="sim_delay" value="0">
+          <div class="sim-dropdown-menu">
+            <div class="sim-dropdown-item active" data-value="0">理论(0ms)</div>
+            <div class="sim-dropdown-item" data-value="23">低(1-45ms)</div>
+            <div class="sim-dropdown-item" data-value="60">中(46-75ms)</div>
+            <div class="sim-dropdown-item" data-value="90">高(76-105ms)</div>
+            <div class="sim-dropdown-item" data-value="120">超高(>105ms)</div>
+          </div>
+        </div>
+        <div class="sim-field sim-dropdown" id="sim_haste_override_dd">
+          <label>加速</label>
+          <span class="sim-input sim-dropdown-trigger" id="sim_haste_override_label">继承配装</span>
+          <div class="sim-dropdown-menu" id="sim_haste_override_menu">
+            <div class="sim-dropdown-item active" data-haste="">继承配装</div>
+          </div>
+        </div>
+        <span class="sim-toolbar-sep"></span>
+        <!-- 3. 设置类按钮（4 字）：配装设置 / 奇穴设置 / 秘籍设置 -->
+        <button class="sim-btn" id="btn_equip_picker" title="切换/跳转配装">配装设置</button>
+        <button class="sim-btn" id="btn_talents">奇穴设置</button>
+        <button class="sim-btn" id="btn_recipes">秘籍设置</button>
+        <button class="sim-btn tb-entry-btn" id="btn_team_buffs" title="团队增益：左侧开关切全局启用，按钮文字打开设置">
+          <span class="tb-entry-toggle" id="tb_entry_toggle" role="switch" aria-checked="false" tabindex="0"></span>
+          <span class="tb-entry-label">团辅</span>
+        </button>
+        <button class="sim-btn" id="btn_seq_to_macro" title="把当前序列模拟结果反推成宏文本" style="display:none">序列→宏</button>
+        <div class="sim-toolbar-spacer"></div>
+        <button class="sim-btn" id="btn_expand_macro">技能块固化</button>
+        <span class="sim-toolbar-sep"></span>
+        <!-- 4. 主 CTA：发送到 ▾ -->
+        <div class="sim-field sim-dropdown sim-send-to">
+          <span class="sim-input sim-dropdown-trigger" id="sim_send_to_label">发送到 ▾</span>
+          <div class="sim-dropdown-menu sim-dropdown-menu-right">
+            <div class="sim-dropdown-item" data-send-to="a">📝 循环蒸馏</div>
+            <div class="sim-dropdown-item" data-send-to="c">🏟️ 战斗广场</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sim-main-row">
+        <!-- 左侧：状态面板 -->
+        <section class="panel sim-status-panel" id="sim_status_panel">
+          <div class="sim-dps-area" id="sim_dps_area">
+            <div class="sim-dps-block">
+              <span class="sim-dps-tag">DPS</span>
+              <div class="sim-dps-number" id="sim_dps_value">—</div>
+            </div>
+            <div class="sim-dps-detail">
+              <div class="sim-dps-row">
+                <span class="sim-dps-label">战斗用时</span>
+                <span class="sim-dps-val" id="sim_fight_time">—</span>
+              </div>
+              <div class="sim-dps-row">
+                <span class="sim-dps-label">总伤害</span>
+                <span class="sim-dps-val" id="sim_total_damage">—</span>
+              </div>
+              <span id="sim_skill_count" style="display:none"></span>
+            </div>
+            <div class="sim-dps-actions">
+              <button class="sim-dps-action-btn" id="btn_stats" title="战斗统计">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="12" width="4" height="9" rx="1"/><rect x="10" y="7" width="4" height="14" rx="1"/><rect x="17" y="3" width="4" height="18" rx="1"/>
+                </svg>
+              </button>
+              <button class="sim-dps-action-btn" id="btn_history" title="战斗记录">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div class="sim-status-sep"></div>
+          <div class="sim-status-item sim-status-item-stance">
+            <span class="sim-status-label">体态</span>
+            <span class="sim-tag" id="sim_stance"><img class="sim-stance-icon" src="/api/icon/6443" alt=""><span class="sim-stance-label">擎盾</span></span>
+          </div>
+          <div class="sim-resource-row">
+            <div class="sim-resource-line sim-rage-line">
+              <span class="sim-status-label">怒气</span>
+              <div class="sim-rage-bar">
+                <div class="sim-rage-fill" id="sim_rage_fill" style="width:0%">
+                  <div class="sim-rage-glow"></div>
+                </div>
+                <div class="sim-rage-particles"></div>
+              </div>
+              <span class="sim-rage-value" id="sim_rage_value">0</span>
+            </div>
+            <div class="sim-block-column" id="sim_block_row" style="display:none">
+              <div class="sim-block-bar">
+                <div class="sim-block-bar-inner">
+                  <div class="sim-block-fill" id="sim_block_fill" style="height:100%">
+                    <div class="sim-block-glow"></div>
+                  </div>
+                </div>
+              </div>
+              <span class="sim-block-value" id="sim_block_value">100</span>
+            </div>
+          </div>
+          <div class="sim-status-item">
+            <div class="sim-buff-header">
+              <span class="sim-status-label">自身Buff</span>
+              <label class="sim-buff-filter" title="隐藏团队增益类 buff，只看自身释放/装备触发的">
+                <input type="checkbox" id="sim_hide_team_buffs">
+                <span>隐藏团辅</span>
+              </label>
+            </div>
+            <div class="sim-buff-list" id="sim_buff_list">
+              <span class="sim-tag sim-buff-empty">无</span>
+            </div>
+          </div>
+          <div class="sim-status-item">
+            <span class="sim-status-label">目标Buff</span>
+            <div class="sim-buff-list" id="sim_target_buff">
+              <span class="sim-tag sim-buff-empty">无</span>
+            </div>
+          </div>
+          <div class="sim-status-sep"></div>
+          <div class="sim-status-row-compact">
+            <span class="sim-status-label">公共调息</span>
+            <div class="sim-gcd-wrap">
+              <div class="sim-gcd-bar">
+                <div class="sim-gcd-fill" id="sim_gcd_fill"></div>
+              </div>
+              <div class="sim-gcd-particles"></div>
+            </div>
+            <span class="sim-gcd-value" id="sim_gcd_value">0s</span>
+            <!-- 铁骨衣模式占位：与怒气行盾牌列 (22px + 10px gap) 对齐，让两条进度条等宽 -->
+            <span class="sim-gcd-block-spacer" id="sim_gcd_block_spacer" style="display:none"></span>
+          </div>
+          <!-- 坚铁/寒甲 期望传播状态（仅启用时显示） -->
+          <div class="sim-expectation" id="sim_expectation" style="display:none">
+            <div class="sim-status-sep"></div>
+            <div class="sim-exp-row" id="sim_exp_jiantie"></div>
+            <div class="sim-exp-row" id="sim_exp_hanjia"></div>
+          </div>
+          <!-- 实时面板（开战时刻 t=0：永久 buff/阵法/团辅/装备 全部应用后）— 放在 panel 末尾，不挤压上方 buff 列表 -->
+          <div class="sim-status-sep"></div>
+          <div class="sim-panel-stats" id="sim_panel_stats">
+            <div class="sim-panel-stats-row" data-attr-key="atk">
+              <span class="sim-panel-stats-label">攻击</span>
+              <span class="sim-panel-stats-val" id="ps_attack">—</span>
+            </div>
+            <div class="sim-panel-stats-row" data-attr-key="agi">
+              <span class="sim-panel-stats-label">身法</span>
+              <span class="sim-panel-stats-val" id="ps_shenfa">—</span>
+            </div>
+            <div class="sim-panel-stats-row" data-attr-key="crit">
+              <span class="sim-panel-stats-label">会心</span>
+              <span class="sim-panel-stats-val" id="ps_crit">—</span>
+            </div>
+            <div class="sim-panel-stats-row" data-attr-key="crit_eff">
+              <span class="sim-panel-stats-label">会效</span>
+              <span class="sim-panel-stats-val" id="ps_crit_eff">—</span>
+            </div>
+            <div class="sim-panel-stats-row" data-attr-key="oc">
+              <span class="sim-panel-stats-label">破防</span>
+              <span class="sim-panel-stats-val" id="ps_overcome">—</span>
+            </div>
+            <div class="sim-panel-stats-row" data-attr-key="strain">
+              <span class="sim-panel-stats-label">无双</span>
+              <span class="sim-panel-stats-val" id="ps_strain">—</span>
+            </div>
+            <div class="sim-panel-stats-row" data-attr-key="haste">
+              <span class="sim-panel-stats-label">加速</span>
+              <span class="sim-panel-stats-val" id="ps_haste">—</span>
+            </div>
+            <div class="sim-panel-stats-row" data-attr-key="surplus">
+              <span class="sim-panel-stats-label">破招</span>
+              <span class="sim-panel-stats-val" id="ps_surplus">—</span>
+            </div>
+            <div class="sim-panel-stats-row" id="ps_parry_row" data-attr-key="parry_val" style="display:none">
+              <span class="sim-panel-stats-label">拆招</span>
+              <span class="sim-panel-stats-val" id="ps_parry">—</span>
+            </div>
+            <div class="sim-panel-stats-row" id="ps_parry_rate_row" data-attr-key="parry" style="display:none">
+              <span class="sim-panel-stats-label">招架</span>
+              <span class="sim-panel-stats-val" id="ps_parry_rate">—</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- 垂直拖动条：左右面板间 -->
+        <div class="sim-splitter sim-splitter-v" id="sim_splitter_v" title="拖动调整状态面板宽度，双击重置"></div>
+
+        <!-- 右侧：序列 + 技能按钮栏 -->
+        <div class="sim-right-col" id="sim_right_col">
+          <section class="panel sim-sequence-panel" id="panel_manual">
+            <div class="sim-sequence" id="sim_sequence">
+              <p class="placeholder-text">请点击下方技能按钮生成模拟技能序列</p>
+            </div>
+            <!-- 左下角浮动工具栏：序列块显示模式 + 释放时间 + 缩放（hover 展开，不挤压序列） -->
+            <div class="seq-floating-toolbar" id="seq_float_toolbar">
+              <button type="button" class="seq-toolbar-handle" id="seq_toolbar_toggle" title="序列显示设置" aria-label="序列显示设置">⚙</button>
+              <div class="seq-toolbar-body">
+                <span class="seq-toolbar-label">显示</span>
+                <div class="seq-mode-seg" id="seq_mode_seg_inline">
+                  <button type="button" class="seq-mode-seg-btn" data-mode="text">文字</button>
+                  <button type="button" class="seq-mode-seg-btn" data-mode="icon">图标</button>
+                </div>
+                <!-- 图标模式下额外显示：底部小字内容 = 技能名 / 时间 -->
+                <span class="seq-toolbar-divider seq-icon-only"></span>
+                <span class="seq-toolbar-label seq-icon-only">图标显示</span>
+                <div class="seq-mode-seg seq-icon-label-seg seq-icon-only" id="seq_icon_label_seg_inline">
+                  <button type="button" class="seq-mode-seg-btn" data-label="name">技能名</button>
+                  <button type="button" class="seq-mode-seg-btn" data-label="time">时间</button>
+                  <button type="button" class="seq-mode-seg-btn" data-label="none">不显示</button>
+                </div>
+                <span class="seq-toolbar-divider"></span>
+                <span class="seq-toolbar-label">辅助信息</span>
+                <button type="button" class="settings-toggle seq-toolbar-toggle" id="seq_helpers_toggle_inline" data-toggle="seq-helpers" role="switch" aria-checked="false">
+                  <span class="settings-toggle-knob"></span>
+                </button>
+                <span class="seq-toolbar-divider"></span>
+                <span class="seq-toolbar-label">缩放</span>
+                <div class="seq-zoom-controls" title="缩放序列技能块">
+                  <button type="button" class="seq-zoom-btn" id="seq_zoom_out" title="缩小">−</button>
+                  <span class="seq-zoom-value" id="seq_zoom_value" title="点击重置到 100%">100%</span>
+                  <button type="button" class="seq-zoom-btn" id="seq_zoom_in" title="放大">+</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- 技能按钮栏（紧贴序列下方，便于编辑） -->
+          <div class="sim-skill-bar">
+            <!-- 第一行：school_ui 中 new_row=false 的组（擎盾/擎刀/特殊...） -->
+            <div id="sim_skill_bar_row1" style="display:contents"></div>
+            <!-- 宏按钮跟在第一行末尾 -->
+            <div class="sim-skill-group sim-skill-group-macro">
+              <div class="sim-macro-btn-wrap">
+                <button class="sim-skill-btn sim-skill-custom sim-macro-btn sim-skill-btn-iconed" id="btn_macro_step"><img class="sim-skill-btn-icon" src="/api/icon/21738" alt=""><span class="sim-skill-btn-label">执行宏</span></button>
+                <button class="sim-macro-gear" id="btn_macro_settings">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div class="sim-skill-bar-break"></div>
+            <!-- 第二行：school_ui 中 new_row=true 起的组（通用...） -->
+            <div id="sim_skill_bar_row2" style="display:contents"></div>
+            <div class="sim-skill-group sim-skill-group-actions">
+              <button class="sim-skill-btn sim-action-btn" data-action="recalc">重算</button>
+              <button class="sim-skill-btn sim-action-btn" data-action="linebreak">换行</button>
+              <button class="sim-skill-btn sim-action-btn" data-action="undo">撤销</button>
+              <button class="sim-skill-btn sim-action-btn sim-action-danger" data-action="reset">重置循环</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 水平拖动条：中间区（含序列+技能栏）和底部时间轴间；折叠时隐藏 -->
+      <div class="sim-splitter sim-splitter-h" id="sim_splitter_h" title="拖动调整时间轴高度，双击重置"></div>
+
+      <!-- 底部：时间轴（全宽，可折叠；默认折叠） -->
+      <section class="panel sim-timeline-panel sim-timeline-collapsed" id="sim_timeline_panel">
+        <!-- 折叠头：始终显示，点击 toggle -->
+        <div class="sim-timeline-header" id="sim_timeline_header" title="点击展开/折叠时间轴">
+          <span class="sim-timeline-title">时间轴</span>
+          <span class="sim-timeline-toggle-icon" id="sim_timeline_toggle_icon">▲</span>
+        </div>
+        <!-- 折叠时隐藏的主体 -->
+        <div class="sim-timeline-body">
+          <!-- 技能轴（固定） -->
+          <div class="sim-timeline-skill-area">
+            <div class="sim-timeline-skill-spacer"></div>
+            <div class="sim-timeline-scroll">
+              <div class="sim-timeline-track" id="timeline_track"></div>
+            </div>
+          </div>
+          <!-- buff轴（可滚动） -->
+          <div class="sim-timeline-buff-area" id="timeline_buff_area">
+            <div class="sim-timeline-labels" id="timeline_labels"></div>
+            <div class="sim-timeline-buff-scroll" id="timeline_buff_scroll"></div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- ═══════ 页面3：优化器 ═══════ -->
+    <div id="page-opt" class="page">
+      <div class="opt-grid">
+        <!-- 左：控制面板 -->
+        <section class="panel opt-control">
+          <div class="opt-sec" data-sec="macro">
+          <div class="opt-section-title">宏文本<span class="opt-help" data-help="粘贴宏文本；修改后自动分析出可调阈值。支持 #page shield / #page blade 分体态。">?</span></div>
+          <div class="opt-macro-wrap">
+            <pre class="opt-macro-hl" id="opt_macro_hl" aria-hidden="true"></pre>
+            <textarea class="opt-macro" id="opt_macro_text" spellcheck="false"
+              placeholder="粘贴宏文本。支持 #page shield / #page blade 分体态。修改后自动分析。"></textarea>
+          </div>
+          <div class="opt-error" id="opt_error"></div>
+          </div>
+
+          <div class="opt-sec" data-sec="thresholds">
+          <div class="opt-section-title">可调阈值<span class="opt-help" data-help="宏条件里抽取的所有数值比较（rage>N / bufftime:X>Ns 等）。取消勾选则保留原值不纳入搜索；每行可调 min/max/step。">?</span> <span class="opt-count" id="opt_params_count">—</span></div>
+          <div class="opt-params" id="opt_params">
+            <div class="opt-empty">分析宏后在这里显示可调阈值</div>
+          </div>
+          </div>
+
+          <div class="opt-sec" data-sec="ga">
+          <div class="opt-section-title opt-ga-title-row">
+            <span>GA 参数<span class="opt-help" data-help="种群 = 每代并行评估的个体数；代数 = 迭代次数。时长下限/上限 + 采样次数 K 已从 Step 2 的场景集继承（不在此处编辑）。fitness = 均值 DPS − 0.5×标准差（奖励均值高且方差小）。计算量 ≈ 种群 × 代数 × K。">?</span></span>
+            <button class="sim-btn" id="wzb_show_macro_btn" type="button" style="display:none;margin-left:auto;">📝 宏设置</button>
+          </div>
+          <div class="opt-ga-grid opt-ga-grid-5">
+            <div class="opt-ga-cell">
+              <label>种群</label>
+              <input type="number" id="opt_pop" value="40" min="10" max="1000">
+            </div>
+            <div class="opt-ga-cell">
+              <label>代数</label>
+              <input type="number" id="opt_gen" value="200" min="10" max="5000">
+            </div>
+            <div class="opt-ga-cell">
+              <label>方向</label>
+              <button class="settings-toggle on" id="opt_fitness_mode" role="switch" aria-checked="true" title="DPS = 追求最高输出；CV = 追求最稳定" style="width:44px;height:22px">
+                <span class="settings-toggle-knob" style="width:18px;height:18px;top:2px"></span>
+              </button>
+              <span class="opt-fitness-label" id="opt_fitness_label" style="font-size:10px;color:var(--text-muted);text-align:center;display:block;margin-top:2px">DPS</span>
+            </div>
+            <div class="opt-ga-cell">
+              <label title="每次评估战斗时长下限（秒）">时长下限</label>
+              <input type="number" id="opt_duration_min" value="180" min="10" max="900" step="1">
+            </div>
+            <div class="opt-ga-cell">
+              <label title="每次评估时长在 [下限, 上限] 区间内按均匀分布随机采样">时长上限</label>
+              <input type="number" id="opt_duration_max" value="300" min="10" max="900" step="1">
+            </div>
+            <div class="opt-ga-cell">
+              <label title="每个个体在时长区间里随机评估 K 次，fitness=均值-0.5×标准差。K 越大越稳定（计算量也线性增加）">采样次数 K</label>
+              <input type="number" id="opt_samples" value="3" min="1" max="10" step="1">
+            </div>
+          </div>
+          <label class="opt-checkbox opt-struct-toggle" style="display:none">
+            <input type="checkbox" class="opt-param-toggle" id="opt_phase3">
+            <span>启用规则结构搜索</span>
+            <span class="opt-help" data-help="Phase 3：在搜索阈值的同时，搜索规则的顺序、启用/禁用、以及候选规则池里的新规则。搜索空间远大于纯阈值搜索，建议先用 Phase 2 找到好阈值后再开。">?</span>
+          </label>
+
+          <div class="opt-actions-row opt-run-row">
+            <button class="sim-btn opt-start-btn" id="opt_start" disabled>启动</button>
+            <button class="sim-btn" id="opt_stop" disabled>停止</button>
+            <span class="opt-algo-hint">
+              遗传算法搜索最优阈值
+              <span class="opt-help" data-help="<b>原理：把宏当装备，让模拟器挑最强配装</b><br><br>每一代并行用后端模拟器跑 N 条变种宏（把你勾选的阈值随机扰动），按木桩 DPS 排序：<br>• 最优的几只（精英）直接晋级下一代<br>• 其余用锦标赛选两只亲代，阈值做算术插值（子承父业）+ 高斯扰动（基因突变），产出子代<br><br>反复数百代，高 DPS 基因在种群中扩散——像自然选择挑出能打的配装。<br><br><b>看图诀窍</b><br>• 收敛曲线变平 → 搜索接近完成<br>• 多样性降到 0 → 种群同化，可能陷入局部最优<br>• 参数分布雷达与默认虚线差异越大 → 优化器找到了手搓直觉之外的解<br>• Top10 任一条都可点『查看』回循环模拟看实际时间轴">?</span>
+            </span>
+          </div>
+          </div>
+        </section>
+
+        <!-- 中：收敛曲线 + 摘要 + 多样性 + 日志 -->
+        <section class="panel opt-chart-panel">
+          <div class="opt-section-title">收敛曲线<span class="opt-help" data-help="蓝线=每代种群最优 DPS；灰线=均值。曲线趋于平台表示收敛，均值追上最优表示种群同化。">?</span></div>
+          <canvas id="opt_chart" width="600" height="280"></canvas>
+          <div class="opt-chart-legend">
+            <span class="opt-legend-item"><span class="opt-legend-swatch" style="background:#3fb950"></span>CV 主线（越低越稳）</span>
+          </div>
+
+          <div class="opt-summary" id="opt_summary">
+            <div class="opt-sum-box">
+              <span class="opt-sum-label">最稳 CV</span>
+              <span class="opt-sum-val opt-sum-best" id="opt_sum_best">—</span>
+            </div>
+            <div class="opt-sum-box">
+              <span class="opt-sum-label">对应均 DPS</span>
+              <span class="opt-sum-val" id="opt_sum_base">—</span>
+            </div>
+            <div class="opt-sum-box">
+              <span class="opt-sum-label">CV 变化</span>
+              <span class="opt-sum-val opt-sum-delta" id="opt_sum_delta">—</span>
+            </div>
+            <div class="opt-sum-box">
+              <span class="opt-sum-label">进度</span>
+              <span class="opt-sum-val" id="opt_sum_prog">—</span>
+            </div>
+            <div class="opt-sum-box">
+              <span class="opt-sum-label">已用</span>
+              <span class="opt-sum-val" id="opt_sum_elapsed">—</span>
+            </div>
+            <div class="opt-sum-box">
+              <span class="opt-sum-label">剩余</span>
+              <span class="opt-sum-val" id="opt_sum_eta">—</span>
+            </div>
+          </div>
+
+          <div class="opt-dual-row">
+            <div class="opt-dual-col">
+              <div class="opt-section-title">多样性<span class="opt-help" data-help="每维参数标准差的均值。随代数下降代表种群在收敛；过早跌到 0 可能陷入局部最优，此时可考虑增大变异率或重启。">?</span></div>
+              <canvas id="opt_div_chart" width="300" height="160"></canvas>
+            </div>
+            <div class="opt-dual-col">
+              <div class="opt-section-title">参数分布<span class="opt-help" data-help="雷达图；每个轴一个启用阈值，值按其 [min,max] 归一化到 [0,1]。金色填充=当前最优个体，灰色虚线=默认值作参考。轴编号与下方图例对应。">?</span> <span class="opt-count">当前最优 vs 默认</span></div>
+              <canvas id="opt_radar_chart" width="300" height="160"></canvas>
+              <div class="opt-radar-legend" id="opt_radar_legend"></div>
+            </div>
+          </div>
+
+          <div class="opt-activity-wrap" id="opt_activity_wrap" style="display:none">
+            <div class="opt-section-title">规则活跃度<span class="opt-help" data-help="Phase 3 专属：Top N 结果中每条规则被启用的比例。满分说明这条规则是稳定解；高比例候选规则（★）是 GA 新发现；0 说明被 GA 淘汰。">?</span></div>
+            <div class="opt-activity" id="opt_activity"></div>
+          </div>
+
+          <div class="opt-section-title">事件日志<span class="opt-help" data-help="按时间顺序记录启动/基准/里程碑/完成/错误。最近 200 条，自动滚动到底。">?</span></div>
+          <div class="opt-log" id="opt_log"></div>
+        </section>
+
+        <!-- 右：节点 -->
+        <section class="panel opt-right">
+          <div class="opt-section-title">里程碑<span class="opt-help" data-help="每次最优 DPS 严格刷新时自动存档一份完整循环配置。点『查看』可跳转循环模拟页播放对应时间轴。">?</span></div>
+          <div class="opt-milestones" id="opt_milestones">
+            <div class="opt-empty">尚未启动</div>
+          </div>
+
+          <div class="opt-section-title">Top 10<span class="opt-help" data-help="末代按 DPS 降序、阈值去重后的前 10 名候选解。点排名/DPS 展开对应宏文本（改动值高亮）；点『查看』跳转循环模拟。">?</span></div>
+          <div class="opt-topn" id="opt_topn">
+            <div class="opt-empty">尚未启动</div>
+          </div>
+        </section>
+      </div>
+
+      <!-- Phase 3：候选规则池（全宽行，擎盾/擎刀并排） -->
+      <section class="panel opt-struct-panel" id="opt_struct_panel" style="display:none">
+        <div class="opt-section-title">
+          候选规则池
+          <span class="opt-help" data-help="GA 会搜索这里所有规则的启用与顺序。🔒 锁定的规则不可禁用/不可移位（默认每页首行锁定）。candidate 来源的规则默认不启用，搜索过程中可能被发现。">?</span>
+          <span class="opt-pool-actions">
+            <button class="sim-btn opt-pool-btn" id="opt_pool_reset" title="用 baseline 宏 + 预置候选池重置">重置</button>
+            <button class="sim-btn opt-pool-btn" id="opt_pool_add" title="新增一条候选规则">+ 新增</button>
+          </span>
+        </div>
+        <div class="opt-pool opt-pool-grid" id="opt_pool">
+          <div class="opt-empty">分析宏后自动生成</div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ═══════ 页面4：RL 训练 ═══════ -->
+    <div id="page-rl" class="page">
+      <div class="opt-shell">
+        <section class="opt-card">
+          <div class="opt-section-title">PPO 超参</div>
+          <div class="rl-form">
+            <label>总步数 <input type="number" id="rl_total_steps" value="500000" step="100000"></label>
+            <label>并行 env <input type="number" id="rl_n_envs" value="8" min="1" max="64"></label>
+            <label>n_steps <input type="number" id="rl_n_steps" value="2048"></label>
+            <label>n_epochs <input type="number" id="rl_n_epochs" value="10"></label>
+            <label>minibatch <input type="number" id="rl_minibatch" value="512"></label>
+            <label>lr <input type="number" id="rl_lr" value="0.0003" step="0.0001"></label>
+            <label>gamma <input type="number" id="rl_gamma" value="0.999" step="0.001"></label>
+            <label>ent_coef <input type="number" id="rl_ent_coef" value="0.01" step="0.005"></label>
+            <label>save_every <input type="number" id="rl_save_every" value="20"></label>
+            <label>device
+              <select id="rl_device"><option value="cuda">cuda</option><option value="cpu">cpu</option></select>
+            </label>
+          </div>
+        </section>
+
+        <section class="opt-card">
+          <div class="opt-section-title">战斗参数</div>
+          <div class="rl-form">
+            <label>episode 时长(s) <input type="number" id="rl_duration" value="60" step="10"></label>
+            <label>初始怒气 <input type="number" id="rl_initial_rage" value="0" min="0" max="100"></label>
+            <label>网络延迟(ms) <input type="number" id="rl_network_delay" value="0"></label>
+            <label>baseline DPS <input type="number" id="rl_baseline_dps" placeholder="留空=不启用 episode bonus" step="10000"></label>
+          </div>
+          <div class="rl-hint">属性面板 / 奇穴 / 秘籍 取自"基础设置"页（当前选择会自动同步）</div>
+        </section>
+
+        <section class="opt-card">
+          <div class="opt-section-title">可选动作
+            <span class="opt-help" data-help="勾选哪些技能允许模型释放；未勾选的会被 mask 屏蔽（等待动作始终允许）。">?</span>
+          </div>
+          <div id="rl_allowed_actions" class="rl-form" style="grid-template-columns:repeat(6,minmax(110px,1fr));"></div>
+          <div class="rl-controls" style="margin-top:8px;">
+            <button class="sim-btn" id="rl_actions_all" type="button">全选</button>
+            <button class="sim-btn" id="rl_actions_none" type="button">全不选</button>
+          </div>
+        </section>
+
+        <section class="opt-card" style="display:none;">
+          <div class="opt-section-title">BC 行为克隆预训练
+            <span class="opt-help" data-help="先用宏当专家做监督学习，得到一个 pretrained.pt；然后在"续训"里选它启动 PPO 微调。比 PPO 从零跑快得多且能直接学到斩刀/狂绝等组合招式。">?</span>
+          </div>
+          <div class="rl-form">
+            <label>采集样本数 <input type="number" id="bc_n_samples" value="50000" step="10000"></label>
+            <label>并行 env <input type="number" id="bc_n_envs" value="4"></label>
+            <label>训练 epochs <input type="number" id="bc_n_epochs" value="10"></label>
+            <label>batch size <input type="number" id="bc_batch" value="512"></label>
+            <label>lr <input type="number" id="bc_lr" value="0.001" step="0.0001"></label>
+            <label>episode 时长(s) <input type="number" id="bc_duration" value="120"></label>
+            <label>device
+              <select id="bc_device"><option value="cuda">cuda</option><option value="cpu">cpu</option></select>
+            </label>
+          </div>
+          <div style="margin-top:10px;">
+            <label style="display:block;color:#aaa;font-size:12px;margin-bottom:4px;">宏文本（专家策略）</label>
+            <textarea id="bc_macro" rows="5" placeholder="贴宏文本，或点下方按钮从循环模拟页导入"></textarea>
+            <div class="rl-controls">
+              <button class="sim-btn" id="bc_macro_from_sim">从循环模拟页导入</button>
+              <button class="sim-btn primary" id="bc_start_btn">启动 BC 预训练</button>
+              <button class="sim-btn" id="bc_stop_btn" disabled>停止</button>
+              <span class="rl-state" id="bc_state">未运行</span>
+            </div>
+          </div>
+          <div class="rl-metrics" style="margin-top:10px;">
+            <div class="rl-metric"><span>阶段</span><b id="bc_phase">—</b></div>
+            <div class="rl-metric"><span>样本</span><b id="bc_samples">—</b></div>
+            <div class="rl-metric"><span>epoch</span><b id="bc_epoch">—</b></div>
+            <div class="rl-metric"><span>loss</span><b id="bc_loss">—</b></div>
+            <div class="rl-metric"><span>top-1 准确率</span><b id="bc_acc">—</b></div>
+          </div>
+          <div class="rl-log" id="bc_log" style="max-height: 160px;"></div>
+        </section>
+
+        <section class="opt-card">
+          <div class="opt-section-title">续训 / 配置</div>
+          <div class="rl-form">
+            <label>从 ckpt 续训
+              <select id="rl_resume_select"><option value="">不续训（从头开始）</option></select>
+            </label>
+            <label class="rl-cb"><input type="checkbox" id="rl_reset_optim"> 重置 optimizer state</label>
+          </div>
+          <div class="rl-controls">
+            <button class="sim-btn" id="rl_runs_refresh">刷新 ckpt 列表</button>
+            <button class="sim-btn" id="rl_cfg_export">导出配置 JSON</button>
+            <button class="sim-btn" id="rl_cfg_import">导入配置 JSON</button>
+            <button class="sim-btn" id="rl_cfg_save_local">保存到浏览器</button>
+            <button class="sim-btn" id="rl_cfg_load_local">从浏览器加载</button>
+          </div>
+          <input type="file" id="rl_cfg_file" accept=".json" style="display:none;">
+        </section>
+
+        <section class="opt-card">
+          <div class="opt-section-title">课程学习（多阶段；为空则单阶段跑当前参数）
+            <span class="opt-help" data-help="按顺序跑多个阶段，前一阶段 final.pt 自动作为下一阶段 resume；每阶段可覆盖 duration / total_steps / lr / ent_coef / baseline_dps">?</span>
+          </div>
+          <div id="rl_stages"></div>
+          <div class="rl-controls">
+            <button class="sim-btn" id="rl_stage_add">+ 新增阶段</button>
+            <button class="sim-btn" id="rl_stage_preset">用推荐课程（30s→120s→300s）</button>
+          </div>
+        </section>
+
+        <section class="opt-card">
+          <div class="opt-section-title">运行控制</div>
+          <div class="rl-controls">
+            <button class="sim-btn primary" id="rl_start_btn">启动训练</button>
+            <button class="sim-btn" id="rl_stop_btn" disabled>停止</button>
+            <span class="rl-state" id="rl_state">未运行</span>
+          </div>
+        </section>
+
+        <section class="opt-card">
+          <div class="opt-section-title">实时指标</div>
+          <div class="rl-metrics">
+            <div class="rl-metric" id="rl_mc_step">
+              <span>step<i class="opt-help" data-help="累计 env-step 数（当前阶段）。单调递增。">?</i></span><b id="rl_m_step">—</b></div>
+            <div class="rl-metric" id="rl_mc_update">
+              <span>update<i class="opt-help" data-help="当前 PPO 更新轮次 / 总数。每完成 n_steps × n_envs 个样本做一次更新。">?</i></span><b id="rl_m_update">—</b></div>
+            <div class="rl-metric" id="rl_mc_sps">
+              <span>steps/s<i class="opt-help" data-help="吞吐量。合并 step_advance 后应 ≈ 1000；<400 说明 HTTP/CPU 成瓶颈。">?</i></span><b id="rl_m_sps">—</b></div>
+            <div class="rl-metric" id="rl_mc_elapsed">
+              <span>elapsed<i class="opt-help" data-help="当前阶段已耗时。">?</i></span><b id="rl_m_elapsed">—</b></div>
+            <div class="rl-metric" id="rl_mc_ret">
+              <span>ep return<i class="opt-help" data-help="最近 50 个完整 episode 的平均累计奖励。上升 = 策略在学。">?</i></span><b id="rl_m_ret">—</b></div>
+            <div class="rl-metric" id="rl_mc_dps">
+              <span>ep dps<i class="opt-help" data-help="最近 50 个 episode 的平均 DPS。核心指标：持续上升即有效。长时间卡 0 = 策略没出招。">?</i></span><b id="rl_m_dps">—</b></div>
+            <div class="rl-metric" id="rl_mc_pg">
+              <span>policy loss<i class="opt-help" data-help="PPO 策略损失。健康区间 ±0.02；剧烈摆动或 >0.1 = lr 过大。">?</i></span><b id="rl_m_pg">—</b></div>
+            <div class="rl-metric" id="rl_mc_v">
+              <span>value loss<i class="opt-help" data-help="值函数 MSE。初期高后期应缓降；持续暴涨 = 奖励尺度异常或 lr 过大。">?</i></span><b id="rl_m_v">—</b></div>
+            <div class="rl-metric" id="rl_mc_ent">
+              <span>entropy<i class="opt-help" data-help="策略熵（探索度）。18 动作上限 ≈ 2.89；初期接近上限，后期缓降到 0.5-1.5。骤降到 0 = policy collapse。">?</i></span><b id="rl_m_ent">—</b></div>
+            <div class="rl-metric" id="rl_mc_kl">
+              <span>approx KL<i class="opt-help" data-help="本次更新前后策略 KL 散度。稳定区间 <0.02；持续 >0.05 = 更新太激进，降 lr 或 clip_range。">?</i></span><b id="rl_m_kl">—</b></div>
+          </div>
+          <canvas id="rl_chart" width="900" height="240"></canvas>
+        </section>
+
+        <section class="opt-card">
+          <div class="opt-section-title">实时策略回放
+            <span class="opt-help" data-help="每 N 次 update 用当前策略跑一局确定性 episode，把时间轴显示在这里。">?</span>
+          </div>
+          <div class="rl-form" style="margin-bottom: 8px;">
+            <label>每 N updates 跑一次 <input type="number" id="rl_eval_every" value="10" min="0"></label>
+            <label>eval episode 时长(s) <input type="number" id="rl_eval_duration" value="60"></label>
+          </div>
+          <div class="rl-eval-nav">
+            <button class="sim-btn" id="rl_eval_prev" title="上一个 eval">◀</button>
+            <input type="range" id="rl_eval_slider" min="0" max="0" value="0" style="flex:1;">
+            <button class="sim-btn" id="rl_eval_next" title="下一个 eval">▶</button>
+            <label class="rl-cb" title="新 eval 到达时自动跳到最新"><input type="checkbox" id="rl_eval_follow" checked>跟随最新</label>
+            <button class="sim-btn" id="rl_eval_clear" title="清空历史">清空</button>
+          </div>
+          <div class="rl-metrics">
+            <div class="rl-metric"><span>更新点</span><b id="rl_eval_at">—</b></div>
+            <div class="rl-metric"><span>DPS</span><b id="rl_eval_dps">—</b></div>
+            <div class="rl-metric"><span>总伤害</span><b id="rl_eval_total">—</b></div>
+            <div class="rl-metric"><span>战斗时长</span><b id="rl_eval_fight">—</b></div>
+            <div class="rl-metric"><span>主动技能数</span><b id="rl_eval_skills">—</b></div>
+            <div class="rl-metric"><span>历史数</span><b id="rl_eval_count">0</b></div>
+          </div>
+          <div class="sim-timeline-scroll" id="rl_eval_scroll" style="max-height: 200px;">
+            <div class="sim-timeline-track" id="rl_eval_track"></div>
+          </div>
+        </section>
+
+        <section class="opt-card">
+          <div class="opt-section-title">事件日志</div>
+          <div class="rl-log" id="rl_log"></div>
+        </section>
+      </div>
+    </div>
+
+    <!-- ═══════ 页面6：RL 分析 ═══════ -->
+    <div id="page-rlana" class="page">
+      <div class="opt-shell">
+        <section class="opt-card">
+          <div class="opt-section-title">分析配置
+            <span class="opt-help" data-help="用训练好的 ckpt 跑一局，逐决策点对比 RL 与宏的选择，输出替换模式和 DPS 对比。属性 / 奇穴 / 秘籍取自"基础设置"页。">?</span>
+          </div>
+          <div class="rl-form">
+            <label>ckpt
+              <select id="rlana_ckpt"><option value="">（选择 ckpt）</option></select>
+            </label>
+            <label>时长(s) <input type="number" id="rlana_duration" value="300"></label>
+            <label>初始怒气 <input type="number" id="rlana_initial_rage" value="0" min="0" max="100"></label>
+            <label>网络延迟(ms) <input type="number" id="rlana_network_delay" value="0"></label>
+            <label>device
+              <select id="rlana_device"><option value="cuda">cuda</option><option value="cpu">cpu</option></select>
+            </label>
+          </div>
+          <div class="rl-controls">
+            <button class="sim-btn" id="rlana_ckpt_refresh">刷新 ckpt 列表</button>
+          </div>
+          <div style="margin-top:10px;">
+            <label style="display:block;color:#aaa;font-size:12px;margin-bottom:4px;">宏文本 <span class="opt-help" data-help="用于作为 baseline 对比。点"从循环模拟页导入"自动取。">?</span></label>
+            <textarea id="rlana_macro" rows="6" placeholder="贴宏文本，或点下方按钮从循环模拟页导入"></textarea>
+            <div class="rl-controls">
+              <button class="sim-btn" id="rlana_macro_from_sim">从循环模拟页导入</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="opt-card">
+          <div class="opt-section-title">运行控制</div>
+          <div class="rl-controls">
+            <button class="sim-btn primary" id="rlana_start_btn">启动分析</button>
+            <button class="sim-btn" id="rlana_stop_btn" disabled>停止</button>
+            <span class="rl-state" id="rlana_state">未运行</span>
+          </div>
+        </section>
+
+        <section class="opt-card">
+          <div class="opt-section-title">实时进度</div>
+          <div class="rl-metrics">
+            <div class="rl-metric"><span>决策点</span><b id="rlana_step">—</b></div>
+            <div class="rl-metric"><span>模拟进度</span><b id="rlana_sim">—</b></div>
+            <div class="rl-metric"><span>当前 DPS</span><b id="rlana_cur_dps">—</b></div>
+            <div class="rl-metric"><span>不一致率</span><b id="rlana_disagree">—</b></div>
+          </div>
+        </section>
+
+        <section class="opt-card">
+          <div class="opt-section-title">分析结果</div>
+          <div class="rl-metrics">
+            <div class="rl-metric"><span>RL DPS</span><b id="rlana_rl_dps">—</b></div>
+            <div class="rl-metric"><span>宏 DPS</span><b id="rlana_macro_dps">—</b></div>
+            <div class="rl-metric"><span>提升</span><b id="rlana_delta">—</b></div>
+            <div class="rl-metric"><span>总决策</span><b id="rlana_total_n">—</b></div>
+          </div>
+          <div class="rl-controls" style="margin-bottom: 10px;">
+            <button class="sim-btn" id="rlana_open_in_rollout">导入到 RL 回放 tab</button>
+          </div>
+          <table class="rl-ana-table" id="rlana_patterns"><thead><tr><th>宏选择</th><th>→</th><th>RL 选择</th><th style="text-align:right;">次数</th></tr></thead><tbody></tbody></table>
+        </section>
+
+        <section class="opt-card">
+          <div class="opt-section-title">事件日志</div>
+          <div class="rl-log" id="rlana_log"></div>
+        </section>
+      </div>
+    </div>
+
+    <!-- ═══════ 页面5：RL 回放 ═══════ -->
+    <div id="page-rlrun" class="page">
+      <div class="opt-shell">
+        <section class="opt-card">
+          <div class="opt-section-title">回放策略</div>
+          <div class="rl-form">
+            <label>模式
+              <select id="rlrun_mode">
+                <option value="macro">宏</option>
+                <option value="actions">动作轨迹（来自 analyze.py 的 rl_actions.json）</option>
+              </select>
+            </label>
+            <label>时长(s) <input type="number" id="rlrun_duration" value="60"></label>
+            <label>初始怒气 <input type="number" id="rlrun_initial_rage" value="0" min="0" max="100"></label>
+            <label>网络延迟(ms) <input type="number" id="rlrun_network_delay" value="0"></label>
+          </div>
+          <div id="rlrun_macro_box">
+            <textarea id="rlrun_macro_text" rows="6" placeholder="贴宏文本，或在循环模拟页编辑后切回这里"></textarea>
+            <div class="rl-controls">
+              <button class="sim-btn" id="rlrun_macro_from_sim">从循环模拟页导入</button>
+            </div>
+          </div>
+          <div id="rlrun_actions_box" style="display:none;">
+            <div class="rl-controls">
+              <button class="sim-btn" id="rlrun_actions_pick">选 rl_actions.json 文件</button>
+              <span id="rlrun_actions_meta" class="rl-state">未导入</span>
+            </div>
+            <input type="file" id="rlrun_actions_file" accept=".json" style="display:none;">
+          </div>
+        </section>
+
+        <section class="opt-card">
+          <div class="opt-section-title">运行</div>
+          <div class="rl-controls">
+            <button class="sim-btn primary" id="rlrun_run_btn">执行回放</button>
+            <span class="rl-state" id="rlrun_state">就绪</span>
+          </div>
+        </section>
+
+        <section class="opt-card">
+          <div class="opt-section-title">结果</div>
+          <div class="rl-metrics">
+            <div class="rl-metric"><span>DPS</span><b id="rlrun_dps">—</b></div>
+            <div class="rl-metric"><span>总伤害</span><b id="rlrun_total">—</b></div>
+            <div class="rl-metric"><span>战斗时长</span><b id="rlrun_fight">—</b></div>
+            <div class="rl-metric"><span>主动技能数</span><b id="rlrun_skills">—</b></div>
+          </div>
+          <div class="sim-timeline-scroll" id="rlrun_timeline_scroll">
+            <div class="sim-timeline-track" id="rlrun_timeline_track"></div>
+          </div>
+          <details style="margin-top: 8px;"><summary style="cursor:pointer;color:#888;font-size:12px;">显示纯文本事件列表</summary>
+            <div class="rl-log" id="rlrun_table" style="max-height: 320px;"></div>
+          </details>
+        </section>
+      </div>
+    </div>
+
+    <!-- ═══════ 配装器 ═══════ -->
+    <div id="page-equip" class="page">
+      <div class="eq-layout">
+        <!-- 左栏：部位 + 最终属性 -->
+        <aside class="eq-left">
+          <div class="eq-section-title">部位</div>
+          <div class="eq-slots-grid">
+            <button class="eq-slot" data-pos="HAT">帽子</button>
+            <button class="eq-slot" data-pos="JACKET">上衣</button>
+            <button class="eq-slot" data-pos="BELT">腰带</button>
+            <button class="eq-slot" data-pos="WRIST">护腕</button>
+            <button class="eq-slot" data-pos="BOTTOMS">下装</button>
+            <button class="eq-slot" data-pos="SHOES">鞋子</button>
+            <button class="eq-slot" data-pos="NECKLACE">项链</button>
+            <button class="eq-slot" data-pos="PENDANT">腰坠</button>
+            <button class="eq-slot" data-pos="RING_1">戒指</button>
+            <button class="eq-slot" data-pos="RING_2">戒指</button>
+            <button class="eq-slot" data-pos="PRIMARY_WEAPON">近武</button>
+            <button class="eq-slot" data-pos="SECONDARY_WEAPON">远武</button>
+          </div>
+          <div class="eq-slot-actions">
+            <button class="sim-btn" id="eq_clear_slot" disabled>清空当前部位</button>
+            <button class="sim-btn" id="eq_reset_all">全部重置</button>
+          </div>
+          <div class="eq-slot-actions">
+            <button class="sim-btn" id="eq_load" title="加载方案 / 粘贴或选文件导入（自动识别本地 / jx3box / 在线库 3 种格式）">加载…</button>
+            <button class="sim-btn" id="eq_export_btn" title="另存为 / 复制本地 JSON / 复制在线库 JSON（弹窗内 Tab 切换）">导出…</button>
+          </div>
+
+          <div class="eq-section-title" style="margin-top:14px;display:flex;align-items:center;gap:8px;">
+            <span>最终属性</span>
+            <span id="eq_mount_label" class="eq-mount-tag"></span>
+            <button class="sim-btn" id="eq_fit_curve_btn" type="button" style="margin-left:auto;font-size:11px;padding:2px 8px;font-weight:normal;" title="基于当前配装跑 55 sim 拟合，弹出属性收益曲线（约 0.5 秒）">📈 属性收益</button>
+          </div>
+          <div class="eq-attrs-panel" id="eq_attrs_panel">
+            <div class="eq-attrs-row eq-attrs-score">
+              <span class="eq-al">装分</span><span class="eq-av" id="eq_av_score">—</span>
+            </div>
+            <div class="eq-attrs-row eq-attrs-quality">
+              <span class="eq-al">品质等级</span><span class="eq-av" id="eq_av_quality">—</span>
+            </div>
+            <div class="eq-attrs-group">
+              <div class="eq-attrs-row"><span class="eq-al">气血</span><span class="eq-av" id="eq_av_hp">—</span></div>
+              <div class="eq-attrs-row"><span class="eq-al">体质</span><span class="eq-av" id="eq_av_vit">—</span></div>
+              <div class="eq-attrs-row"><span class="eq-al">力道</span><span class="eq-av" id="eq_av_str">—</span></div>
+              <div class="eq-attrs-row"><span class="eq-al">身法</span><span class="eq-av" id="eq_av_agi">—</span></div>
+            </div>
+            <div class="eq-attrs-group">
+              <div class="eq-attrs-row"><span class="eq-al">外攻</span><span class="eq-av"><span class="eq-av-dim" id="eq_av_atk_base">—</span> <span class="eq-av-sep">›</span> <span id="eq_av_atk">—</span></span></div>
+              <div class="eq-attrs-row"><span class="eq-al">会心</span><span class="eq-av" id="eq_av_crit">—</span></div>
+              <div class="eq-attrs-row"><span class="eq-al">会效</span><span class="eq-av" id="eq_av_crit_eff">—</span></div>
+              <div class="eq-attrs-row"><span class="eq-al">破防</span><span class="eq-av" id="eq_av_oc">—</span></div>
+              <div class="eq-attrs-row"><span class="eq-al">无双</span><span class="eq-av" id="eq_av_strain">—</span></div>
+              <div class="eq-attrs-row"><span class="eq-al">加速</span><span class="eq-av" id="eq_av_haste">—</span></div>
+              <div class="eq-attrs-row"><span class="eq-al">破招</span><span class="eq-av" id="eq_av_surplus">—</span></div>
+              <div class="eq-attrs-row"><span class="eq-al">全能</span><span class="eq-av" id="eq_av_pvx">—</span></div>
+            </div>
+            <div class="eq-attrs-group">
+              <div class="eq-attrs-row"><span class="eq-al">外防</span><span class="eq-av" id="eq_av_pshield">—</span></div>
+              <div class="eq-attrs-row"><span class="eq-al">内防</span><span class="eq-av" id="eq_av_mshield">—</span></div>
+              <div class="eq-attrs-row"><span class="eq-al">招架</span><span class="eq-av" id="eq_av_parry">—</span></div>
+              <div class="eq-attrs-row"><span class="eq-al">拆招</span><span class="eq-av" id="eq_av_parry_val">—</span></div>
+              <div class="eq-attrs-row"><span class="eq-al">闪避</span><span class="eq-av" id="eq_av_dodge">—</span></div>
+              <div class="eq-attrs-row"><span class="eq-al">御劲</span><span class="eq-av" id="eq_av_tough">—</span></div>
+              <div class="eq-attrs-row"><span class="eq-al">化劲</span><span class="eq-av" id="eq_av_decrit">—</span></div>
+            </div>
+            <!-- 套装件数指示器：装上对应套装时自动展示，未装备时隐藏 -->
+            <div class="eq-attrs-group eq-set-indicator" id="eq_set_indicator" style="display:none">
+              <div class="eq-attrs-row eq-attrs-section-title">套装效果</div>
+            </div>
+            <!-- 装备特效指示器：天下宏愿 / 幽烽蝶语·式微 等武器效果 -->
+            <div class="eq-attrs-group eq-effect-indicator" id="eq_effect_indicator" style="display:none">
+              <div class="eq-attrs-row eq-attrs-section-title">装备特效</div>
+            </div>
+          </div>
+        </aside>
+
+        <!-- 中栏：筛选 + 装备列表 -->
+        <section class="eq-center">
+          <div class="eq-center-head" id="eq_center_head">请从左侧选择一个部位</div>
+          <div class="eq-filters" id="eq_filters" style="display:none">
+            <div class="eq-filter-row">
+              <label>品级</label>
+              <div class="eq-range">
+                <div class="eq-range-track">
+                  <div class="eq-range-fill" id="eq_range_fill"></div>
+                  <input type="range" id="eq_min_level" min="22000" max="44000" step="100" value="22000">
+                  <input type="range" id="eq_max_level" min="22000" max="44000" step="100" value="44000">
+                </div>
+                <div class="eq-range-vals">
+                  <span id="eq_min_level_val">22000</span>
+                  <span>~</span>
+                  <span id="eq_max_level_val">44000</span>
+                </div>
+              </div>
+              <button class="sim-btn eq-mini-btn" id="eq_filter_reset">重置</button>
+              <button class="sim-btn eq-mini-btn" id="eq_filter_all" title="激活所有筛选 chip（门派/心法/属性/战斗/类型）">全选</button>
+              <button class="sim-btn eq-mini-btn" id="eq_filter_none" title="清空所有筛选 chip">全不选</button>
+            </div>
+            <div class="eq-filter-row">
+              <label>门派</label>
+              <div class="eq-chip-group" id="eq_school_chips"></div>
+            </div>
+            <div class="eq-filter-row">
+              <label>心法</label>
+              <div class="eq-chip-group" id="eq_kind_chips"></div>
+            </div>
+            <div class="eq-filter-row">
+              <label>属性</label>
+              <div class="eq-chip-group" id="eq_attr_chips">
+                <button class="eq-chip" data-attr="招架">招架</button>
+                <button class="eq-chip" data-attr="会心">会心</button>
+                <button class="eq-chip" data-attr="无双">无双</button>
+                <button class="eq-chip" data-attr="破防">破防</button>
+                <button class="eq-chip" data-attr="破招">破招</button>
+                <button class="eq-chip" data-attr="加速">加速</button>
+                <button class="eq-chip" data-attr="全能">全能</button>
+              </div>
+            </div>
+            <div class="eq-filter-row">
+              <label>战斗</label>
+              <div class="eq-chip-group" id="eq_battle_chips">
+                <button class="eq-chip" data-battle="PVE">PVE</button>
+                <button class="eq-chip" data-battle="PVP">PVP</button>
+                <button class="eq-chip" data-battle="PVX">PVX</button>
+              </div>
+            </div>
+            <div class="eq-filter-row">
+              <label>类型</label>
+              <div class="eq-chip-group" id="eq_category_chips">
+                <button class="eq-chip" data-cat="无修">无修</button>
+                <button class="eq-chip" data-cat="散件">散件</button>
+                <button class="eq-chip" data-cat="切糕">切糕</button>
+                <button class="eq-chip" data-cat="普通精简">普通精简</button>
+                <button class="eq-chip" data-cat="黄字精简">黄字精简</button>
+                <button class="eq-chip" data-cat="橙武">橙武</button>
+                <button class="eq-chip" data-cat="紫武">紫武</button>
+                <button class="eq-chip" data-cat="橙坠">橙坠</button>
+                <button class="eq-chip" data-cat="紫坠">紫坠</button>
+              </div>
+            </div>
+            <div class="eq-filter-row">
+              <input type="text" id="eq_keyword" placeholder="搜索 装备名/属性类型">
+              <label class="eq-check"><input type="checkbox" id="eq_only_set">只看套装</label>
+              <label class="eq-check"><input type="checkbox" id="eq_only_orange">只看橙装</label>
+              <span class="eq-hint" id="eq_list_count"></span>
+            </div>
+            <div class="eq-filter-row">
+              <label title="DPS 预览用来跑模拟的循环/序列。默认走「循环模拟」页面当前的宏；也可以选已保存的方案或保存到 userdata/loops 的循环。">DPS 来源</label>
+              <select id="eq_dps_source" class="eq-mini-select"></select>
+              <span class="eq-hint" id="eq_dps_source_hint"></span>
+            </div>
+          </div>
+          <div class="eq-list-wrap">
+            <table class="eq-list-table" id="eq_list_table" style="display:none">
+              <thead>
+                <tr>
+                  <th style="width:30%" data-sort-key="name"          title="点击按装备名排序">装备名称</th>
+                  <th style="width:24%" data-sort-key="magic_type"    title="点击按属性类型排序">属性类型</th>
+                  <th style="width:9%"  data-sort-key="belong_school" title="点击按门派排序">门派</th>
+                  <th style="width:11%" data-sort-key="set_name"      title="点击按套装名排序">套装</th>
+                  <th style="width:11%" data-sort-key="level"         title="点击按品级排序">品级</th>
+                  <th style="width:15%" data-sort-key="dps_delta" class="eq-dps-col-head" title="点击按 DPS Δ 排序。替换当前部位为该装备后，按当前宏模拟得到的 DPS 与基线的差值。绿色=提升，红色=下降，灰色=接近持平。">DPS Δ</th>
+                </tr>
+              </thead>
+              <tbody id="eq_list_body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- 右栏：装备详情 + 设置 -->
+        <aside class="eq-right">
+          <div class="eq-right-empty" id="eq_detail_empty">
+            选择装备后在此配置精炼、镶嵌、附魔、五彩石
+          </div>
+          <div class="eq-detail" id="eq_detail" style="display:none">
+            <div class="eq-detail-name" id="eq_dn_name">—</div>
+            <div class="eq-detail-sub" id="eq_dn_sub">—</div>
+            <div class="eq-detail-attrs" id="eq_dn_attrs"></div>
+
+            <div class="eq-setting-row">
+              <label>精炼</label>
+              <div class="eq-stars" id="eq_stars"></div>
+              <button class="eq-mini-btn" id="eq_stars_clear">×</button>
+            </div>
+
+            <div class="eq-setting-row" id="eq_embed_row" style="display:none">
+              <label>镶嵌</label>
+              <div class="eq-embed-group" id="eq_embed_group"></div>
+            </div>
+
+            <div class="eq-setting-row">
+              <label>小附魔</label>
+              <div class="eq-enh-picker" id="eq_enhance_picker">
+                <button type="button" class="eq-enh-trigger" id="eq_enhance_trigger">
+                  <span class="enh-name">（无）</span>
+                  <span class="enh-attrs"></span>
+                  <span class="enh-delta"></span>
+                  <span class="enh-arrow">▾</span>
+                </button>
+                <div class="eq-enh-dropdown" id="eq_enhance_dropdown" hidden></div>
+              </div>
+            </div>
+
+            <div class="eq-setting-row" id="eq_enchant_row" style="display:none">
+              <label>大附魔</label>
+              <select id="eq_enchant_select"><option value="">（无）</option></select>
+            </div>
+
+            <div class="eq-setting-row" id="eq_stone_row" style="display:none">
+              <label>五彩石</label>
+              <div class="eq-stone-picker">
+                <span class="eq-stone-name" id="eq_stone_name">（未选择）</span>
+                <button class="sim-btn eq-mini-btn" id="eq_stone_pick">选择</button>
+                <button class="sim-btn eq-mini-btn" id="eq_stone_clear">清除</button>
+              </div>
+            </div>
+
+            <div class="eq-setting-row">
+              <label>套装</label>
+              <div class="eq-set-info" id="eq_set_info">—</div>
+            </div>
+          </div>
+        </aside>
+      </div>
+
+      <!-- 五彩石选择弹窗 -->
+      <div class="eq-modal" id="eq_stone_modal" style="display:none">
+        <div class="eq-modal-content">
+          <div class="eq-modal-head">
+            <span>五彩石选择</span>
+            <button class="eq-modal-close" id="eq_stone_modal_close">×</button>
+          </div>
+          <div class="eq-modal-body">
+            <div class="eq-stone-filters">
+              <div class="eq-stone-fg">
+                <label>等级</label>
+                <div class="eq-stone-chips" id="eq_stone_lv_chips"></div>
+              </div>
+              <div class="eq-stone-fg">
+                <label>属性 1</label>
+                <div class="eq-stone-chips" id="eq_stone_a0_chips"></div>
+              </div>
+              <div class="eq-stone-fg">
+                <label>属性 2</label>
+                <div class="eq-stone-chips" id="eq_stone_a1_chips"></div>
+              </div>
+              <div class="eq-stone-fg">
+                <label>属性 3</label>
+                <div class="eq-stone-chips" id="eq_stone_a2_chips"></div>
+              </div>
+              <div class="eq-stone-ctl">
+                <input type="text" id="eq_stone_search" placeholder="搜索">
+                <button class="sim-btn eq-mini-btn" id="eq_stone_reset">清空筛选</button>
+              </div>
+            </div>
+            <table class="eq-list-table eq-stone-table">
+              <thead>
+                <tr>
+                  <th style="width:8%"  class="eq-stone-sort-th" data-sort-key="level">等级<span class="sort-ind"></span></th>
+                  <th style="width:30%" class="eq-stone-sort-th" data-sort-key="name">名称<span class="sort-ind"></span></th>
+                  <th style="width:42%">属性</th>
+                  <th style="width:10%">需求</th>
+                  <th style="width:10%" class="eq-stone-sort-th" data-sort-key="delta">DPS Δ<span class="sort-ind"></span></th>
+                </tr>
+              </thead>
+              <tbody id="eq_stone_list_body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- 账号级设置同步：先从服务端拉用户设置覆盖 localStorage，再按序加载脚本，
+       这样主题/字体/显示模式等所有 init 直接读到账号同步后的值（换设备/origin/清缓存都跟随）。 -->
+  <script>
+  (function () {
+    function loadSeq(list) {
+      if (!list.length) return;
+      var s = document.createElement('script');
+      s.src = list[0];
+      var next = function () { loadSeq(list.slice(1)); };
+      s.onload = next; s.onerror = next;
+      document.body.appendChild(s);
+    }
+    var SCRIPTS = ['state.js', 'app.js'];
+    var go = function () { loadSeq(SCRIPTS); };
+    try {
+      fetch('/api/settings', { cache: 'no-store' })
+        .then(function (r) { return r.json(); })
+        .then(function (obj) {
+          if (obj && typeof obj === 'object') {
+            for (var k in obj) {
+              if (Object.prototype.hasOwnProperty.call(obj, k) && obj[k] != null) {
+                try { localStorage.setItem(k, String(obj[k])); } catch (e) {}
+              }
+            }
+          }
+        })
+        .catch(function () {})
+        .finally(go);
+    } catch (e) { go(); }
+  })();
+  </script>
+</body>
+</html>

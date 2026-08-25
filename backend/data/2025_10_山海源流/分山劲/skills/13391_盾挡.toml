@@ -1,0 +1,27 @@
+id   = 13391
+name = "盾挡"
+
+# 防御技 / 消耗怒气（最少10点）/ GCD: 无
+# 每点体质获得0.04拆招值，持续11秒
+# 每额外消耗10怒，每点体质转化+0.04
+
+rage_cost = 10
+
+[[cooldowns]]
+cd_id    = "gcd_1.5"
+duration = 1.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_0.5"
+duration = 0.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[ranks]]
+rank         = 1
+name         = "盾挡"
+base_damage  = 0
+attack_coeff = 0
+weapon_coeff = 0

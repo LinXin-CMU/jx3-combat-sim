@@ -1,0 +1,32 @@
+[
+  {
+    "id": "S9",
+    "name": "盾飞·保血誓",
+    "page": "shield",
+    "line_text": "/cast rage>65 盾飞"
+  },
+  {
+    "id": "B10",
+    "name": "劫刀·补血誓",
+    "page": "blade",
+    "line_text": "/cast tbuff:以血盟誓 劫刀"
+  },
+  {
+    "id": "B6",
+    "name": "绝刀·低怒免费",
+    "page": "blade",
+    "line_text": "/cast buff:狂绝&rage<30 绝刀"
+  },
+  {
+    "id": "S7",
+    "name": "血怒·提前",
+    "page": "shield",
+    "line_text": "/fcast nobuff:血怒·惊涌&rage>30 血怒"
+  },
+  {
+    "id": "B9",
+    "name": "斩刀·有虚弱",
+    "page": "blade",
+    "line_text": "/cast tbuff:虚弱 斩刀"
+  }
+]

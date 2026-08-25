@@ -1,0 +1,25 @@
+id   = 13387
+name = "惊沙"
+
+# 盾毅后可施展，将目标下压砸地
+# 击倒8尺范围内最多5个僵直目标3秒
+
+[[cooldowns]]
+cd_id    = "gcd_1.5"
+duration = 1.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_1.0"
+duration = 1.0
+mode     = "check_only"
+haste    = true
+
+[[ranks]]
+rank           = 1
+name           = "惊沙"
+requires_combo = "盾毅_2"
+base_damage  = 0
+attack_coeff = 0
+weapon_coeff = 0

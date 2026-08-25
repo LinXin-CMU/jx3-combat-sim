@@ -1,0 +1,29 @@
+﻿id   = 13040
+name = "血怒"
+icon = "https://icon.jx3box.com/icon/6351.png"
+description = "充能3层25秒 / 回复10怒气 / 外功攻击+10%持续10秒 / 免疫控制4秒"
+
+# 辅助技 / 充能: 3层，25秒 / GCD: 无 / 保护CD: 0.5秒
+# 回复 10 怒气
+# 获得[血怒] buff，分山劲：外功基础攻击+10%，威胁-20%，持续10秒
+# 2秒内连续施展可叠加，最大3层
+# 获得[劫化]，免疫控制4秒，时间可累加
+# 奇穴[惊涌]：替换为[血怒·惊涌]，无法叠加，无双+30%
+
+rage_gain   = 10
+max_charges = 3
+charge_cd   = 25.0
+
+[[cooldowns]]
+cd_id    = "protect_血怒"
+duration = 0.5
+mode     = "check_and_trigger"
+haste    = false
+
+[[ranks]]
+rank         = 1
+name         = "血怒"
+icon = "https://icon.jx3box.com/icon/6351.png"
+base_damage  = 0
+attack_coeff = 0
+weapon_coeff = 0

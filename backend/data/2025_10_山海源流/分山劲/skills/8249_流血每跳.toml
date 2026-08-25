@@ -1,0 +1,13 @@
+id   = 8249
+name = "流血·每跳"
+passive = true
+
+# 流血 debuff 每2秒跳一次伤害
+# 被动触发，不由玩家控制
+
+[[ranks]]
+rank         = 1
+name         = "流血·每跳"
+base_damage  = 47.0
+attack_coeff = 0.12489
+weapon_coeff = 0

@@ -1,0 +1,44 @@
+﻿id   = 13045
+name = "盾压"
+icon = "https://icon.jx3box.com/icon/6332.png"
+description = "擎盾 / CD12秒 / 回复15怒气 / 使目标无法施展轻功5秒"
+
+# 姿态: 擎盾 / 距离: 4尺 / CD: 12秒 / GCD: 1.5秒
+# 回复 15 怒气 / 使目标无法施展轻功 5秒（每15秒触发一次）
+# 重置条件: 招架率×2% 几率重置（分山劲心法）
+# 盾墙下距离延长至20尺，可对友方施展盾护（吸收10%气血伤害）
+
+stance    = "shield"
+rage_gain = 15
+
+[[cooldowns]]
+cd_id    = "gcd_1.5"
+duration = 1.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_1.0"
+duration = 1.0
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_0.5"
+duration = 0.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "cd_盾压"
+duration = 12.0
+mode     = "check_and_trigger"
+haste    = false
+
+[[ranks]]
+rank         = 1
+name         = "盾压"
+icon = "https://icon.jx3box.com/icon/6332.png"
+base_damage  = 211.0      # (202 + 220) / 2
+attack_coeff = 3.59375
+weapon_coeff = 1.0

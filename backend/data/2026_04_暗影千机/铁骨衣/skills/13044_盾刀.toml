@@ -1,0 +1,80 @@
+﻿id   = 13044
+name = "盾刀"
+icon = "https://icon.jx3box.com/icon/6327.png"
+description = "擎盾 / 回复5怒气 / 三段连招 / 减速目标60%持续8秒"
+
+# 姿态: 擎盾 / 距离: 4尺 / GCD: 1秒
+# 回复 5 怒气 / 使目标移动速度降低60% 持续8秒
+# 二段需前置BUFF[8232]（施展后4秒内）
+# 三段需前置BUFF[8262]（二段后4秒内）
+# 注：二段(13059)附带180°6尺范围最多5目标同伤害AoE，当前公式仅计算单体
+# 四段(13119)需奇穴[强袭]，三段命中有虚弱/流血目标后触发
+
+stance    = "shield"
+rage_gain = 5
+
+[[cooldowns]]
+cd_id    = "gcd_1.0"
+duration = 1.0
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_0.5"
+duration = 0.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_1.5"
+duration = 1.5
+mode     = "check_only"
+haste    = true
+
+[[ranks]]
+rank         = 1
+name         = "盾刀·一段"
+icon = "https://icon.jx3box.com/icon/6327.png"
+base_damage  = 137.5      # (130 + 145) / 2
+attack_coeff = 1.40625
+weapon_coeff = 1.0
+grants_combo = "盾刀_2"
+
+[[ranks]]
+rank         = 2
+name         = "盾刀·二段"
+icon = "https://icon.jx3box.com/icon/6328.png"
+base_damage  = 137.5      # (130 + 145) / 2
+attack_coeff = 1.5375
+weapon_coeff = 1.0
+requires_combo = "盾刀_2"
+grants_combo   = "盾刀_3"
+# 二段/三段/四段：触发 gcd_1.0；check_only gcd_1.5（不触发）；不涉及 gcd_0.5
+cooldowns = [
+  { cd_id = "gcd_1.0", duration = 1.0, mode = "check_and_trigger", haste = true },
+  { cd_id = "gcd_1.5", duration = 1.5, mode = "check_only",        haste = true },
+]
+
+[[ranks]]
+rank         = 3
+name         = "盾刀·三段"
+icon = "https://icon.jx3box.com/icon/6329.png"
+base_damage  = 137.5      # (130 + 145) / 2
+attack_coeff = 1.68125
+weapon_coeff = 1.0
+requires_combo = "盾刀_3"
+cooldowns = [
+  { cd_id = "gcd_1.0", duration = 1.0, mode = "check_and_trigger", haste = true },
+]
+
+[[ranks]]
+rank         = 4
+name         = "盾刀·四段"
+icon = "https://icon.jx3box.com/icon/6330.png"
+base_damage  = 137.5      # (130 + 145) / 2
+attack_coeff = 1.3625
+weapon_coeff = 1.0
+requires_combo = "盾刀_4"
+cooldowns = [
+  { cd_id = "gcd_1.0", duration = 1.0, mode = "check_and_trigger", haste = true },
+]

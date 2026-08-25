@@ -1,0 +1,30 @@
+﻿id   = 15072
+name = "寒啸千军"
+icon = "https://icon.jx3box.com/icon/7514.png"
+description = "消耗20点格挡值，使自身半径20尺内最多25名友方目标无双率提高5%，持续15秒。"
+stance = "any"
+requires_talent = 15072  # 寒啸千军 奇穴解锁此技能
+
+# 消耗 20 格挡值（脚本处理）；无怒气消耗
+rage_cost = 0
+
+# 检测并触发 1.5s GCD
+[[cooldowns]]
+cd_id    = "gcd_1.5"
+duration = 1.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "cd_寒啸千军"
+duration = 30.0
+mode     = "check_and_trigger"
+haste    = false
+
+[[ranks]]
+rank         = 1
+name         = "寒啸千军"
+icon = "https://icon.jx3box.com/icon/7514.png"
+base_damage  = 0
+attack_coeff = 0.0
+weapon_coeff = 0.0

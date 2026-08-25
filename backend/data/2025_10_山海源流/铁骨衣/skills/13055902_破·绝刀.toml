@@ -1,0 +1,11 @@
+id   = 13055902
+name = "破·绝刀"
+passive = true
+damage_kind = "surplus_only"
+description = "铁骨衣绝刀附带的破招伤害；不受怒气段加成影响（独立 ID 与分山劲 13055901 区分）"
+
+# 由 13055 触发；铁骨衣破·绝刀固定 25怒基础系数，怒气段秘籍 99035/45/55/65 不命中
+[[ranks]]
+rank          = 1
+name          = "破·绝刀"
+surplus_coeff = 1.9983

@@ -1,0 +1,39 @@
+id   = 13424
+name = "撼地"
+description = "门派轻功 / 5尺范围眩晕3秒 / 每命中回复5怒气"
+
+# 门派轻功 / 5尺范围最多5目标眩晕3秒
+# 每命中一目标回复5点怒气
+
+rage_gain = 5
+
+[[cooldowns]]
+cd_id    = "gcd_1.5"
+duration = 1.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_1.0"
+duration = 1.0
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_0.5"
+duration = 0.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "cd_han_di"
+duration = 20.0
+mode     = "check_and_trigger"
+haste    = false
+
+[[ranks]]
+rank         = 1
+name         = "撼地"
+base_damage  = 105.0      # (100 + 110) / 2
+attack_coeff = 0.6250
+weapon_coeff = 1.0

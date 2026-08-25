@@ -1,0 +1,11 @@
+{
+  "name": "绝云宏 + 坚铁/寒甲奇穴 + boss=2s",
+  "fingerprint": "8e679148d62245b5",
+  "dps": 1035553.0264528224,
+  "total_damage": 310730630.0,
+  "skill_count": 1618,
+  "fight_time": 300.0625,
+  "captured_at": "2026-05-01",
+  "captured_after": "fix sync_expectation_buffs bump",
+  "notes": "覆盖坚铁(13138)+寒甲(13134)奇穴的 expectation 子系统路径。boss_attack_interval=2s 触发 sync_expectation_buffs 的 retain/push/mutate active_buffs 路径，需 buff_generation 正确 bump 才能让 buff_idx_cache / aggregate cache 失效。首跑前 fingerprint 是 PENDING，跑 --update 后写入。"
+}

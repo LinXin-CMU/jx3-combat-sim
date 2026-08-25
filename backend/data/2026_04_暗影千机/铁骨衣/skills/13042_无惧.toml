@@ -1,0 +1,24 @@
+﻿id   = 13042
+name = "无惧"
+icon = "https://icon.jx3box.com/icon/6299.png"
+description = "解除自身所有控制效果，并使自身免疫控制及恐惧效果，持续6秒。仅铁骨衣心法可用。"
+stance = "any"
+
+# 生存技 / CD: 30秒（奇穴[鸿烈] -5秒 → 25秒）/ 无GCD
+# 解除所有控制，免疫控制及恐惧6秒
+# 分山劲心法下额外受伤-30%持续6秒
+# 奇穴[鸿烈] 会触发独立伤害段 13042901（见脚本 wu_ju.rs）
+
+[[cooldowns]]
+cd_id    = "cd_无惧"
+duration = 30.0
+mode     = "check_and_trigger"
+haste    = false
+
+[[ranks]]
+rank         = 1
+name         = "无惧"
+icon = "https://icon.jx3box.com/icon/6299.png"
+base_damage  = 0
+attack_coeff = 0
+weapon_coeff = 0

@@ -1,0 +1,15 @@
+id   = 25797
+name = "盾压·神兵"
+passive = true
+description = "驭焰装备特效：盾压额外触发的少量伤害与威胁（1024 制累计 prob=205）"
+
+# 触发段：dun_ya.rs 在盾压释放时按 1024 制累计；触发时 em.emit("盾压·神兵", 25797, t)
+# 数据：游戏内伤害 20~22；attack_coeff 0.25000；weapon_coeff 1.0
+# 威胁值由游戏方处理（DPS 模拟器不模拟仇恨，仅算伤害）
+
+[[ranks]]
+rank         = 1
+name         = "盾压·神兵"
+base_damage  = 21.0          # (20 + 22) / 2
+attack_coeff = 0.25000
+weapon_coeff = 1.0

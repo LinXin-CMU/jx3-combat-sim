@@ -1,0 +1,38 @@
+﻿id   = 13053
+name = "闪刀"
+icon = "https://icon.jx3box.com/icon/6354.png"
+description = "擎刀 / 消耗15怒气 / 突进目标"
+
+# 姿态: 擎刀 / 距离: 突进 / GCD: 1秒
+# 消耗 15 怒气 / 快速冲向目标
+
+stance    = "blade"
+rage_cost = 15
+
+[[cooldowns]]
+cd_id    = "gcd_1.5"
+duration = 1.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_1.0"
+duration = 1.0
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_0.5"
+duration = 0.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[ranks]]
+rank         = 1
+name         = "闪刀"
+icon = "https://icon.jx3box.com/icon/6354.png"
+grants_combo   = "闪刀_后续"
+combo_duration = 160         # 10秒 = 160帧
+base_damage    = 157.5      # (150 + 165) / 2
+attack_coeff = 5.2250
+weapon_coeff = 1.0

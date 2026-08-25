@@ -1,0 +1,23 @@
+[
+  {
+    "name": "绝云宏",
+    "mode": "stance",
+    "general": "",
+    "shield": "/cast [skill_energy:阵云结晦=2|nobuff:麟光甲&bufftime:嗜血>8] 阵云结晦\n/cast 盾击\n/cast 业火麟光\n/cast [rage>64&bufftime:嗜血<5.2|nobuff:嗜血] 盾飞",
+    "blade": "/cast 斩刀\n/cast [nobuff:血怒·惊涌&bufftime:狂绝<4.7&buff:麟光甲|skill_energy:血怒>1] 血怒\n/cast [buff:狂绝|bufftime:嗜血>7] 绝刀\n/cast [rage<50] 盾回"
+  },
+  {
+    "name": "分山武学助手",
+    "mode": "general",
+    "general": "/cast [buff:盾飞&nobuff:血怒·惊涌&buff:麟光甲=9|bufftime:狂绝<4.7&buff:麟光甲|skill_energy:血怒>1] 血怒\n/cast [nobuff:盾飞&rage>14] 业火麟光\n/cast [buff:天下宏愿|rage>64&bufftime:嗜血<5.3|nobuff:嗜血] 盾飞\n/cast [rage<50&bufftime:嗜血<10.8&nobuff:天下宏愿] 盾回\n/cast [buff:天下宏愿|buff:狂绝] 绝刀\n/cast 斩刀\n/cast [bufftime:嗜血>7] 绝刀\n/cast [skill_energy:阵云结晦=2|nobuff:麟光甲&bufftime:嗜血>8] 阵云结晦\n/cast 盾击\n/cast 盾猛",
+    "shield": "",
+    "blade": ""
+  },
+  {
+    "name": "铁骨武学助手",
+    "mode": "general",
+    "general": "/cast skill:34912&rage>64|rage>59&nobuff:麟光甲 盾飞\n/cast [skill:13133&rage>69] 盾飞\n/cast buff:麟光甲&bufftime:振奋<14&rage<31 盾挡\n/cast nobuff:振奋|bufftime:振奋<4 盾挡\n/cast 盾反\n/cast 断马摧城\n/cast 盾压\n/cast noskill:20203 盾猛\n/cast 盾击\n/cast 盾刀\n/cast buff:8277 业火麟光\n/cast buff:驭焰|buff:天下宏愿 绝刀\n/cast buff:8278&rage>=70&bufftime:天下宏愿<=0.3|bufftime:驭焰<=0.3 业火麟光\n/cast 寒啸千军\n/cast skill:13133 斩刀\n/cast buff:麟光甲=2|buff:麟光甲=5|buff:麟光甲=8 劫刀\n/cast 绝刀\n/cast nobuff:麟光甲&rage<10&nobuff:天下宏愿&nobuff:驭焰 盾回",
+    "shield": "",
+    "blade": ""
+  }
+]

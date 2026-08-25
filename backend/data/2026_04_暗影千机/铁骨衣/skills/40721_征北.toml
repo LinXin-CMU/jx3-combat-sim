@@ -1,0 +1,22 @@
+id   = 40721
+name = "征北"
+icon = "https://icon.jx3box.com/icon/6321.png"
+description = "对目标造成外功伤害，强制目标攻击自身。CD10秒，无GCD。"
+
+stance    = "any"
+rage_cost = 0
+
+# 无 GCD，只有自身 10s CD
+[[cooldowns]]
+cd_id    = "zheng_bei"
+duration = 10.0
+mode     = "check_and_trigger"
+haste    = false
+
+[[ranks]]
+rank         = 1
+name         = "征北"
+icon = "https://icon.jx3box.com/icon/6321.png"
+base_damage  = 22
+attack_coeff = 0.1
+weapon_coeff = 0

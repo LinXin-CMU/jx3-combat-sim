@@ -1,0 +1,13 @@
+id   = 40789
+name = "精简·护手真伤"
+passive = true
+true_damage = true
+description = "副本/无修精简护手 40788 黄字特效（暗影千机赛季）：自身气血>75%命中触发 1,138,846 真实伤害，CD 10s。仅过等级压制+易伤+全局增伤"
+
+# 暗影千机品级 lvl 3（IcyTide skills.json 顶级）
+[[ranks]]
+rank          = 1
+name          = "精简·护手真伤"
+base_damage   = 1138846
+attack_coeff  = 0
+weapon_coeff  = 0

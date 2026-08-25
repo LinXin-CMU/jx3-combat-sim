@@ -1,0 +1,74 @@
+# 分山劲 · 山海源流（2025.10）心法元信息
+
+name  = "分山劲"
+class = "苍云"
+
+# ── 主属性 → 副属性转化系数 ──────────────────────────────
+[constants]
+shenfa_to_attack  = 1.88    # 身法 → 外功攻击
+shenfa_to_crit    = 0.9     # 身法 → 外功会心等级
+lidao_to_attack   = 0.163   # 力道 → 外功攻击
+lidao_to_overcome = 0.3     # 力道 → 外功破防
+yuanqi_to_attack  = 0.181   # 元气 → 内功攻击（保留供内功线 buff）
+vitality_to_attack = 0.0    # 体质 → 外功攻击（铁骨衣特化，分山劲为 0）
+parry_base_rate = 0.03      # 心法自带基础招架率（+3%）
+non_player_bonus = 61.0     # 非侠士增伤（1024制）
+
+# ── 心法固定增益（仅心法本身的额外加成；全角色基础由后端 PLAYER_BASE_* 注入）──
+[base_stats]
+physics_attack_power = 6513.0  # 外功攻击
+physics_overcome     = 4696.0  # 外功破防
+parry                = 3756.0  # 招架等级
+
+# ── 心法转化（郭氏值 /1024；每项单独 / 1024 再 floor；结果不进攻击百分比增益）──
+[mount_conversions]
+agility_to_attack       = 1925   # 身法 → 外功攻击（1925/1024 ≈ 1.88）
+agility_to_parry        = 113    # 身法 → 招架等级（113/1024 ≈ 0.11）
+agility_to_parry_value  = 1024   # 身法 → 拆招值（1024/1024 = 1.0）
+
+# ── UI 配置 ───────────────────────────────────────────────
+[ui]
+talent_tiers = 6    # 暗影千机：6层固定 + 混选池
+
+[[ui.skill_groups]]
+label  = "擎盾"
+skills = ["盾击", "盾刀", "盾压", "盾猛", "偃守孤旌", "断马摧城"]
+
+[[ui.skill_groups]]
+label  = "擎刀"
+skills = ["斩刀", "绝刀", "劫刀", "闪刀", "盾回"]
+
+[[ui.skill_groups]]
+label  = "特殊"
+skills = ["天下宏愿", "移除气劲", "预释放"]
+
+[[ui.skill_groups]]
+label   = "通用"
+new_row = true                     # 此组之前换行
+skills  = ["血怒", "盾飞", "阵云结晦", "业火麟光", "盾舞", "撼地"]
+
+# ── 连招替换映射（combo 技能名 → 被替换的按钮技能名）────
+[[ui.combo_replace]]
+combo    = "月照连营"
+replaces = "阵云结晦"
+
+[[ui.combo_replace]]
+combo    = "雁门迢递"
+replaces = "阵云结晦"
+
+[[ui.combo_replace]]
+combo    = "隐刀"
+replaces = "闪刀"
+
+[[ui.combo_replace]]
+combo    = "血刀"
+replaces = "闪刀"
+
+[[ui.combo_replace]]
+combo    = "盾回"
+replaces = "盾飞"
+
+# ── A 工作流（循环蒸馏）参数 ────────────────────────────
+[workflow_a]
+default_consistency           = ["血怒", "业火麟光"]
+consistency_sensitive_skills  = ["血怒", "业火麟光"]

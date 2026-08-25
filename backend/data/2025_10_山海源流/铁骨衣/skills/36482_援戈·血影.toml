@@ -1,0 +1,15 @@
+id   = 36482
+name = "援戈·血影"
+passive = true
+
+# 援戈Buff(27030)期间：施展苍雪刀招式附带外功伤害并消耗一层
+# 被动触发，无 GCD / 无 CD（talent 36058 = 援戈奇穴）
+
+requires_talent = 36058
+
+[[ranks]]
+rank         = 1
+name         = "援戈·血影"
+base_damage  = 0
+attack_coeff = 9.66250
+weapon_coeff = 1.0

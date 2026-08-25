@@ -1,0 +1,112 @@
+# ═══════════════════════════════════════════════════════════════════
+# 技能配置模板
+# 文件命名：{id}_{技能名}.toml
+# ═══════════════════════════════════════════════════════════════════
+
+id   = 0                    # 技能 ID
+name = "技能名"              # 技能基础名（不含段数后缀）
+# icon = "https://icon.jx3box.com/icon/12130.png"  # 图标 URL（与团辅 toml.icon 一致；序列块 icon 模式渲染；空=降级显字）
+
+# ── 技能描述（注释）──────────────────────────────────────────────
+# 姿态: 擎盾 / 距离: 4尺 / CD: 12秒 / GCD: 1秒
+# 消耗/回复 X 怒气 / 特殊效果说明
+
+# ── 姿态要求 ─────────────────────────────────────────────────────
+# "shield" = 擎盾, "blade" = 擎刀, "wall" = 盾墙
+# "not_wall" = 非盾墙, "any" = 任意（默认）
+stance = "shield"
+
+# ── 怒气 ─────────────────────────────────────────────────────────
+rage_cost = 0               # 怒气消耗（0 = 不消耗）
+rage_gain = 10              # 怒气回复（0 = 不回复）
+
+# ── 姿态切换 ─────────────────────────────────────────────────────
+# 释放后切换姿态，不切换则删除此行
+# stance_change = "blade"
+
+# ── 奇穴要求 ─────────────────────────────────────────────────────
+# 需要激活指定奇穴才能释放，无要求则删除此行
+# requires_talent = 36058
+
+# ── 充能（非充能技能删除此段）─────────────────────────────────────
+# max_charges = 3            # 充能最大层数
+# charge_cd   = 4.0          # 每层充能恢复时间（秒）
+# 充能技能不需要写 cd_技能名，充能替代了技能CD
+# 保护CD（protect_）仍然可以和充能共存（如血怒 0.5s 保护）
+
+# ── 引导技能（非引导技能删除此段）─────────────────────────────────
+# channel_frame    = 80     # 总引导帧数（5秒 = 80帧）
+# channel_interval = 8      # 每跳间隔帧数（0.5秒 = 8帧）
+# first_tick_frame = 8      # 首跳延迟帧数（0 = 立即触发，默认 = channel_interval）
+
+# ── GCD 配置 ─────────────────────────────────────────────────────
+# mode: "check_and_trigger" = 检测并触发, "check_only" = 仅检测
+# haste: true = 受加速影响, false = 不受
+#
+# 常见模板：
+#   1.5s GCD 技能：触发 1.5 + 1.0 + 0.5
+#   1.0s GCD 技能：触发 1.0 + 0.5，仅检测 1.5
+#   0.5s GCD 技能：触发 0.5
+#   无 GCD 技能：  不写 cooldowns 或仅写保护 CD
+
+[[cooldowns]]
+cd_id    = "gcd_1.5"
+duration = 1.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_1.0"
+duration = 1.0
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_0.5"
+duration = 0.5
+mode     = "check_and_trigger"
+haste    = true
+
+# ── 保护 CD（可选）────────────────────────────────────────────────
+# [[cooldowns]]
+# cd_id    = "protect_技能名"
+# duration = 4.0
+# mode     = "check_and_trigger"
+# haste    = false
+
+# ── 技能 CD（可选）────────────────────────────────────────────────
+# [[cooldowns]]
+# cd_id    = "cd_技能名"
+# duration = 12.0
+# mode     = "check_and_trigger"
+# haste    = false
+
+# ── 品级（伤害数据）──────────────────────────────────────────────
+# 单品级技能：name 直接用技能名
+# 多段技能：name 加后缀（盾击·一段 / 绝刀·25怒）
+# 无伤害技能：base_damage = 0, attack_coeff = 0, weapon_coeff = 0
+
+[[ranks]]
+rank           = 1
+name           = "技能名"
+base_damage    = 0           # 伤害均值 (min + max) / 2
+attack_coeff   = 0           # 攻击系数（× 面板攻击）
+weapon_coeff   = 0           # 武器系数（× 武器伤害，通常 1.0 或 0）
+# defense_ignore = 0.5       # 无视防御比例（0~1.0，无则删除）
+# break_coeff  = 1.3190      # 破招系数（× 破招值，无则删除）
+# rage_cost    = 25           # 覆盖顶层怒气消耗（多品级怒气不同时用）
+# rage_gain    = 15           # 覆盖顶层怒气回复
+# requires_combo = "盾击_2"   # 需要的连招状态（无则删除）
+# grants_combo   = "盾击_2"   # 释放后授予的连招状态（无则删除）
+# combo_duration = 24         # 连招 Buff 持续帧数（默认 64 = 4秒）
+
+# ── 多品级示例 ───────────────────────────────────────────────────
+# [[ranks]]
+# rank           = 2
+# name           = "技能名·二段"
+# base_damage    = 200.0
+# attack_coeff   = 3.0
+# weapon_coeff   = 1.0
+# requires_combo = "技能_2"
+# grants_combo   = "技能_3"
+# combo_duration = 24

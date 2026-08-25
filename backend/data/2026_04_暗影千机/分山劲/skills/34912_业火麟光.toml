@@ -1,0 +1,27 @@
+﻿id   = 34912
+name = "业火麟光"
+icon = "https://icon.jx3box.com/icon/19153.png"
+description = "奇穴 / CD50秒 / 无GCD / 获得麟光玄甲14秒 / 返还盾飞25秒调息 / 苍雪刀附带额外伤害"
+
+# 奇穴技能（第二重·业火麟光）/ CD: 50秒 / 无 GCD
+# 无需目标即可释放
+# 获得14秒[麟光玄甲]效果，返还25秒[盾飞]调息
+#
+# [麟光玄甲]期间施展苍雪刀招式消耗一层，附带[麟光甲寒]额外伤害
+# 累计触发3次[麟光甲寒]后触发[业火焚城]大伤害
+
+requires_talent = 34912
+
+[[cooldowns]]
+cd_id    = "cd_业火麟光"
+duration = 50.0
+mode     = "check_and_trigger"
+haste    = false
+
+[[ranks]]
+rank         = 1
+name         = "业火麟光"
+icon = "https://icon.jx3box.com/icon/19153.png"
+base_damage  = 0
+attack_coeff = 0
+weapon_coeff = 0

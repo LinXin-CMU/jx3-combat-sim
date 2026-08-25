@@ -1,0 +1,11 @@
+{
+  "name": "简单循环 (盾击+盾压)",
+  "fingerprint": "099ddb885b081c61",
+  "dps": 227020.83732555716,
+  "skill_count": 992,
+  "captured_at": "2026-05-01",
+  "captured_after": "Tier 4 simplified",
+  "notes": "最小 macro：仅盾击+盾压",
+  "total_damage": 68120440.0,
+  "fight_time": 300.0625
+}

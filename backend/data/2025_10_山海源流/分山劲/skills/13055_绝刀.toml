@@ -1,0 +1,36 @@
+id   = 13055
+name = "绝刀"
+description = "擎刀 / 消耗 25~65 怒气 / 附带武器伤害 + 破·绝刀"
+
+# 姿态: 擎刀 / 距离: 6尺 / GCD: 1.5秒
+# 怒气段、秘籍3005 减费、橙武免耗、秘籍激活 全部由 jue_dao.rs 脚本处理
+# rage_cost 字段在此仅作占位，实际值由 effective_rage_cost(jue_dao) 决定
+# 破招段独立显示为"破·绝刀"（13055901，由 jue_dao.rs emit）
+
+stance    = "blade"
+rage_cost = 25
+
+[[cooldowns]]
+cd_id    = "gcd_1.5"
+duration = 1.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_1.0"
+duration = 1.0
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_0.5"
+duration = 0.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[ranks]]
+rank         = 1
+name         = "绝刀"
+base_damage  = 186.0
+attack_coeff = 4.17500
+weapon_coeff = 1.0

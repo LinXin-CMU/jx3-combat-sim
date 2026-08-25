@@ -1,0 +1,22 @@
+# Copy this file to frpc.toml and keep the real file outside version control.
+# 203.0.113.0/24 is reserved for documentation and is not a real server.
+
+serverAddr = "203.0.113.10"
+serverPort = 7000
+
+# Generate a high-entropy value and configure the same value on frps.
+auth.token = "replace-with-a-random-secret"
+
+transport.tls.enable = true
+transport.tcpMux = false
+
+[[proxies]]
+name = "jx3-router"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 3006
+
+# Treat this as a private origin port behind an HTTPS reverse proxy. Do not
+# present an unauthenticated bare-HTTP port as the public portfolio endpoint.
+remotePort = 8080
+

@@ -1,0 +1,14 @@
+id   = 13039
+name = "卷雪刀"
+passive = true
+description = "苍云默认平砍。每 1.5s（受加速影响）造成武器伤害+外功伤害；释放主动技能时启动循环，不被打断"
+
+# 基础间隔 24帧 = 1.5s（0加速档）；attack_coeff 在 fill_event_damage 中由 juan_xue.rs 按当前加速实时算
+# attack_coeff = (实际帧数 - 1) × 0.00625（24帧→0.14375, 23→0.1375, ..., 19→0.11875）
+
+[[ranks]]
+rank         = 1
+name         = "卷雪刀"
+base_damage  = 0
+attack_coeff = 0.14375     # 占位（24帧档）；实际由脚本动态覆盖
+weapon_coeff = 1.0

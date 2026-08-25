@@ -1,0 +1,20 @@
+﻿id   = 37239
+name = "麾远"
+icon = "https://icon.jx3box.com/icon/21953.png"
+passive = true
+
+# 奇穴(八~十重·麾远)触发
+# [斩刀]命中时追加一段伤害，锁足变眩晕
+# 眩晕成功则返还15怒 + 6秒斩刀调息
+# 被动触发，无 GCD / 无 CD
+
+requires_talent = 37239
+
+[[ranks]]
+rank           = 1
+name           = "麾远"
+icon = "https://icon.jx3box.com/icon/21953.png"
+base_damage    = 82.5      # (80 + 85) / 2
+attack_coeff   = 2.97500
+weapon_coeff   = 1.0
+defense_ignore = 0.3

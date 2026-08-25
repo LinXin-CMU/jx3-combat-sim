@@ -1,0 +1,27 @@
+id   = 13042
+name = "无惧"
+
+# 生存技 / CD: 60秒
+# 解除所有控制，免疫控制及恐惧6秒
+# 分山劲额外受伤-30%持续6秒
+# 奇穴[鸿烈] 对8尺范围最多6目标造成伤害
+
+[[cooldowns]]
+cd_id    = "cd_无惧"
+duration = 60.0
+mode     = "check_and_trigger"
+haste    = false
+
+[[ranks]]
+rank         = 1
+name         = "无惧"
+base_damage  = 0
+attack_coeff = 0
+weapon_coeff = 0
+
+[[ranks]]
+rank         = 2
+name         = "无惧·鸿烈"
+base_damage  = 1525.0     # (1500 + 1550) / 2
+attack_coeff = 1.5625
+weapon_coeff = 0

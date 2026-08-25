@@ -1,0 +1,22 @@
+id   = 13051
+name = "盾回"
+description = "擎刀 / 收回盾牌 / 切换擎盾 / 获得坚定(受伤降低10%持续8秒)"
+
+# 姿态: 擎刀 / GCD: 无 / 保护CD: 1秒
+# 收回盾牌，切换[擎盾]姿态，获得[坚定]（受伤降低10%，持续8秒）
+
+stance        = "blade"
+stance_change = "shield"
+
+[[cooldowns]]
+cd_id    = "protect_盾飞盾回"
+duration = 1.0
+mode     = "check_and_trigger"
+haste    = false
+
+[[ranks]]
+rank         = 1
+name         = "盾回"
+base_damage  = 0
+attack_coeff = 0
+weapon_coeff = 0

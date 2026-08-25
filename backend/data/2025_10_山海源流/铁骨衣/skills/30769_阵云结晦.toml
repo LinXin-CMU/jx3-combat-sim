@@ -1,0 +1,49 @@
+id   = 30769
+name = "阵云结晦"
+description = "奇穴 / CD45秒 / 三段招式 / 无视100%防御 / 非侠士伤害+200%"
+
+# 奇穴技能（第七重·阵云结晦）/ 姿态: 擎刀 / CD: 45秒 / GCD: 1.5秒
+# 3段招式，无视目标100%外功防御等级，非侠士伤害+200%
+# 一段：6尺矩形5目标，延迟0.625秒命中，每目标回15怒
+# 需进入战斗后施展才能获得后续段BUFF
+
+stance          = "not_wall"
+rage_gain       = 15
+requires_talent = 30769
+max_charges     = 2
+charge_cd       = 45.0
+
+[[cooldowns]]
+cd_id    = "gcd_1.5"
+duration = 1.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_1.0"
+duration = 1.0
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_0.5"
+duration = 0.5
+mode     = "check_and_trigger"
+haste    = true
+
+# 宏只需写一行"阵云结晦"，后端按连招状态自动重定向到二/三段
+[[combo_follow]]
+requires_combo = "阵云_3"
+skill_id = 30856
+
+[[combo_follow]]
+requires_combo = "阵云_2"
+skill_id = 30855
+
+[[ranks]]
+rank           = 1
+name           = "阵云结晦"
+base_damage    = 73.0      # (72 + 74) / 2
+attack_coeff   = 3.67500
+weapon_coeff   = 1.0
+defense_ignore = 1.0

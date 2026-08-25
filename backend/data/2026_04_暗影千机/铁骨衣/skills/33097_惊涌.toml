@@ -1,0 +1,16 @@
+id   = 33097
+name = "惊涌"
+passive = true
+description = "苍雪刀触发惊涌伤害；怒气段加成由脚本通过 emit_with_recipes 附加"
+
+# 奇穴(惊涌 36205)触发；脚本控制 name = "惊涌·N怒"
+# 所有怒气段使用相同基础系数（25 怒值），加成走秘籍
+
+requires_talent = 36205
+
+[[ranks]]
+rank         = 1
+name         = "惊涌"
+base_damage  = 87.5
+attack_coeff = 7.8975
+weapon_coeff = 1.0

@@ -1,0 +1,42 @@
+id   = 25213
+name = "断马摧城"
+icon = "https://icon.jx3box.com/icon/14087.png"
+description = "擎盾 / 奇穴 / 30秒CD / 举盾锤击范围目标，造成高额外功伤害并回复20怒"
+
+stance          = "shield"
+rage_cost       = 0
+rage_gain       = 20
+requires_talent = 25213
+
+[[cooldowns]]
+cd_id    = "gcd_1.0"
+duration = 1.0
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_0.5"
+duration = 0.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_1.5"
+duration = 1.5
+mode     = "check_only"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "cd_断马摧城"
+duration = 30.0
+mode     = "check_and_trigger"
+haste    = false
+
+[[ranks]]
+rank         = 1
+name         = "断马摧城"
+icon = "https://icon.jx3box.com/icon/14087.png"
+base_damage  = 61
+# 2026 正式服：铁骨衣系数 = 16.78125 × 0.5
+attack_coeff = 8.390625
+weapon_coeff = 0

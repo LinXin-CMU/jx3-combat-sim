@@ -1,0 +1,20 @@
+id   = 13180
+name = "收盾"
+
+# 解除盾墙状态
+
+stance        = "wall"
+stance_change = "shield"
+
+[[cooldowns]]
+cd_id    = "gcd_1.5"
+duration = 1.5
+mode     = "check_only"
+haste    = true
+
+[[ranks]]
+rank         = 1
+name         = "收盾"
+base_damage  = 0
+attack_coeff = 0
+weapon_coeff = 0

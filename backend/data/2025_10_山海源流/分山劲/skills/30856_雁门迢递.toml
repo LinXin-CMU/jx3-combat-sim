@@ -1,0 +1,40 @@
+id   = 30856
+name = "雁门迢递"
+description = "阵云结晦三段 / 20尺冲刺 / 回复15怒气 / 无视100%防御"
+
+# 阵云结晦三段 / 距离20尺冲刺（120°） / GCD: 1.5秒
+# 冲向目标位置后对30尺内目标造成伤害，回15怒
+# 无视100%外功防御，非侠士+200%
+# 冲刺结束后才生效，切换目标/目标无敌可能丢失伤害
+
+stance          = "not_wall"
+rage_gain       = 15
+requires_talent = 30769
+
+[[cooldowns]]
+cd_id    = "gcd_1.5"
+duration = 1.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_1.0"
+duration = 1.0
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_0.5"
+duration = 0.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[ranks]]
+rank           = 1
+name           = "雁门迢递"
+requires_combo = "阵云_3"
+base_damage    = 124.5     # (120 + 129) / 2
+attack_coeff   = 5.51250
+weapon_coeff   = 1.0
+defense_ignore = 1.0
+# 破招段独立显示为 30856901 破·雁门迢递

@@ -1,0 +1,7 @@
+# PyTorch（CUDA 版按系统装 https://pytorch.org/get-started/locally/）
+torch>=2.1
+numpy>=1.24
+requests>=2.31
+gymnasium>=0.29
+tensorboard>=2.15
+tqdm>=4.66

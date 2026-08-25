@@ -1,0 +1,25 @@
+id   = 13152
+name = "隐刀"
+description = "奇穴 / 擎刀 / 消耗5~15怒气 / 闪刀命中虚弱/流血后可连续施展 / 免疫1秒"
+
+# 奇穴技能（第三重·隐刀）
+# 消耗 5~15 怒气（逐渐递增）/ "闪刀"命中虚弱/流血目标后10秒内连续施展
+# 冲刺穿过目标，免疫伤害和控制1秒
+
+stance          = "blade"
+rage_cost       = 5
+requires_talent = 13152
+
+[[cooldowns]]
+cd_id    = "gcd_0.5"
+duration = 0.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[ranks]]
+rank           = 1
+name           = "隐刀"
+requires_combo = "闪刀_后续"
+base_damage  = 31.5       # (30 + 33) / 2
+attack_coeff = 0.3062
+weapon_coeff = 1.0

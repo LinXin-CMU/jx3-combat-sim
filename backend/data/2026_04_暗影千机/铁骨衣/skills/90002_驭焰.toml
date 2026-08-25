@@ -1,0 +1,24 @@
+id   = 90002
+name = "驭焰"
+icon = "https://icon.jx3box.com/icon/23383.png"
+description = "橙武 / CD50秒 / 回复70怒气 / 获得橙武buff4秒"
+
+# 橙武主动技能 / 无GCD / CD50秒
+# 回复70点怒气
+# 获得[橙武]buff 4秒：擎刀绝刀免费+伤害30%，擎盾盾压无调息+怒气翻倍
+
+rage_gain = 70
+
+[[cooldowns]]
+cd_id    = "cd_天下宏愿"
+duration = 50.0
+mode     = "check_and_trigger"
+haste    = false
+
+[[ranks]]
+rank         = 1
+name         = "驭焰"
+icon = "https://icon.jx3box.com/icon/23383.png"
+base_damage  = 0.0
+attack_coeff = 0.0
+weapon_coeff = 0.0

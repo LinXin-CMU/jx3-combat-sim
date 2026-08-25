@@ -1,0 +1,10 @@
+id   = 34674901
+name = "破·麟光甲寒"
+passive = true
+damage_kind = "surplus_only"
+description = "麟光甲寒附带的破招伤害（独立显示）"
+
+[[ranks]]
+rank          = 1
+name          = "破·麟光甲寒"
+surplus_coeff = 1.0515

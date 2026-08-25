@@ -1,0 +1,11 @@
+id   = 13042901
+name = "鸿烈"
+passive = true
+description = "奇穴鸿烈触发的外功伤害段（由无惧 13042 触发）。8尺 AoE，最多 6 目标；此处只模拟单目标。"
+
+[[ranks]]
+rank         = 1
+name         = "鸿烈"
+base_damage  = 1525.0     # (1500 + 1550) / 2
+attack_coeff = 1.5625
+weapon_coeff = 0

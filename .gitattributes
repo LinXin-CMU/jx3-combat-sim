@@ -1,0 +1,36 @@
+* text=auto
+
+.gitattributes text eol=lf
+.gitignore text eol=lf
+.env.example text eol=lf
+
+# Cross-platform source and data files
+*.rs text eol=lf
+*.toml text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.py text eol=lf
+*.sh text eol=lf
+*.html text eol=lf
+*.js text eol=lf
+*.css text eol=lf
+*.tsv text eol=lf
+*.tab text eol=lf
+*.txt text eol=lf
+*.lock text eol=lf
+
+# Imported game-data tables use tab-padded columns by design.
+backend/data/equip/*.tab -whitespace
+backend/data/equip/*.txt -whitespace
+backend/data/equip/*.tsv -whitespace
+
+# Native Windows entrypoints
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+
+# Binary assets
+*.ico binary
+*.pdf binary
+*.zip binary
+*.exe binary
+*.pt binary

@@ -1,0 +1,16 @@
+id   = 33097
+name = "血誓"
+passive = true
+description = "苍雪刀触发血誓伤害；怒气段加成由 xue_shi.rs 脚本通过 emit_with_recipes 附加 99135-99165"
+
+# 奇穴(八~十重·血誓 32618)触发；脚本控制 name = "血誓·N怒"
+# 所有怒气段使用相同基础系数（25 怒值），加成走秘籍
+
+requires_talent = 32618
+
+[[ranks]]
+rank         = 1
+name         = "血誓"
+base_damage  = 87.5
+attack_coeff = 1.12500
+weapon_coeff = 1.0

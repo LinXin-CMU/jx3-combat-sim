@@ -1,0 +1,13 @@
+id   = 34714
+name = "业火焚城"
+description = "麟光甲寒触发3次后的大伤害（分山劲+42%，2026 正式服 −20%）"
+passive = true
+
+requires_talent = 34912
+
+[[ranks]]
+rank         = 1
+name         = "业火焚城"
+base_damage  = 407
+attack_coeff = 24.85
+weapon_coeff = 0

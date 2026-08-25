@@ -1,0 +1,39 @@
+﻿id   = 13458
+name = "盾墙下盾舞"
+
+icon = "https://icon.jx3box.com/icon/6302.png"
+# 盾墙状态下施展，可移动释放
+# 每0.5秒对8尺内最多6目标造成伤害，持续5秒
+# 不回复怒气
+
+stance = "wall"
+
+channel_frame    = 80       # 5秒 = 80帧
+channel_interval = 8        # 0.5秒 = 8帧
+first_tick_frame = 8        # 首跳正常间隔（0.5秒）
+
+[[cooldowns]]
+cd_id    = "gcd_1.0"
+duration = 1.0
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_0.5"
+duration = 0.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_1.5"
+duration = 1.5
+mode     = "check_only"
+haste    = true
+
+[[ranks]]
+rank         = 1
+name         = "盾墙下盾舞·每跳"
+icon = "https://icon.jx3box.com/icon/6302.png"
+base_damage  = 340.0      # (325 + 355) / 2
+attack_coeff = 0.97500
+weapon_coeff = 1.0

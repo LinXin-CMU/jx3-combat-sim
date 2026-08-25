@@ -1,0 +1,45 @@
+﻿id   = 13054
+name = "斩刀"
+icon = "https://icon.jx3box.com/icon/6318.png"
+description = "擎刀 / CD10秒 / 消耗15怒气 / 20尺突进 / 移除虚弱添加流血 / 锁足3秒"
+
+# 姿态: 擎刀 / 距离: 20尺突进 / CD: 10秒 / GCD: 1.5秒
+# 消耗 15 怒气，冲向目标，使目标下马并锁足 3 秒
+# 命中有[虚弱]或[流血]目标时，移除[虚弱]，附加[流血]
+# 附带破招伤害（break_coeff × 破招值），当前公式暂不计入
+
+stance    = "blade"
+rage_cost = 15
+
+[[cooldowns]]
+cd_id    = "gcd_1.5"
+duration = 1.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_1.0"
+duration = 1.0
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_0.5"
+duration = 0.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "cd_斩刀"
+duration = 10.0
+mode     = "check_and_trigger"
+haste    = false
+
+[[ranks]]
+rank         = 1
+name         = "斩刀"
+icon = "https://icon.jx3box.com/icon/6318.png"
+base_damage  = 233.0      # (228 + 238) / 2
+attack_coeff = 7.48125
+weapon_coeff = 1.0
+# 破招段独立显示为 13054901 破·斩刀

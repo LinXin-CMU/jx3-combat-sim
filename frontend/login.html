@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>苍云器灵 · 登入</title>
+<style>
+  :root{
+    --bg:#16130e; --card:#211c14; --gold:#c9a84a; --gold-dim:#9c8338;
+    --text:#e8e0cf; --muted:#9c917c; --line:#3a3225; --err:#e06a5a;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; font-family:"Microsoft YaHei","PingFang SC",system-ui,sans-serif;
+    background:radial-gradient(1200px 600px at 50% -10%,#2a2316 0%,var(--bg) 60%);
+    color:var(--text); display:flex; align-items:center; justify-content:center; padding:20px;
+  }
+  .card{
+    width:360px; max-width:100%; background:var(--card); border:1px solid var(--line);
+    border-radius:14px; padding:30px 28px; box-shadow:0 18px 50px rgba(0,0,0,.5);
+  }
+  .brand{text-align:center; margin-bottom:6px}
+  .brand .cn{font-size:26px; font-weight:700; letter-spacing:4px; color:var(--gold)}
+  .brand .en{font-size:12px; letter-spacing:3px; color:var(--gold-dim); margin-top:4px}
+  .sub{text-align:center; color:var(--muted); font-size:12px; margin:8px 0 22px}
+  label{display:block; font-size:13px; color:var(--muted); margin:14px 0 6px}
+  input{
+    width:100%; padding:11px 12px; background:#191510; border:1px solid var(--line);
+    border-radius:8px; color:var(--text); font-size:15px; outline:none; transition:border-color .15s;
+  }
+  input:focus{border-color:var(--gold-dim)}
+  .hint{font-size:11px; color:var(--muted); margin-top:6px; line-height:1.5}
+  button{
+    width:100%; margin-top:22px; padding:12px; background:linear-gradient(180deg,var(--gold),var(--gold-dim));
+    border:none; border-radius:8px; color:#1c170d; font-size:15px; font-weight:700;
+    letter-spacing:2px; cursor:pointer; transition:filter .15s;
+  }
+  button:hover{filter:brightness(1.08)}
+  button:disabled{opacity:.6; cursor:not-allowed}
+  .err{color:var(--err); font-size:13px; min-height:18px; margin-top:12px; text-align:center}
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="brand">
+      <div class="cn">苍云器灵</div>
+      <div class="en">JX3 CANGYUN COMBAT SIM</div>
+    </div>
+    <div class="sub">分山劲 / 铁骨衣 · 战斗循环模拟器</div>
+
+    <form id="f" autocomplete="off">
+      <label for="u">用户名</label>
+      <input id="u" name="username" type="text" placeholder="给自己起个名字" maxlength="40" required>
+      <label for="p">密码</label>
+      <input id="p" name="password" type="password" placeholder="首次登入填发布密码 / 已设专属密码填它">
+      <div class="hint">首次用某用户名登入需填<b>发布密码</b>创建账号；之后同名再登入：设过专属密码就填它，没设则免密。</div>
+
+      <label for="sp">设置专属密码 <span style="color:var(--muted);font-weight:400">（可选）</span></label>
+      <input id="sp" name="set_password" type="password" placeholder="想保护账号就填，留空＝免密">
+      <div class="hint">填了之后，以后用这个用户名登入就必须输入它（防止别人冒用你的名字）。也可日后登入时再设。</div>
+
+      <div class="err" id="err"></div>
+      <button id="btn" type="submit">登 入</button>
+    </form>
+  </div>
+
+<script>
+  // 已登入则直接进入
+  fetch('/api/auth/me').then(r=>r.json()).then(d=>{
+    if(d && d.authed){ location.replace('/'); }
+  }).catch(()=>{});
+
+  const f = document.getElementById('f');
+  const err = document.getElementById('err');
+  const btn = document.getElementById('btn');
+
+  f.addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    err.textContent = '';
+    const username = document.getElementById('u').value.trim();
+    const password = document.getElementById('p').value;
+    const setPassword = document.getElementById('sp').value;
+    if(!username){ err.textContent='请填写用户名'; return; }
+    btn.disabled = true; btn.textContent = '登入中…';
+    try{
+      const r = await fetch('/api/auth/login', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({username, password, set_password: setPassword || null})
+      });
+      const d = await r.json().catch(()=>({}));
+      if(r.ok && d.ok){
+        location.replace('/');
+      }else{
+        err.textContent = d.error || ('登入失败 ('+r.status+')');
+        btn.disabled = false; btn.textContent = '登 入';
+      }
+    }catch(ex){
+      err.textContent = '网络错误，请重试';
+      btn.disabled = false; btn.textContent = '登 入';
+    }
+  });
+</script>
+</body>
+</html>

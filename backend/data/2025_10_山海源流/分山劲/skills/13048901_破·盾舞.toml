@@ -1,0 +1,10 @@
+id   = 13048901
+name = "破·盾舞"
+passive = true
+damage_kind = "surplus_only"
+description = "盾舞每跳附带的破招伤害（独立显示）"
+
+[[ranks]]
+rank          = 1
+name          = "破·盾舞"
+surplus_coeff = 0.9462

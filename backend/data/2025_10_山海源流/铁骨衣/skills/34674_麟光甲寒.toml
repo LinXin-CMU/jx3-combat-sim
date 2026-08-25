@@ -1,0 +1,17 @@
+id   = 34674
+name = "麟光甲寒"
+passive = true
+
+# [麟光玄甲]期间施展苍雪刀招式触发，消耗一层麟光玄甲
+# 被动触发，无 GCD / 无 CD
+# 对非侠士目标伤害额外+150%
+
+requires_talent = 34912
+
+[[ranks]]
+rank         = 1
+name         = "麟光甲寒"
+base_damage  = 87.5       # (80 + 95) / 2
+attack_coeff = 3.06250
+weapon_coeff = 1.0
+# 破招段独立显示为 34674901 破·麟光

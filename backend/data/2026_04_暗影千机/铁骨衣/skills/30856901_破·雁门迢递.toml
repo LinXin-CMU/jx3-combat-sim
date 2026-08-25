@@ -1,0 +1,11 @@
+id   = 30856901
+name = "破·雁门迢递"
+passive = true
+damage_kind = "surplus_only"
+description = "雁门迢递附带的破招伤害（独立显示）"
+
+[[ranks]]
+rank           = 1
+name           = "破·雁门迢递"
+surplus_coeff  = 11.98997
+defense_ignore = 1.0      # 阵云破招无视100%外功防御

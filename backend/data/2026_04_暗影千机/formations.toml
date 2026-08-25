@@ -1,0 +1,479 @@
+# 阵法（暗影千机 2026.04）
+#
+# 每场战斗最多开一个阵（GameMechanics 单选）
+# - self 变体：当前心法 == owner_school 时显示，前 1-3 重永久属性走 effects；
+#              4-6 重触发型走拟真挂载（jue_dao.rs / equip_effects::on_post_cast / on_hit.rs）
+# - other 变体：当前心法 != owner_school 时显示，effects 是 jx3dps 已覆盖率折算的"假永久"数值
+# - any 变体：通用阵，无所属心法
+#
+# 数据来源：
+#  - description: ui/Scheme/Case/skill.txt 各阵法"描述技能"原文（游戏内 1-6 重）
+#  - 永久 / 折算数值: jx3dps-online-public src/数据/阵眼/
+#  - 4-6 重触发型 BuffDef: 本地 buff.txt + Buff.tab
+#
+# AttribField 单位约定（与 buffs.rs 一致）：
+#  - *Base：直接数值或等级加算（如 SurplusValueBase 2667 = +2667 破招值）
+#  - *Percent：1024 制百分比加成（如 PhysicsAttackPowerPercent 51 = +5%）
+#  - PhysicsCriticalStrikePercent：1024 制（jx3dps 0.03 = round(0.03 × 1024) = 31）
+#  - ParryValuePercent：10000 制（招架率 +N/10000；jx3dps 0.03 = 300）
+#  - VitalityBasePercentAdd：1024 制（jx3dps 0.09 = round(0.09 × 1024) = 92）
+#  - WeaponDamageBase：直接数值（武器伤害）
+
+# ─────────────────────────────────────────────────────────────────────────
+# 苍云阵（外功攻击阵 / 分山劲）
+# ─────────────────────────────────────────────────────────────────────────
+
+[[formations]]
+key = "cangyun_self"
+formation_id = "cangyun"
+display_name = "苍云阵"
+formation_full_name = "锋凌横绝阵"
+buff_id = 8401
+owner_school = "分山劲"
+applicable_when = "self"
+category = "外功攻击阵"
+icon = "https://icon.jx3box.com/icon/6446.png"
+permanent_effects = [
+    ["PhysicsCriticalStrikePercent", 30.72],
+    ["StrainBasePercentAdd",         20.0],
+    ["PhysicsOvercomePercent",      154.0],
+]
+description = """
+锋凌横绝阵 — 边服胡尘起，长安汉将飞。
+一重：阅历提高5%，声望提高5%，外功会心几率提高3%。
+二重：无双等级提高2%。
+三重：化劲率提高3%。
+四重：外功招式会心则阵眼外功破防提高15%。
+五重：阵眼施展"绝刀"，使小队成员外功会心效果提高2%，最多叠加5层，持续30秒。
+六重：小队成员被击则阵眼获得外功基础攻击力提高10%，持续5秒。"""
+
+[[formations]]
+key = "cangyun_other"
+formation_id = "cangyun"
+display_name = "苍云阵"
+formation_full_name = "锋凌横绝阵"
+buff_id = 8401
+owner_school = "分山劲"
+applicable_when = "other"
+category = "外功攻击阵"
+icon = "https://icon.jx3box.com/icon/6446.png"
+public_effects_other = [
+    ["PhysicsCriticalStrikePercent",   30.72],
+    ["StrainBasePercentAdd",           20.0],
+    ["PhysicsCriticalDamagePowerPercent", 102.4],
+]
+description = """
+锋凌横绝阵 — 边服胡尘起，长安汉将飞。
+一重：阅历提高5%，声望提高5%，外功会心几率提高3%。
+二重：无双等级提高2%。
+三重：化劲率提高3%。
+四重：外功招式会心则阵眼外功破防提高15%。
+五重：阵眼施展"绝刀"，使小队成员外功会心效果提高2%，最多叠加5层，持续30秒。
+六重：小队成员被击则阵眼获得外功基础攻击力提高10%，持续5秒。"""
+
+# ─────────────────────────────────────────────────────────────────────────
+# 铁骨阵（T 心法阵 / 铁骨衣）
+# ─────────────────────────────────────────────────────────────────────────
+
+[[formations]]
+key = "tiegu_self"
+formation_id = "tiegu"
+display_name = "铁骨阵"
+formation_full_name = "临川列山阵"
+buff_id = 8337
+owner_school = "铁骨衣"
+applicable_when = "self"
+category = "T 心法阵"
+icon = "https://icon.jx3box.com/icon/6447.png"
+permanent_effects = [
+    ["VitalityBasePercentAdd", 92.0],     # +9% 体质（叠满 3 层）→ 经铁骨气劲转化为攻击/破防
+    ["ParryValuePercent",     300.0],     # +3% 招架率
+    ["ParryValueBase",      20000.0],     # +20000 拆招值
+]
+description = """
+临川列山阵 — 荒裔一戎衣，灵台凯歌入。
+一重：阅历提高5%，声望提高5%，体质提高3%。
+二重：招架率提高3%，拆招值提高20000点。
+三重：受到的伤害降低10%，气血最大值提高10%。
+四重：被攻击则阵眼回复5点格挡值。
+五重：阵眼施展"盾猛"则小队成员的被疗伤成效提高10%。
+六重：若小队成员重伤，则回复20点格挡值。"""
+
+[[formations]]
+key = "tiegu_other"
+formation_id = "tiegu"
+display_name = "铁骨阵"
+formation_full_name = "临川列山阵"
+buff_id = 8337
+owner_school = "铁骨衣"
+applicable_when = "other"
+category = "T 心法阵"
+icon = "https://icon.jx3box.com/icon/6447.png"
+public_effects_other = []
+description = """
+临川列山阵 — 荒裔一戎衣，灵台凯歌入。
+一重：阅历提高5%，声望提高5%，体质提高3%。
+二重：招架率提高3%，拆招值提高20000点。
+三重：受到的伤害降低10%，气血最大值提高10%。
+四重：被攻击则阵眼回复5点格挡值。
+五重：阵眼施展"盾猛"则小队成员的被疗伤成效提高10%。
+六重：若小队成员重伤，则回复20点格挡值。
+（防御阵：DPS 心法无铁骨气劲转化，对输出无收益）"""
+
+# ─────────────────────────────────────────────────────────────────────────
+# 11 个外功攻击阵 other（项目当前心法都不属于这些 owner_school）
+# ─────────────────────────────────────────────────────────────────────────
+
+[[formations]]
+key = "badao_other"
+formation_id = "badao"
+display_name = "霸刀阵"
+formation_full_name = "霜岚洗锋阵"
+buff_id = 10953
+owner_school = "北傲诀"
+applicable_when = "other"
+category = "外功攻击阵"
+icon = "https://icon.jx3box.com/icon/8426.png"
+public_effects_other = [
+    ["PhysicsAttackPowerPercent",   50.0],
+    ["StrainBasePercentAdd",        20.0],
+    ["PhysicsOvercomePercent",     102.0],
+    ["PhysicsCriticalStrikePercent", 51.2],
+]
+description = """
+霜岚洗锋阵 — 焕光焚炉混灵煞，金英霜岚洗神锋。
+一重：阅历提高5%，声望提高5%，外功基础攻击提高5%。
+二重：无双提高2%。
+三重：外功破防等级提高10%。
+四重：小队成员招式会心则使阵眼回复1点能量。
+五重：施展耗能量技能，则使小队成员会心几率提高5%，持续4秒。
+六重：小队成员受到会心攻击则使阵眼下一招式会心几率提高20%，持续4秒。"""
+
+[[formations]]
+key = "penglai_other"
+formation_id = "penglai"
+display_name = "蓬莱阵"
+formation_full_name = "墟海引归阵"
+buff_id = 14072
+owner_school = "凌海诀"
+applicable_when = "other"
+category = "外功攻击阵"
+icon = "https://icon.jx3box.com/icon/11194.png"
+public_effects_other = [
+    ["PhysicsCriticalStrikePercent", 30.72],
+    ["PhysicsAttackPowerPercent",   133.0],
+    ["PhysicsOvercomePercent",      102.0],
+]
+description = """
+墟海引归阵
+一重：阅历提高5%，声望提高5%，外功会心几率提高3%。
+二重：外功基础攻击力提高13%。
+三重：招式释放距离增加1尺，外功破防等级提高10%。
+四重：小队成员外功招式会心则使阵眼外功基础攻击力提高7%，持续4秒。
+五重：施展"九霄踏云步"套路下招式，则小队移动速度提高20%，持续5秒。
+六重：小队成员被会心攻击则阵眼外功会心效果提高20%，持续5秒。"""
+
+[[formations]]
+key = "lingxue_other"
+formation_id = "lingxue"
+display_name = "凌雪阵"
+formation_full_name = "龙皇雪风阵"
+buff_id = 15955
+owner_school = "隐龙诀"
+applicable_when = "other"
+category = "外功攻击阵"
+icon = "https://icon.jx3box.com/icon/12130.png"
+public_effects_other = [
+    ["PhysicsAttackPowerPercent",      107.12],  # 50 + 102×0.56（青山覆盖率）
+    ["PhysicsCriticalStrikePercent",    30.72],
+    ["PhysicsCriticalDamagePowerPercent", 153.6],
+]
+description = """
+龙皇雪风阵
+一重：阅历提高5%，声望提高5%，外功基础攻击力提高5%。
+二重：外功会心几率提高3%。
+三重：移动速度提高10%，外功会心效果提高15%。
+四重：招式会心则阵眼外功会心效果提高10%，持续4秒。
+五重：施展"乱天狼"则使小队成员外功基础攻击力提高10%，持续5秒。
+六重：小队成员被会心攻击则阵眼外功会心提高10%，持续5秒。"""
+
+[[formations]]
+key = "daozong_other"
+formation_id = "daozong"
+display_name = "刀宗阵"
+formation_full_name = "横云破锋阵"
+buff_id = 24577
+owner_school = "孤锋诀"
+applicable_when = "other"
+category = "外功攻击阵"
+icon = "https://icon.jx3box.com/icon/18185.png"
+public_effects_other = [
+    ["SurplusValueBase",         2667.0],
+    ["PhysicsOvercomePercent",    256.0],
+    ["PhysicsAttackPowerPercent",  50.0],
+]
+description = """
+横云破锋阵
+一重：阅历提高5%，声望提高5%，外功基础攻击提高5%。
+二重：破招点数提高2667点。
+三重：外功破防等级提高25%。
+四重：小队成员招式会心则使阵眼会心效果提高10%。
+五重：阵眼施展"灭影追风"时，小队成员伤害将无视目标10%减伤效果。
+六重：小队成员重伤时，阵眼将立刻清除"观风寻隙"发现弱点的间隔时间，并获得100点"锐意"。"""
+
+[[formations]]
+key = "wanling_other"
+formation_id = "wanling"
+display_name = "万灵阵"
+formation_full_name = "苍梧引灵阵"
+buff_id = 27235
+owner_school = "山海心诀"
+applicable_when = "other"
+category = "外功攻击阵"
+icon = "https://icon.jx3box.com/icon/20426.png"
+public_effects_other = [
+    ["PhysicsCriticalStrikePercent",    30.72],
+    ["StrainBasePercentAdd",            20.0],
+    ["AllDamageAddPercent",             62.0],
+    ["PhysicsCriticalDamagePowerPercent", 147.456],
+]
+description = """
+苍梧引灵阵
+一重：阅历提高5%，声望提高5%，全会心提高3%。
+二重：无双提高2%。
+三重：造成伤害提高6%。
+四重：阵眼消耗一枚唤灵印时获得1%受到伤害降低效果，最多6层，持续10秒。
+五重：阵眼施展"白羽流星"强化招式时，使小队成员会心效果提高15%，持续6秒。
+六重：若重伤目标，则阵眼回复30%气血值。"""
+
+[[formations]]
+key = "jianchun_other"
+formation_id = "jianchun"
+display_name = "剑纯阵"
+formation_full_name = "北斗七星阵"
+buff_id = 946
+owner_school = "太虚剑意"
+applicable_when = "other"
+category = "外功攻击阵"
+icon = "https://icon.jx3box.com/icon/1798.png"
+public_effects_other = [
+    ["PhysicsCriticalStrikePercent",    77.824],
+    ["StrainBasePercentAdd",            20.0],
+    ["PhysicsCriticalDamagePowerPercent", 153.6],
+]
+description = """
+北斗七星阵
+一重：阅历提高5%，声望提高5%，外功会心几率提高3%。
+二重：无双提高2%。
+三重：外功会心效果等级提高15%。
+四重：外功招式会心则可使阵眼额外获得一格气。
+五重：阵眼施展续气招式，则小队成员外功会心几率提高1%，最多叠加五层。
+六重：被会心攻击则可使阵眼外功基础攻击力提高20%，持续8秒。"""
+
+[[formations]]
+key = "jingyu_other"
+formation_id = "jingyu"
+display_name = "鲸鱼阵"
+formation_full_name = "流星赶月阵"
+buff_id = 3302
+owner_school = "惊羽诀"
+applicable_when = "other"
+category = "外功攻击阵"
+icon = "https://icon.jx3box.com/icon/3144.png"
+public_effects_other = [
+    ["StrainBasePercentAdd",         20.0],
+    ["PhysicsOvercomePercent",      205.0],
+    ["PhysicsCriticalStrikePercent", 51.2],
+]
+description = """
+流星赶月阵
+一重：阅历提高5%，声望提高5%，力道提高3%。
+二重：无双提高2%。
+三重：外功破防等级提高20%。
+四重：外功招式会心则使阵眼恢复10点神机值。
+五重：阵眼施展"追命箭"，则小队成员外功会心几率提高5%，持续10秒。
+六重：若目标重伤，则阵眼下一个伤害招式会心率提高20%，并击倒目标。"""
+
+[[formations]]
+key = "gaibang_other"
+formation_id = "gaibang"
+display_name = "丐帮阵"
+formation_full_name = "降龙伏虎阵"
+buff_id = 6340
+owner_school = "笑尘诀"
+applicable_when = "other"
+category = "外功攻击阵"
+icon = "https://icon.jx3box.com/icon/4612.png"
+public_effects_other = [
+    ["PhysicsAttackPowerPercent",   50.0],
+    ["PhysicsOvercomePercent",     178.5],
+]
+description = """
+降龙伏虎阵
+一重：阅历提高5%，声望提高5%，外功基础攻击提高5%。
+二重：外功破防提高10%。
+三重：移动速度提高5%。
+四重：招式会心则阵眼外功破防值提高30%。
+五重：阵眼施展"龙战于野"，则外功破防值提高2980点，最多叠5层，持续30秒。
+六重：小队成员被会心攻击则可使阵眼外功攻击提高20%。"""
+
+[[formations]]
+key = "cangjian_other"
+formation_id = "cangjian"
+display_name = "藏剑阵"
+formation_full_name = "依山观澜阵"
+buff_id = 1923
+owner_school = "山居剑意"
+applicable_when = "other"
+category = "外功攻击阵"
+icon = "https://icon.jx3box.com/icon/2546.png"
+public_effects_other = [
+    ["PhysicsAttackPowerPercent",       51.0],
+    ["PhysicsCriticalDamagePowerPercent", 204.8],
+    ["WeaponDamageBase",               248.4],
+]
+description = """
+依山观澜阵 — 坐看云出岫，卧听水生波。叶孟秋于藏剑山庄之中体山水之情，悟天地之妙而创出此阵。
+一重：阅历提高5%，声望提高5%，身法提高3%。
+二重：外功基础攻击力提高5%。
+三重：外功会心效果提高20%。
+四重：小队成员外功招式会心则阵眼获得3点剑气值。
+五重：阵眼使用招式"莺鸣柳"则全队武器伤害提高2385点。
+六重：小队成员闪避则阵眼获得外功会心率提高20%，持续5秒。"""
+
+[[formations]]
+key = "tiance_atk_other"
+formation_id = "tiance_atk"
+display_name = "天策阵"
+formation_full_name = "卫公折冲阵"
+buff_id = 929
+owner_school = "傲血战意"
+applicable_when = "other"
+category = "外功攻击阵"
+icon = "https://icon.jx3box.com/icon/1804.png"
+public_effects_other = [
+    ["PhysicsAttackPowerPercent",   75.5],
+    ["PhysicsOvercomePercent",     200.0],
+]
+description = """
+卫公折冲阵
+一重：阅历提高5%，声望提高5%，外功基础攻击力提高5%。
+二重：外功破防提高20%。
+三重：御劲提高3%。
+四重：招式会心攻击则使阵眼力道提高1%，最多叠加五层。
+五重：阵眼施展"撼如雷"，则外功基础攻击力提高5%。
+六重：若重伤，则阵眼招式必会心。"""
+
+[[formations]]
+key = "tianluo_other"
+formation_id = "tianluo"
+display_name = "天罗阵"
+formation_full_name = "千机百变阵"
+buff_id = 3303
+owner_school = "天罗诡道"
+applicable_when = "other"
+category = "外功攻击阵"
+icon = "https://icon.jx3box.com/icon/3152.png"
+public_effects_other = [
+    ["AllShieldIgnorePercent",          52.0],
+    ["PhysicsCriticalDamagePowerPercent", 153.6],
+    ["PhysicsCriticalStrikePercent",    51.2],
+]
+description = """
+千机百变阵 — 千机存妙算，百变恒莫测。
+一重：阅历提高5%，声望提高5%，内功基础攻击提高5%。
+二重：无视目标5%防御等级。
+三重：受到的外功伤害降低5%，会心效果提高15%。
+四重：内功招式会心则使阵眼无双率提高2%。
+五重：施展耗能量技能，则使小队成员会心几率提高5%，持续4秒。
+六重：若重伤，则阵眼移动速度提高50%，化解自身气血最大值50%伤害，持续5秒。"""
+
+# ─────────────────────────────────────────────────────────────────────────
+# 3 个 T 心法阵 other（铁牢/明尊/洗髓）
+# 数据：jx3dps 没列（防御阵对 DPS 无输出收益）；保留 entry 让 UI 显示选项
+# ─────────────────────────────────────────────────────────────────────────
+
+[[formations]]
+key = "tielao_other"
+formation_id = "tielao"
+display_name = "铁牢阵"
+formation_full_name = "九襄地玄阵"
+buff_id = 922
+owner_school = "铁牢律"
+applicable_when = "other"
+category = "T 心法阵"
+icon = "https://icon.jx3box.com/icon/1813.png"
+public_effects_other = []
+description = """
+九襄地玄阵
+一重：阅历提高5%，声望提高5%，体质提高3%。
+二重：外功防御等级提高30%。
+三重：被治疗成效提高5%。
+四重：被攻击则阵眼御劲率提高2%，最多叠加三层。
+五重：阵眼施展"定军"，则小队成员可获得无威胁气劲。
+六重：若重伤，则阵眼重置"疾如风"调息时间。
+（防御阵：DPS 心法无铁牢气劲转化，对输出无收益）"""
+
+[[formations]]
+key = "mingzun_other"
+formation_id = "mingzun"
+display_name = "明尊阵"
+formation_full_name = "无量光明阵"
+buff_id = 4578
+owner_school = "明尊"
+applicable_when = "other"
+category = "T 心法阵"
+icon = "https://icon.jx3box.com/icon/3863.png"
+public_effects_other = []
+description = """
+无量光明阵 — 无量妙境有明尊，光明遍洒三界中。
+一重：阅历提高5%，声望提高5%，体质提高3%。
+二重：闪避几率提高5%。
+三重：受到的伤害降低10%。
+四重：被攻击则阵眼气血最大值提高3%，持续20秒，最多叠加三层。
+五重：阵眼施展"慈悲愿"则小队成员立即回复5%气血最大值。
+六重：若重伤，则阵眼重置"渡厄力"调息时间。
+（防御阵：DPS 心法无明尊气劲转化，对输出无收益）"""
+
+[[formations]]
+key = "xisui_other"
+formation_id = "xisui"
+display_name = "洗髓阵"
+formation_full_name = "金刚伏魔阵"
+buff_id = 913
+owner_school = "洗髓经"
+applicable_when = "other"
+category = "T 心法阵"
+icon = "https://icon.jx3box.com/icon/1811.png"
+public_effects_other = []
+description = """
+金刚伏魔阵
+一重：阅历提高5%，声望提高5%，体质提高3%。
+二重：内功防御等级提高10%。
+三重：被疗伤成效提高5%。
+四重：被攻击则阵眼御劲率提高2%，最多叠加三层。
+五重：阵眼施展"大狮子吼"，小队成员受到伤害降低10%。
+六重：被疗伤则阵眼同时获得疗伤成效的10%。
+（防御阵：DPS 心法无洗髓气劲转化，对输出无收益）"""
+
+# ─────────────────────────────────────────────────────────────────────────
+# 通用阵（无界 / 全心法）
+# ─────────────────────────────────────────────────────────────────────────
+
+[[formations]]
+key = "jianghu_any"
+formation_id = "jianghu"
+display_name = "江湖行侠阵"
+formation_full_name = "江湖行侠阵"
+buff_id = 71338
+owner_school = ""
+applicable_when = "any"
+category = "通用阵"
+icon = "https://icon.jx3box.com/icon/22210.png"
+permanent_effects = [
+    ["StrainBasePercentAdd",  102.0],
+    ["AllDamageAddPercent",    51.0],
+]
+description = """
+江湖行侠阵（无界专属）
+伤害提高5%，无双提高10%，疗伤成效提高5%，阅历提高5%，声望提高5%。"""

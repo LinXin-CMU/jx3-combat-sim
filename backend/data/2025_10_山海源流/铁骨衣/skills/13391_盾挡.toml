@@ -1,0 +1,28 @@
+id   = 13391
+name = "盾挡"
+description = "擎盾 / 消耗 10~100 怒气 / 获得盾挡 buff 11秒，每点体质提高拆招值"
+
+# 防御技 / 怒气越多 buff 等级越高（10/20/.../100 → 1~10级）
+# 拆招值不在本模拟器属性体系内，buff 仅记录用于时间轴显示
+
+stance    = "shield"
+rage_cost = 10                 # 占位，实际由 dun_dang.rs 脚本决定（按当前怒气取最大可消耗段）
+
+[[cooldowns]]
+cd_id    = "gcd_1.5"
+duration = 1.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_0.5"
+duration = 0.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[ranks]]
+rank         = 1
+name         = "盾挡"
+base_damage  = 0
+attack_coeff = 0
+weapon_coeff = 0

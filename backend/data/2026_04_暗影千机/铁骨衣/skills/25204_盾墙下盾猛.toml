@@ -1,0 +1,44 @@
+﻿id   = 25204
+name = "盾墙下盾猛"
+
+icon = "https://icon.jx3box.com/icon/6324.png"
+# 奇穴[扶阵] 盾墙状态下施展
+# 举盾冲刺15尺，击晕路径目标 + 终点6尺范围5目标击倒5秒
+# 回复 15 怒气 / 施展后解除盾墙
+
+stance    = "wall"
+rage_gain = 15
+
+[[cooldowns]]
+cd_id    = "gcd_1.5"
+duration = 1.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_1.0"
+duration = 1.0
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_0.5"
+duration = 0.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[ranks]]
+rank         = 1
+name         = "盾墙下盾猛·路径"
+icon = "https://icon.jx3box.com/icon/6324.png"
+base_damage  = 11.0       # (10 + 12) / 2
+attack_coeff = 1.1250
+weapon_coeff = 0
+
+[[ranks]]
+rank         = 2
+name         = "盾墙下盾猛·终点"
+icon = "https://icon.jx3box.com/icon/6324.png"
+base_damage  = 50.5       # (50 + 51) / 2
+attack_coeff = 1.9375
+weapon_coeff = 1.0

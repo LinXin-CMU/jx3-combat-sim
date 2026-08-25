@@ -1,0 +1,626 @@
+# 秘籍配置（全技能 N 选 4，不可重复）
+#
+# 字段说明：
+#   damage_pct      : atRecipeDamagePercent  仅普通伤害生效
+#   critical_pct    : atRecipePhysicsCriticalPercent  全部伤害生效
+#   crit_eff_pct    : atRecipeCriticalDamagePower  全部伤害生效
+#   surplus_pct     : atSurplusValueAddPercent  仅破招段生效
+#   shield_ignore   : atAllShieldIgnorePercent  全部伤害（按 1024 制）
+#   skill_filter    : 限定生效的 skill_id 列表
+#   hidden          : 不在 UI 显示，由 buff/脚本激活
+
+# ── 劫刀 ────────────────────────────────────────────────────────────
+[[recipes]]
+id = 1001
+skill = "劫刀"
+name = "参悟残页"
+desc = "伤害提高3%"
+damage_pct = 0.03
+skill_filter = [13052]
+
+[[recipes]]
+id = 1002
+skill = "劫刀"
+name = "参悟断篇"
+desc = "伤害提高4%"
+damage_pct = 0.04
+skill_filter = [13052]
+
+[[recipes]]
+id = 1003
+skill = "劫刀"
+name = "参悟绝章"
+desc = "伤害提高5%"
+damage_pct = 0.05
+skill_filter = [13052]
+
+[[recipes]]
+id = 1004
+skill = "劫刀"
+name = "秘诀残页"
+desc = "会心提高2%"
+critical_pct = 0.02
+skill_filter = [13052]
+
+[[recipes]]
+id = 1005
+skill = "劫刀"
+name = "秘诀断篇"
+desc = "会心提高3%"
+critical_pct = 0.03
+skill_filter = [13052]
+
+[[recipes]]
+id = 1006
+skill = "劫刀"
+name = "秘诀绝章"
+desc = "会心提高4%"
+critical_pct = 0.04
+skill_filter = [13052]
+
+[[recipes]]
+id = 1007
+skill = "劫刀"
+name = "注解残页"
+desc = "怒气消耗降低5点"
+
+# ── 斩刀 ────────────────────────────────────────────────────────────
+[[recipes]]
+id = 2001
+skill = "斩刀"
+name = "参悟残页"
+desc = "伤害提高3%"
+damage_pct = 0.03
+skill_filter = [13054, 13054901]
+
+[[recipes]]
+id = 2002
+skill = "斩刀"
+name = "参悟断篇"
+desc = "伤害提高4%"
+damage_pct = 0.04
+skill_filter = [13054, 13054901]
+
+[[recipes]]
+id = 2003
+skill = "斩刀"
+name = "参悟绝章"
+desc = "伤害提高5%"
+damage_pct = 0.05
+skill_filter = [13054, 13054901]
+
+[[recipes]]
+id = 2004
+skill = "斩刀"
+name = "秘诀残页"
+desc = "会心提高2%"
+critical_pct = 0.02
+skill_filter = [13054, 13054901]
+
+[[recipes]]
+id = 2005
+skill = "斩刀"
+name = "秘诀断篇"
+desc = "会心提高3%"
+critical_pct = 0.03
+skill_filter = [13054, 13054901]
+
+[[recipes]]
+id = 2006
+skill = "斩刀"
+name = "秘诀绝章"
+desc = "会心提高4%"
+critical_pct = 0.04
+skill_filter = [13054, 13054901]
+
+[[recipes]]
+id = 2007
+skill = "斩刀"
+name = "人偶图残页"
+desc = "使目标锁足3秒"
+
+[[recipes]]
+id = 2008
+skill = "斩刀"
+name = "人偶图断篇"
+desc = "解除自身减速和锁足效果"
+
+# ── 绝刀 ────────────────────────────────────────────────────────────
+# 绝刀秘籍同时作用于绝刀本体、破·绝刀
+# 暗影千机：惊涌(33097)暂不吃绝刀用户秘籍，如需启用把 33097 加回 skill_filter
+[[recipes]]
+id = 3001
+skill = "绝刀"
+name = "参悟残页"
+desc = "伤害提高4%"
+damage_pct = 0.04
+skill_filter = [13055, 13055901]  # 原含 33097(惊涌)，暂禁用
+
+[[recipes]]
+id = 3002
+skill = "绝刀"
+name = "参悟断篇"
+desc = "伤害提高5%"
+damage_pct = 0.05
+skill_filter = [13055, 13055901]  # 原含 33097(惊涌)，暂禁用
+
+[[recipes]]
+id = 3003
+skill = "绝刀"
+name = "秘诀残页"
+desc = "会心提高3%"
+critical_pct = 0.03
+skill_filter = [13055, 13055901]  # 原含 33097(惊涌)，暂禁用
+
+[[recipes]]
+id = 3004
+skill = "绝刀"
+name = "秘诀断篇"
+desc = "会心提高4%"
+critical_pct = 0.04
+skill_filter = [13055, 13055901]  # 原含 33097(惊涌)，暂禁用
+
+[[recipes]]
+id = 3005
+skill = "绝刀"
+name = "人偶图残页"
+desc = "怒气消耗降低15点"
+
+# ── 盾压 ────────────────────────────────────────────────────────────
+[[recipes]]
+id = 4001
+skill = "盾压"
+name = "参悟残页"
+desc = "伤害提高4%"
+damage_pct = 0.04
+skill_filter = [13045]
+
+[[recipes]]
+id = 4002
+skill = "盾压"
+name = "参悟断篇"
+desc = "伤害提高5%"
+damage_pct = 0.05
+skill_filter = [13045]
+
+[[recipes]]
+id = 4003
+skill = "盾压"
+name = "秘诀残页"
+desc = "会心提高3%"
+critical_pct = 0.03
+skill_filter = [13045]
+
+[[recipes]]
+id = 4004
+skill = "盾压"
+name = "秘诀断篇"
+desc = "会心提高4%"
+critical_pct = 0.04
+skill_filter = [13045]
+
+[[recipes]]
+id = 4005
+skill = "盾压"
+name = "穴位图残页"
+desc = "调息时间减少1秒"
+
+[[recipes]]
+id = 4006
+skill = "盾压"
+name = "穴位图断篇"
+desc = "调息时间减少1秒"
+
+[[recipes]]
+id = 4007
+skill = "盾压"
+name = "人偶图残页"
+desc = "增加5%触发几率"
+
+[[recipes]]
+id = 4008
+skill = "盾压"
+name = "人偶图断篇"
+desc = "增加5%触发几率"
+
+# ── 盾刀 ────────────────────────────────────────────────────────────
+[[recipes]]
+id = 5001
+skill = "盾刀"
+name = "参悟残页"
+desc = "伤害提高3%"
+damage_pct = 0.03
+skill_filter = [13044]
+
+[[recipes]]
+id = 5002
+skill = "盾刀"
+name = "参悟断篇"
+desc = "伤害提高4%"
+damage_pct = 0.04
+skill_filter = [13044]
+
+[[recipes]]
+id = 5003
+skill = "盾刀"
+name = "参悟绝章"
+desc = "伤害提高5%"
+damage_pct = 0.05
+skill_filter = [13044]
+
+[[recipes]]
+id = 5004
+skill = "盾刀"
+name = "秘诀残页"
+desc = "会心提高2%"
+critical_pct = 0.02
+skill_filter = [13044]
+
+[[recipes]]
+id = 5005
+skill = "盾刀"
+name = "秘诀断篇"
+desc = "会心提高3%"
+critical_pct = 0.03
+skill_filter = [13044]
+
+[[recipes]]
+id = 5006
+skill = "盾刀"
+name = "秘诀绝章"
+desc = "会心提高4%"
+critical_pct = 0.04
+skill_filter = [13044]
+
+[[recipes]]
+id = 5007
+skill = "盾刀"
+name = "人偶图残页"
+desc = "第三段额外回复5点怒气"
+
+# ── 血怒 ────────────────────────────────────────────────────────────
+[[recipes]]
+id = 6001
+skill = "血怒"
+name = "手抄残页"
+desc = "效果持续时间增加1秒"
+
+[[recipes]]
+id = 6002
+skill = "血怒"
+name = "手抄断篇"
+desc = "效果持续时间增加1秒"
+
+[[recipes]]
+id = 6003
+skill = "血怒"
+name = "手抄绝章"
+desc = "效果持续时间增加1秒"
+
+[[recipes]]
+id = 6004
+skill = "血怒"
+name = "人偶图残页"
+desc = "回复5点怒气"
+
+[[recipes]]
+id = 6005
+skill = "血怒"
+name = "人偶图断篇"
+desc = "回复5点怒气"
+
+[[recipes]]
+id = 6006
+skill = "血怒"
+name = "人偶图绝章"
+desc = "回复5点怒气"
+
+[[recipes]]
+id = 6007
+skill = "血怒"
+name = "真髓图残页"
+desc = "回复2%气血最大值"
+
+# ── 盾墙 ────────────────────────────────────────────────────────────
+[[recipes]]
+id = 7001
+skill = "盾墙"
+name = "人偶图残页"
+desc = "移动速度提高5%"
+
+[[recipes]]
+id = 7002
+skill = "盾墙"
+name = "人偶图断篇"
+desc = "移动速度提高5%"
+
+[[recipes]]
+id = 7003
+skill = "盾墙"
+name = "人偶图绝章"
+desc = "移动速度提高5%"
+
+[[recipes]]
+id = 7004
+skill = "盾墙"
+name = "真髓图残页"
+desc = "受到的伤害额外降低10%"
+
+[[recipes]]
+id = 7005
+skill = "盾墙"
+name = "真髓图断篇"
+desc = "收盾移除阳/阴/混元/毒性不利效果各一个"
+
+# ── 盾舞 ────────────────────────────────────────────────────────────
+[[recipes]]
+id = 8001
+skill = "盾舞"
+name = "参悟残页"
+desc = "伤害提高4%"
+damage_pct = 0.04
+skill_filter = [13048, 13048901]
+
+[[recipes]]
+id = 8002
+skill = "盾舞"
+name = "参悟断篇"
+desc = "伤害提高5%"
+damage_pct = 0.05
+skill_filter = [13048, 13048901]
+
+[[recipes]]
+id = 8003
+skill = "盾舞"
+name = "秘诀残页"
+desc = "会心提高3%"
+critical_pct = 0.03
+skill_filter = [13048, 13048901]
+
+[[recipes]]
+id = 8004
+skill = "盾舞"
+name = "秘诀断篇"
+desc = "会心提高4%"
+critical_pct = 0.04
+skill_filter = [13048, 13048901]
+
+[[recipes]]
+id = 8005
+skill = "盾舞"
+name = "真传残页"
+desc = "有效范围增加1尺"
+
+[[recipes]]
+id = 8006
+skill = "盾舞"
+name = "真传断篇"
+desc = "有效范围增加1尺"
+
+[[recipes]]
+id = 8007
+skill = "盾舞"
+name = "人偶图残页"
+desc = "效果持续时间增加1秒"
+
+[[recipes]]
+id = 8008
+skill = "盾舞"
+name = "人偶图断篇"
+desc = "效果持续时间增加2秒"
+
+# ── 盾飞 ────────────────────────────────────────────────────────────
+[[recipes]]
+id = 9001
+skill = "盾飞"
+name = "参悟残页"
+desc = "伤害提高3%"
+damage_pct = 0.03
+skill_filter = [13050, 13463]
+
+[[recipes]]
+id = 9002
+skill = "盾飞"
+name = "参悟断篇"
+desc = "伤害提高4%"
+damage_pct = 0.04
+skill_filter = [13050, 13463]
+
+[[recipes]]
+id = 9003
+skill = "盾飞"
+name = "秘诀残页"
+desc = "会心提高2%"
+critical_pct = 0.02
+skill_filter = [13050, 13463]
+
+[[recipes]]
+id = 9004
+skill = "盾飞"
+name = "秘诀断篇"
+desc = "会心提高3%"
+critical_pct = 0.03
+skill_filter = [13050, 13463]
+
+[[recipes]]
+id = 9005
+skill = "盾飞"
+name = "手抄残页"
+desc = "效果持续时间增加5秒"
+
+[[recipes]]
+id = 9006
+skill = "盾飞"
+name = "手抄断篇"
+desc = "效果持续时间增加5秒"
+
+# ════════════════════════════════════════════════════════════════════
+# 隐藏秘籍（hidden=true，由 buff/脚本激活，UI 不显示）
+# ════════════════════════════════════════════════════════════════════
+
+# ── 绝刀怒气段（同时作用于绝刀/破·绝刀）──
+# 按用怒激活：35→99035, 45→99045, 55→99055, 65→99065
+# 数值参考游戏内秘籍：4918/4919/4920/4921 = 205/410/614/819 over 1024
+# 暗影千机：惊涌(33097)暂不吃怒气段秘籍，如需启用把 33097 加回 skill_filter
+[[recipes]]
+id = 99035
+name = "绝刀·35怒加成"
+hidden = true
+damage_pct = 0.200195
+surplus_pct = 0.200195
+skill_filter = [13055, 13055901]  # 原含 33097(惊涌)，暂禁用
+
+[[recipes]]
+id = 99045
+name = "绝刀·45怒加成"
+hidden = true
+damage_pct = 0.400391
+surplus_pct = 0.400391
+skill_filter = [13055, 13055901]  # 原含 33097(惊涌)，暂禁用
+
+[[recipes]]
+id = 99055
+name = "绝刀·55怒加成"
+hidden = true
+damage_pct = 0.599609
+surplus_pct = 0.599609
+skill_filter = [13055, 13055901]  # 原含 33097(惊涌)，暂禁用
+
+[[recipes]]
+id = 99065
+name = "绝刀·65怒加成"
+hidden = true
+damage_pct = 0.799805
+surplus_pct = 0.799805
+skill_filter = [13055, 13055901]  # 原含 33097(惊涌)，暂禁用
+
+# ── 嗜血·绝刀加成（由奇穴 21281 常驻激活）──
+# 仅作用于绝刀本体的普通伤害部分，破招段不吃
+# 暗影千机：惊涌(33097)暂不吃嗜血加成，如需启用把 33097 加回 skill_filter
+[[recipes]]
+id = 99240
+name = "嗜血·绝刀加成"
+hidden = true
+damage_pct = 0.400391
+skill_filter = [13055]  # 原含 33097(惊涌)，暂禁用
+
+# ── 嗜血·双会（由奇穴 21281 常驻激活）──
+# 会心 +153/1024 ≈ 14.9%；会效 +205/1024 ≈ 20.0%
+# 仅作用于绝刀本体，破·绝刀不吃
+# 暗影千机：惊涌(33097)暂不吃嗜血双会，如需启用把 33097 加回 skill_filter
+[[recipes]]
+id = 99241
+name = "嗜血·双会"
+hidden = true
+critical_pct = 0.149414
+crit_eff_pct = 0.200195
+skill_filter = [13055]  # 原含 33097(惊涌)，暂禁用
+
+# ── 阵云·雾海寻龙·非侠士增伤（实验性，+60%）──
+[[recipes]]
+id = 99343
+name = "阵云·雾海非侠士增伤"
+hidden = true
+pve_addition = 0.60
+skill_filter = [90010, 90011, 90012, 30858, 30859]
+
+# ── 麟光甲寒·非侠士增伤：暗影千机已移除 ──
+
+# ── 援戈·血怒增伤（暗影千机：血怒期间血影+50%）──
+[[recipes]]
+id = 99230
+name = "援戈·血怒增伤"
+hidden = true
+damage_pct = 0.50
+skill_filter = [36482]
+
+# ── 赴敌（由奇穴 13317 常驻激活）──
+# 盾猛 / 斩刀 无视防御 100%
+[[recipes]]
+id = 99310
+name = "赴敌·盾猛·无视防御"
+hidden = true
+shield_ignore = 1024.0
+skill_filter = [13046]
+
+[[recipes]]
+id = 99311
+name = "赴敌·斩刀·无视防御"
+hidden = true
+shield_ignore = 1024.0
+skill_filter = [13054]
+
+# ── 阵云结晦系列·非侠士增伤（技能内置，常驻激活）──
+# 阵云/月照连营/雁门迢递 对非侠士额外 +200%；破招段不吃
+[[recipes]]
+id = 99342
+name = "阵云结晦·非侠士额外增伤"
+hidden = true
+pve_addition = 2.00
+skill_filter = [30769, 30855, 30856]
+
+# ── 惊涌：血怒·惊涌期间 斩/绝/盾舞 破招段 +20%
+# 由 BUFF_XUE_NU_JY_DEF.activate_recipes 主动激活
+[[recipes]]
+id = 99220
+name = "惊涌·破招加成"
+hidden = true
+surplus_pct = 0.20
+skill_filter = [13055901, 13054901, 13048901]
+
+# ── 锋鸣：盾飞主体+每跳 伤害 +100%
+# 由 BUFF_FENG_MING_DEF.activate_recipes 主动激活
+[[recipes]]
+id = 99201
+name = "锋鸣·盾飞加成"
+hidden = true
+damage_pct = 1.00
+skill_filter = [13050, 13463]
+
+# ── 天下宏愿装备特效：盾飞 +5% / 斩刀 +5%（由 collect_recipes 检测主武器装备时激活）
+[[recipes]]
+id = 99260
+name = "天下宏愿·盾飞加成"
+hidden = true
+damage_pct = 0.05
+skill_filter = [13050, 13463]
+
+[[recipes]]
+id = 99261
+name = "天下宏愿·斩刀加成"
+hidden = true
+damage_pct = 0.05
+skill_filter = [13054]
+
+# ── 幽烽蝶语·式微（外功老小橙武）装备特效：盾刀会心+5% / 斩刀会心+5%
+# 由 collect_recipes 检测主武器装备时激活
+[[recipes]]
+id = 99262
+name = "幽烽蝶语·式微·盾刀会心加成"
+hidden = true
+critical_pct = 0.05
+skill_filter = [13044]
+
+[[recipes]]
+id = 99263
+name = "幽烽蝶语·式微·斩刀会心加成"
+hidden = true
+critical_pct = 0.05
+skill_filter = [13054]
+
+# ── 苍云外功 T 套 4 件套：绝刀+10% / 盾压+10%（atSetEquipmentRecipe 1932/1933）
+# 三套同效（5936 西塞·行歌 / 6481 孤漠·雁际 / 6782 玄阙·芦荡），由 collect_recipes
+# 检测全身装备 ≥ 4 件来自任一 T 套时激活。
+[[recipes]]
+id = 99270
+name = "T套·绝刀加成"
+hidden = true
+damage_pct = 0.10
+skill_filter = [13055]
+
+[[recipes]]
+id = 99271
+name = "T套·盾压加成"
+hidden = true
+damage_pct = 0.10
+skill_filter = [13045]

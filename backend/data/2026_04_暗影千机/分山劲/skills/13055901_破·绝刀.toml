@@ -1,0 +1,14 @@
+id   = 13055901
+name = "破·绝刀"
+passive = true
+damage_kind = "surplus_only"
+description = "绝刀附带的破招伤害（独立显示）；怒气段加成由 atSurplusValueAddPercent 字段秘籍提供"
+
+# 由 13055 触发，破招段固定 25怒基础系数；不同怒气段加成走 99035/45/55/65 秘籍
+# damage_kind=surplus_only → 走 surplus_coeff × SURPLUS_PARAM × 破招值 公式
+
+[[ranks]]
+rank          = 1
+name          = "破·绝刀"
+surplus_coeff  = 1.9983
+defense_ignore = 1.0

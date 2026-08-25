@@ -1,0 +1,48 @@
+﻿id   = 13048
+name = "盾舞"
+icon = "https://icon.jx3box.com/icon/6343.png"
+description = "引导5秒 / CD8秒 / 8尺范围每0.5秒命中6目标 / 擎盾下每命中回1怒"
+
+# 引导技能 / 范围: 8尺 / CD: 8秒 / GCD: 1秒
+# 持续运功 5 秒，每 0.5 秒命中最多 6 目标
+# 每命中一个目标对当前目标追加一次破招伤害
+# [擎盾]姿态下每命中一目标回复 1 怒气
+# 本赛季不受加速影响
+
+stance = "any"
+
+channel_frame    = 80       # 5秒 = 80帧
+channel_interval = 8        # 0.5秒 = 8帧
+first_tick_frame = 8        # 首跳正常间隔（0.5秒）
+
+[[cooldowns]]
+cd_id    = "gcd_1.0"
+duration = 1.0
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_0.5"
+duration = 0.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "cd_盾舞"
+duration = 8.0
+mode     = "check_and_trigger"
+haste    = false
+
+[[cooldowns]]
+cd_id    = "gcd_1.5"
+duration = 1.5
+mode     = "check_only"
+haste    = true
+
+[[ranks]]
+rank         = 1
+name         = "盾舞"
+icon = "https://icon.jx3box.com/icon/6343.png"
+base_damage  = 0.0
+attack_coeff = 0.0
+weapon_coeff = 0.0

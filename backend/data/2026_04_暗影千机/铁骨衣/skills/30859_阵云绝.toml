@@ -1,0 +1,15 @@
+id   = 30859
+name = "阵云绝"
+passive = true
+description = "绝刀附带的阵云绝伤害（雾海寻龙·实验性）"
+
+# 施展绝刀时被动追加，+60%非侠（走秘籍99343）
+requires_talent = 30769
+
+[[ranks]]
+rank           = 1
+name           = "阵云绝"
+base_damage    = 14.0
+attack_coeff   = 0.60000
+weapon_coeff   = 1.0
+defense_ignore = 1.0

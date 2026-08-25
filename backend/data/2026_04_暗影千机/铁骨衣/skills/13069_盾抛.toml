@@ -1,0 +1,28 @@
+﻿id   = 13069
+name = "盾抛"
+
+icon = "https://icon.jx3box.com/icon/6296.png"
+# 盾墙下盾压后可施展
+# 将目标抛至身后15尺，眩晕2秒
+
+stance = "wall"
+
+[[cooldowns]]
+cd_id    = "gcd_1.5"
+duration = 1.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_1.0"
+duration = 1.0
+mode     = "check_only"
+haste    = true
+
+[[ranks]]
+rank         = 1
+name         = "盾抛"
+icon = "https://icon.jx3box.com/icon/6296.png"
+base_damage  = 0
+attack_coeff = 0
+weapon_coeff = 0

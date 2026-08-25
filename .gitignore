@@ -1,0 +1,62 @@
+# Rust build outputs
+backend/target/
+target/
+
+# Python environments, caches, models, and experiment outputs
+.venv/
+venv/
+**/__pycache__/
+*.py[cod]
+python/runs/
+python/pretrains/
+python/analyses/
+*.pt
+*.pth
+*.ckpt
+*.onnx
+events.out.tfevents*
+
+# Simulator-generated runs and local user state
+backend/runs/
+backend/userdata/
+*.log
+test_result.json
+
+# Packaged artifacts and downloaded deployment binaries
+dist/
+tools/*.exe
+*.pdb
+backend/data/*.zip
+backend/src/scripts/*.zip
+
+# Secrets and machine-local deployment configuration
+.env
+.env.*
+!.env.example
+tools/frpc.toml
+tools/frps.toml
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+
+# Legacy local agent workspace. Stable project guidance lives in AGENTS.md and
+# reusable repository skills live in .agents/skills/.
+.claude/
+
+# IDE and operating-system files
+.idea/
+.vscode/
+.vs/
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.swp
+*~
