@@ -152,7 +152,13 @@ def benchmark_tool(
 
     consistent = all(signature == signatures[0] for signature in signatures)
     if not consistent:
-        raise BenchmarkFailure(f"{tool_name} evidence or fingerprint changed between runs")
+        first_difference = next(
+            signature for signature in signatures[1:] if signature != signatures[0]
+        )
+        raise BenchmarkFailure(
+            f"{tool_name} evidence or fingerprint changed between runs: "
+            f"first={signatures[0]!r} changed={first_difference!r}"
+        )
     assert last_response is not None
     metrics = {
         "samples": samples,
@@ -276,7 +282,7 @@ def compact_success_trace(
         base_url,
         "/api/agent/tools/compare",
         rejected_payload,
-        expected_status=400,
+        expected_status=422,
     )
     failure = {
         "trace_id": "p1-07-rejected",
@@ -285,7 +291,7 @@ def compact_success_trace(
             "candidate_label": "noop",
             "patch": {"network_delay": 0},
         },
-        "http_status": 400,
+        "http_status": 422,
         "response_bytes": response_size,
         "wall_ms": round(wall_ms, 3),
         "response": rejected,

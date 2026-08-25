@@ -111,11 +111,15 @@ pub fn analyze_timeline(
     let total_cd_wait_seconds = cd_waits.iter().map(|wait| wait.wait_seconds).sum();
     let gcd_gaps = collect_gcd_gaps(&response.timeline);
     let total_observed_gcd_gap_seconds = gcd_gaps.iter().map(|gap| gap.observed_gap_seconds).sum();
-    let buff_coverage = response
+    let mut buff_coverage: Vec<_> = response
         .buff_timeline
         .iter()
         .filter_map(|track| calculate_buff_coverage(track, response.fight_time))
         .collect();
+    // The simulator builds buff tracks from a hash map. UI timeline order can
+    // contain equal priorities, so source iteration order is not a stable
+    // evidence identity. The Agent result uses the stable buff ID as its key.
+    buff_coverage.sort_by_key(|coverage| coverage.buff_id);
 
     let result = TimelineAnalysis {
         fingerprint: response.fingerprint,
@@ -510,6 +514,48 @@ mod tests {
             .result
             .limitations
             .contains(&"timeline_correlations_are_not_causal_without_ab_test".to_string()));
+    }
+
+    #[test]
+    fn timeline_evidence_is_stable_when_source_buff_tracks_are_reordered() {
+        let buff_event = |time| BuffTimelineEvent {
+            time,
+            event_type: "gain".to_string(),
+            state: None,
+        };
+        let track = |buff_id, name: &str| BuffTimelineTrack {
+            buff_id,
+            name: name.to_string(),
+            short_name: name.to_string(),
+            color: String::new(),
+            events: vec![buff_event(0.0)],
+        };
+        let mut first = simulation_execution();
+        first.response.buff_timeline =
+            vec![track(200, "后一个气劲"), track(100, "前一个气劲")];
+        let mut second = simulation_execution();
+        second.response.buff_timeline =
+            vec![track(100, "前一个气劲"), track(200, "后一个气劲")];
+
+        let first_evidence =
+            analyze_timeline("trace-order-a", &first, &ToolProvenance::fixture()).unwrap();
+        let second_evidence =
+            analyze_timeline("trace-order-b", &second, &ToolProvenance::fixture()).unwrap();
+
+        assert_eq!(
+            first_evidence.evidence.evidence_id,
+            second_evidence.evidence.evidence_id
+        );
+        assert_eq!(
+            first_evidence
+                .evidence
+                .result
+                .buff_coverage
+                .iter()
+                .map(|coverage| coverage.buff_id)
+                .collect::<Vec<_>>(),
+            vec![100, 200]
+        );
     }
 
     #[test]
