@@ -208,6 +208,52 @@ def benchmark_payloads(simulation: dict[str, object], scenario: dict[str, object
     }
 
 
+def compact_envelope(
+    envelope: dict[str, object],
+    result_projection: object,
+) -> dict[str, object]:
+    return {
+        "schema_version": envelope["schema_version"],
+        "trace_id": envelope["trace_id"],
+        "evidence_id": envelope["evidence_id"],
+        "tool_name": envelope["tool_name"],
+        "scenario_hash": envelope["scenario_hash"],
+        "engine_version": envelope["engine_version"],
+        "engine_commit": envelope["engine_commit"],
+        "data_hash": envelope["data_hash"],
+        "args": envelope["args"],
+        "result_projection": result_projection,
+        "warnings": envelope["warnings"],
+        "duration_ms": envelope["duration_ms"],
+    }
+
+
+def timeline_projection(result: dict[str, object]) -> dict[str, object]:
+    return {
+        "fingerprint_hex": result["fingerprint_hex"],
+        "fight_time": result["fight_time"],
+        "active_event_count": result["active_event_count"],
+        "triggered_event_count": result["triggered_event_count"],
+        "skill_groups": len(result["skills"]),
+        "total_cd_wait_seconds": result["total_cd_wait_seconds"],
+        "cd_wait_count": len(result["cd_waits"]),
+        "total_observed_gcd_gap_seconds": result["total_observed_gcd_gap_seconds"],
+        "gcd_gap_count": len(result["gcd_gaps"]),
+        "rage": result["rage"],
+        "buff_coverage": [
+            {
+                "buff_id": coverage["buff_id"],
+                "active_seconds": coverage["active_seconds"],
+                "coverage_percent": coverage["coverage_percent"],
+                "activation_count": coverage["activation_count"],
+            }
+            for coverage in result["buff_coverage"]
+        ],
+        "skipped": result["skipped"],
+        "limitations": result["limitations"],
+    }
+
+
 def compact_success_trace(
     base_url: str,
     simulation: dict[str, object],
@@ -244,12 +290,49 @@ def compact_success_trace(
     success = {
         "trace_id": trace_id,
         "scenario_hash": scenario["scenario_hash"],
+        "projection_note": (
+            "Evidence IDs bind the complete tool results; large per-event lists are "
+            "projected to counts and aggregates in this portfolio artifact."
+        ),
         "evidence": [
-            captured["evidence"],
-            simulated["evidence"],
-            compared["evidence"],
-            timeline["simulation"],
-            timeline["timeline"],
+            compact_envelope(
+                captured["evidence"],
+                captured["evidence"]["result"],
+            ),
+            compact_envelope(
+                simulated["evidence"],
+                {
+                    key: simulated["evidence"]["result"][key]
+                    for key in (
+                        "dps",
+                        "total_damage",
+                        "fight_time",
+                        "skill_count",
+                        "fingerprint_hex",
+                    )
+                },
+            ),
+            compact_envelope(
+                compared["evidence"],
+                compared["evidence"]["result"],
+            ),
+            compact_envelope(
+                timeline["simulation"],
+                {
+                    key: timeline["simulation"]["result"][key]
+                    for key in (
+                        "dps",
+                        "total_damage",
+                        "fight_time",
+                        "skill_count",
+                        "fingerprint_hex",
+                    )
+                },
+            ),
+            compact_envelope(
+                timeline["timeline"],
+                timeline_projection(timeline["timeline"]["result"]),
+            ),
         ],
         "chain_checks": {
             "all_scenario_hashes_match": len(
