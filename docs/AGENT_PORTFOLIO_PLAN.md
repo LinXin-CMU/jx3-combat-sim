@@ -263,6 +263,8 @@ Agent 将自然语言目标转成可计算指标和边界，调用批量模拟/�
 
 ### 第 1 周：Agent 工具层
 
+详细的数据协议、工作包与阻断节点见 [`AGENT_PHASE_1_PLAN.md`](AGENT_PHASE_1_PLAN.md)。
+
 - 从现有核心逻辑提取 scenario schema；
 - 实现 `get_current_scenario`、`simulate_scenario`、`compare_scenarios`、`analyze_timeline`；
 - 统一 evidence envelope：`trace_id / scenario_hash / tool / args / result / duration_ms`；

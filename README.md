@@ -176,7 +176,7 @@ Agent 将围绕明确目标自主调用高层工具：
 
 让 PPO 策略作为教师，Agent 聚类关键决策与失败分歧，提出人类可读的宏规则，再交给现有宏验证器和 GA 复验。目标不是把神经网络伪装成解释，而是量化“理论策略”到“游戏内可执行宏”的性能差距与表达边界。
 
-详细计划见 [`docs/AGENT_PORTFOLIO_PLAN.md`](docs/AGENT_PORTFOLIO_PLAN.md)。
+总体路线见 [`docs/AGENT_PORTFOLIO_PLAN.md`](docs/AGENT_PORTFOLIO_PLAN.md)，第一阶段的工具协议与验收计划见 [`docs/AGENT_PHASE_1_PLAN.md`](docs/AGENT_PHASE_1_PLAN.md)。
 
 ## 项目边界
 
@@ -191,6 +191,7 @@ Agent 将围绕明确目标自主调用高层工具：
 
 - [`docs/PROJECT_BASELINE.md`](docs/PROJECT_BASELINE.md)：项目模块、规模、技术债和已验证基线；
 - [`docs/AGENT_PORTFOLIO_PLAN.md`](docs/AGENT_PORTFOLIO_PLAN.md)：四套 Agent 方案和六周路线；
+- [`docs/AGENT_PHASE_1_PLAN.md`](docs/AGENT_PHASE_1_PLAN.md)：首批四个只读工具、证据协议与 20 题评测计划；
 - [`docs/PHASE_0_PLAN.md`](docs/PHASE_0_PLAN.md)：公开仓库卫生计划；
 - [`docs/baselines/2026-08-25-phase0.md`](docs/baselines/2026-08-25-phase0.md)：Agent 接入前的回归与性能锚点；
 - [`docs/baselines/2026-08-25-versioned-golden-migration.md`](docs/baselines/2026-08-25-versioned-golden-migration.md)：跨版本 Golden v2 迁移证据；
