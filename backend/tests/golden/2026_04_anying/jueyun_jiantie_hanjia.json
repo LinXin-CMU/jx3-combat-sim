@@ -1,0 +1,17 @@
+{
+  "schema_version": 2,
+  "scenario_id": "jueyun_jiantie_hanjia",
+  "name": "坚铁寒甲(boss=2s)",
+  "game_version": "AnYingQianJi",
+  "version_dir": "2026_04_暗影千机",
+  "mount": "FenShanJin",
+  "scenario_sha256": "329e45e8350f42af7f540b3b936f7f710289bddac34e9acd5441c8e5e03741cd",
+  "data_sha256": "fd932d52bf50277882cc89e9c6463a7960544debfe7568699e68b4d760567d29",
+  "engine_commit": "a69aff65f16dc8f015bdf902a11cf0e913fd319a",
+  "captured_at": "2026-08-25T03:09:47.918379+00:00",
+  "fingerprint": "d91b95325a935c51",
+  "dps": 920311.41,
+  "total_damage": 276093423.0,
+  "skill_count": 1607,
+  "fight_time": 300.0
+}

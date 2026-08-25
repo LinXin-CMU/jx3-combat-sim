@@ -1,0 +1,17 @@
+{
+  "schema_version": 2,
+  "scenario_id": "simple_loop",
+  "name": "简单循环",
+  "game_version": "ShanHaiYuanLiu",
+  "version_dir": "2025_10_山海源流",
+  "mount": "FenShanJin",
+  "scenario_sha256": "e2639c9e9b7878f675470a55864a9865fb3c894944efe7f01f224a740337a8c1",
+  "data_sha256": "8dda461690ff8fa70dcd9faba1d88e011a56513884fe2a581206ee1d6b57ae7d",
+  "engine_commit": "a69aff65f16dc8f015bdf902a11cf0e913fd319a",
+  "captured_at": "2026-08-25T03:09:47.599359+00:00",
+  "fingerprint": "9b818eba0c077063",
+  "dps": 116947.12666666666,
+  "total_damage": 35084138.0,
+  "skill_count": 485,
+  "fight_time": 300.0
+}

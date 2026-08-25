@@ -1,0 +1,17 @@
+{
+  "schema_version": 2,
+  "scenario_id": "jueyun_300s",
+  "name": "绝云宏 standard",
+  "game_version": "AnYingQianJi",
+  "version_dir": "2026_04_暗影千机",
+  "mount": "FenShanJin",
+  "scenario_sha256": "8331f03a7451790fa1e494bdcb12858caf433632f6fbcd6cb7597024a36c425a",
+  "data_sha256": "fd932d52bf50277882cc89e9c6463a7960544debfe7568699e68b4d760567d29",
+  "engine_commit": "a69aff65f16dc8f015bdf902a11cf0e913fd319a",
+  "captured_at": "2026-08-25T03:09:47.795427+00:00",
+  "fingerprint": "e43e87d24ff9aed2",
+  "dps": 949319.2666666667,
+  "total_damage": 284795780.0,
+  "skill_count": 1648,
+  "fight_time": 300.0
+}

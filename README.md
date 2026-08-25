@@ -150,7 +150,7 @@ python tests/diff_baseline.py
 
 除非确认规则行为发生了有意变化，否则不要使用 `--update` 覆盖 golden。
 
-当前两套版本共 8 个场景均通过确定性与 Lite/Full 等价检查。旧 Golden 无法追溯到精确版本，已保留为历史证据；新的 Golden v2 候选值尚待人工确认，因此仓库仍处于发布阻断状态。迁移证据见 [`docs/baselines/2026-08-25-versioned-golden-migration.md`](docs/baselines/2026-08-25-versioned-golden-migration.md)。
+当前两套版本共 8 个场景均通过确定性、Lite/Full 等价和 Golden v2 检查。旧 Golden 无法追溯到精确版本，已保留为历史证据；新基线记录了生成提交与场景/数据哈希。迁移证据见 [`docs/baselines/2026-08-25-versioned-golden-migration.md`](docs/baselines/2026-08-25-versioned-golden-migration.md)。
 
 ## Game × AI 路线
 

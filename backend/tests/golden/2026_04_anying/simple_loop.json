@@ -1,0 +1,17 @@
+{
+  "schema_version": 2,
+  "scenario_id": "simple_loop",
+  "name": "简单循环",
+  "game_version": "AnYingQianJi",
+  "version_dir": "2026_04_暗影千机",
+  "mount": "FenShanJin",
+  "scenario_sha256": "e2639c9e9b7878f675470a55864a9865fb3c894944efe7f01f224a740337a8c1",
+  "data_sha256": "fd932d52bf50277882cc89e9c6463a7960544debfe7568699e68b4d760567d29",
+  "engine_commit": "a69aff65f16dc8f015bdf902a11cf0e913fd319a",
+  "captured_at": "2026-08-25T03:09:47.811064+00:00",
+  "fingerprint": "099ddb885b081c61",
+  "dps": 227068.13333333333,
+  "total_damage": 68120440.0,
+  "skill_count": 992,
+  "fight_time": 300.0
+}

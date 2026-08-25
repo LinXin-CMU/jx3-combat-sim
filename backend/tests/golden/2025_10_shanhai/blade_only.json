@@ -1,0 +1,17 @@
+{
+  "schema_version": 2,
+  "scenario_id": "blade_only",
+  "name": "纯刀系",
+  "game_version": "ShanHaiYuanLiu",
+  "version_dir": "2025_10_山海源流",
+  "mount": "FenShanJin",
+  "scenario_sha256": "0e33823b6f78ba3b1bfc0b0a01b42e8e7cda0f86bfaefa6fd8a94ddb34ede496",
+  "data_sha256": "8dda461690ff8fa70dcd9faba1d88e011a56513884fe2a581206ee1d6b57ae7d",
+  "engine_commit": "a69aff65f16dc8f015bdf902a11cf0e913fd319a",
+  "captured_at": "2026-08-25T03:09:47.613460+00:00",
+  "fingerprint": "cbf29ce484222325",
+  "dps": -0.0,
+  "total_damage": -0.0,
+  "skill_count": 0,
+  "fight_time": 300.0
+}

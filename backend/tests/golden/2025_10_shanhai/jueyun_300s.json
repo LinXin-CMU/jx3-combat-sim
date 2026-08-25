@@ -1,0 +1,17 @@
+{
+  "schema_version": 2,
+  "scenario_id": "jueyun_300s",
+  "name": "绝云宏 standard",
+  "game_version": "ShanHaiYuanLiu",
+  "version_dir": "2025_10_山海源流",
+  "mount": "FenShanJin",
+  "scenario_sha256": "8331f03a7451790fa1e494bdcb12858caf433632f6fbcd6cb7597024a36c425a",
+  "data_sha256": "8dda461690ff8fa70dcd9faba1d88e011a56513884fe2a581206ee1d6b57ae7d",
+  "engine_commit": "a69aff65f16dc8f015bdf902a11cf0e913fd319a",
+  "captured_at": "2026-08-25T03:09:47.589283+00:00",
+  "fingerprint": "b66420a335455845",
+  "dps": 811230.08,
+  "total_damage": 243369024.0,
+  "skill_count": 1242,
+  "fight_time": 300.0
+}
