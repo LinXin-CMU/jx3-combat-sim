@@ -156,7 +156,7 @@ fn validate_simulation(simulation: &SimulateRequest) -> Result<(), ScenarioError
     Ok(())
 }
 
-fn game_version_id(version: GameVersion) -> &'static str {
+pub(super) fn game_version_id(version: GameVersion) -> &'static str {
     match version {
         GameVersion::ShanHaiYuanLiu => "2025_10_shanhai_yuanliu",
         GameVersion::AnYingQianJi => "2026_04_anying_qianji",
@@ -164,7 +164,7 @@ fn game_version_id(version: GameVersion) -> &'static str {
     }
 }
 
-fn mount_id(mount: Mount) -> &'static str {
+pub(super) fn mount_id(mount: Mount) -> &'static str {
     match mount {
         Mount::FenShanJin => "fenshanjin",
         Mount::TieGuYi => "tieguyi",

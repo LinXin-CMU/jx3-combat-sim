@@ -4,7 +4,7 @@
 计划工期：5–7 个有效开发日  
 阶段目标：在不接入语言模型、不增加写入能力、不改变战斗数值的前提下，把现有模拟器封装为可独立测试的四个强类型只读工具，并建立 Agent 后续必须遵守的证据链与离线评测集。
 
-执行状态（2026-08-25）：架构节点已确认；P1-01 场景快照与 canonical SHA-256 已实现，新增 9 项测试，完整 Rust 测试 43/43、两版本 Golden 8/8 和 smoke 均通过。下一工作包为 P1-02 模拟工具与 evidence envelope。
+执行状态（2026-08-25）：架构节点已确认；P1-01 场景快照与 P1-02 领域层已实现，包含 canonical SHA-256、`EvidenceEnvelopeV1`、`get_current_scenario`、`simulate_scenario` 和模拟预算。Agent 工具层现有 17 项测试，完整 Rust 测试 51/51、两版本 Golden 8/8 和 smoke 均通过。下一工作包为 P1-03 强类型 A/B 对比。
 
 ## 1. 审计结论
 
@@ -156,7 +156,7 @@ duration_ms
 
 验收：同场景 hash 稳定；任一玩法字段变化导致 hash 变化；只改变 lite 不改变 hash。
 
-### P1-02 模拟工具与证据 envelope
+### P1-02 模拟工具与证据 envelope（领域层已完成）
 
 - 新建 `backend/src/agent/evidence.rs`、`tools.rs`；
 - 将 `simulate_core` 通过领域适配器复用；
