@@ -6601,15 +6601,22 @@ loadFormations();
 //   jx3_wzc_state_v1_<心法>）、state.js 的 key、将来新增的 key 都自动覆盖，保证不落下。
 //   setItem + removeItem 都钩（删除也要同步，否则换设备会被服务端旧值复活）。
 (function initSettingsSync() {
-  // 不该跟账号走的 key 放这里（目前无；如有设备专属/敏感项再加）。
+  // 精确 denylist 保留给设备专属项；敏感字段另做模式拦截，防止未来误把凭据同步到账户设置。
   const DENY = new Set([]);
+  function isSensitiveStorageKey(key) {
+    const normalized = String(key || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    return ['apikey', 'authorization', 'credential', 'password', 'accesstoken',
+      'refreshtoken', 'bearertoken', 'clientsecret', 'secret', 'token']
+      .some(marker => normalized.includes(marker));
+  }
+  function canSync(key) { return !DENY.has(key) && !isSensitiveStorageKey(key); }
   let pushTimer = null;
   function snapshot() {
     const obj = {};
     try {
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
-        if (k && !DENY.has(k)) { const v = localStorage.getItem(k); if (v != null) obj[k] = v; }
+        if (k && canSync(k)) { const v = localStorage.getItem(k); if (v != null) obj[k] = v; }
       }
     } catch {}
     return obj;
@@ -6631,9 +6638,9 @@ loadFormations();
   };
   try {
     const origSet = localStorage.setItem.bind(localStorage);
-    localStorage.setItem = function (k, v) { origSet(k, v); if (!DENY.has(k)) schedulePush(); };
+    localStorage.setItem = function (k, v) { origSet(k, v); if (canSync(k)) schedulePush(); };
     const origRemove = localStorage.removeItem.bind(localStorage);
-    localStorage.removeItem = function (k) { origRemove(k); if (!DENY.has(k)) schedulePush(); };
+    localStorage.removeItem = function (k) { origRemove(k); if (canSync(k)) schedulePush(); };
   } catch {}
   // 兜底：任何卸载（关页/刷新/导航）时若有未推送的改动，用 sendBeacon 同步发出，
   // 避免「改完设置不到 600ms 就离开」丢失。sendBeacon 不被页面卸载打断。

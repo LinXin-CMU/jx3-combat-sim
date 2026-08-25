@@ -33,6 +33,8 @@ backend/src/scripts/*.zip
 .env
 .env.*
 !.env.example
+agent.providers.toml
+backend/agent.providers.toml
 tools/frpc.toml
 tools/frps.toml
 *.pem

@@ -1,0 +1,864 @@
+use super::{
+    config::is_loopback_host,
+    protocol::{
+        valid_identifier, FinishReason, ModelMessage, ModelRequest, ModelResponse,
+        ProviderToolCall, TokenUsage,
+    },
+    LlmProvider, ProviderError,
+};
+use async_trait::async_trait;
+use reqwest::{redirect::Policy, Client, Url};
+use serde::Deserialize;
+use serde_json::{json, Value};
+use std::time::Duration;
+
+const MAX_PROVIDER_RESPONSE_BYTES: usize = 1024 * 1024;
+const PROVIDER_TIMEOUT_SECS: u64 = 30;
+
+struct OpenAiTransport {
+    profile_id: String,
+    model: String,
+    base_url: String,
+    api_key: String,
+    client: Client,
+}
+
+impl OpenAiTransport {
+    fn new(
+        profile_id: String,
+        model: String,
+        base_url: String,
+        api_key: String,
+    ) -> Result<Self, ProviderError> {
+        Self::new_with_timeout(
+            profile_id,
+            model,
+            base_url,
+            api_key,
+            Duration::from_secs(PROVIDER_TIMEOUT_SECS),
+        )
+    }
+
+    fn new_with_timeout(
+        profile_id: String,
+        model: String,
+        base_url: String,
+        api_key: String,
+        timeout: Duration,
+    ) -> Result<Self, ProviderError> {
+        if api_key.trim().is_empty() || api_key.chars().any(char::is_control) {
+            return Err(ProviderError::configuration(
+                "provider_key_invalid",
+                "provider credential is invalid",
+            ));
+        }
+        let parsed_base_url = Url::parse(&base_url).map_err(|_| {
+            ProviderError::configuration(
+                "provider_base_url_invalid",
+                "provider base URL is invalid",
+            )
+        })?;
+        if !matches!(parsed_base_url.scheme(), "http" | "https")
+            || parsed_base_url.host_str().is_none()
+            || !parsed_base_url.username().is_empty()
+            || parsed_base_url.password().is_some()
+            || parsed_base_url.query().is_some()
+            || parsed_base_url.fragment().is_some()
+        {
+            return Err(ProviderError::configuration(
+                "provider_base_url_invalid",
+                "provider base URL is invalid",
+            ));
+        }
+        if parsed_base_url.scheme() == "http"
+            && !parsed_base_url.host_str().is_some_and(is_loopback_host)
+        {
+            return Err(ProviderError::configuration(
+                "provider_insecure_remote_url",
+                "remote provider base URL must use HTTPS",
+            ));
+        }
+        let client = Client::builder()
+            .timeout(timeout)
+            .redirect(Policy::none())
+            .build()
+            .map_err(|_| {
+                ProviderError::configuration(
+                    "provider_client_unavailable",
+                    "provider HTTP client cannot be initialized",
+                )
+            })?;
+        Ok(Self {
+            profile_id,
+            model,
+            base_url: parsed_base_url.as_str().trim_end_matches('/').to_string(),
+            api_key,
+            client,
+        })
+    }
+
+    fn endpoint(&self, suffix: &str) -> Result<Url, ProviderError> {
+        Url::parse(&format!("{}/{}", self.base_url, suffix)).map_err(|_| {
+            ProviderError::configuration(
+                "provider_base_url_invalid",
+                "provider base URL is invalid",
+            )
+        })
+    }
+
+    async fn post_json(&self, suffix: &str, body: &Value) -> Result<Vec<u8>, ProviderError> {
+        let encoded = serde_json::to_vec(body).map_err(|_| ProviderError::invalid_request())?;
+        let response = self
+            .client
+            .post(self.endpoint(suffix)?)
+            .bearer_auth(&self.api_key)
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body(encoded)
+            .send()
+            .await
+            .map_err(|error| ProviderError::network(&error))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(ProviderError::upstream_status(status.as_u16()));
+        }
+        if response
+            .content_length()
+            .is_some_and(|length| length > MAX_PROVIDER_RESPONSE_BYTES as u64)
+        {
+            return Err(ProviderError::response_too_large());
+        }
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|error| ProviderError::network(&error))?;
+        if bytes.len() > MAX_PROVIDER_RESPONSE_BYTES {
+            return Err(ProviderError::response_too_large());
+        }
+        Ok(bytes.to_vec())
+    }
+}
+
+pub struct OpenAiResponsesProvider {
+    transport: OpenAiTransport,
+}
+
+impl OpenAiResponsesProvider {
+    pub fn new(
+        profile_id: String,
+        model: String,
+        base_url: String,
+        api_key: String,
+    ) -> Result<Self, ProviderError> {
+        Ok(Self {
+            transport: OpenAiTransport::new(profile_id, model, base_url, api_key)?,
+        })
+    }
+
+    #[cfg(test)]
+    fn new_with_timeout(
+        profile_id: String,
+        model: String,
+        base_url: String,
+        api_key: String,
+        timeout: Duration,
+    ) -> Result<Self, ProviderError> {
+        Ok(Self {
+            transport: OpenAiTransport::new_with_timeout(
+                profile_id, model, base_url, api_key, timeout,
+            )?,
+        })
+    }
+}
+
+#[async_trait]
+impl LlmProvider for OpenAiResponsesProvider {
+    fn profile_id(&self) -> &str {
+        &self.transport.profile_id
+    }
+
+    fn model(&self) -> &str {
+        &self.transport.model
+    }
+
+    async fn complete(&self, request: &ModelRequest) -> Result<ModelResponse, ProviderError> {
+        request
+            .validate()
+            .map_err(|_| ProviderError::invalid_request())?;
+        let body = responses_request(&self.transport.model, request)?;
+        let bytes = self.transport.post_json("responses", &body).await?;
+        let response = parse_responses_response(&bytes)?;
+        response
+            .validate_against(request)
+            .map_err(|_| ProviderError::invalid_response())?;
+        Ok(response)
+    }
+}
+
+pub struct OpenAiChatProvider {
+    transport: OpenAiTransport,
+}
+
+impl OpenAiChatProvider {
+    pub fn new(
+        profile_id: String,
+        model: String,
+        base_url: String,
+        api_key: String,
+    ) -> Result<Self, ProviderError> {
+        Ok(Self {
+            transport: OpenAiTransport::new(profile_id, model, base_url, api_key)?,
+        })
+    }
+}
+
+#[async_trait]
+impl LlmProvider for OpenAiChatProvider {
+    fn profile_id(&self) -> &str {
+        &self.transport.profile_id
+    }
+
+    fn model(&self) -> &str {
+        &self.transport.model
+    }
+
+    async fn complete(&self, request: &ModelRequest) -> Result<ModelResponse, ProviderError> {
+        request
+            .validate()
+            .map_err(|_| ProviderError::invalid_request())?;
+        let body = chat_request(&self.transport.model, request)?;
+        let bytes = self.transport.post_json("chat/completions", &body).await?;
+        let response = parse_chat_response(&bytes)?;
+        response
+            .validate_against(request)
+            .map_err(|_| ProviderError::invalid_response())?;
+        Ok(response)
+    }
+}
+
+fn responses_request(model: &str, request: &ModelRequest) -> Result<Value, ProviderError> {
+    let mut input = Vec::new();
+    for message in &request.messages {
+        match message {
+            ModelMessage::User { content } => input.push(json!({
+                "role": "user",
+                "content": [{"type": "input_text", "text": content}],
+            })),
+            ModelMessage::Assistant {
+                content,
+                tool_calls,
+            } => {
+                if let Some(content) = content {
+                    input.push(json!({
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": content}],
+                    }));
+                }
+                for call in tool_calls {
+                    input.push(json!({
+                        "type": "function_call",
+                        "call_id": call.call_id,
+                        "name": call.name,
+                        "arguments": compact_json(&call.arguments)?,
+                    }));
+                }
+            }
+            ModelMessage::ToolResult { call_id, output } => input.push(json!({
+                "type": "function_call_output",
+                "call_id": call_id,
+                "output": compact_json(output)?,
+            })),
+        }
+    }
+    let tools: Vec<Value> = request
+        .tools
+        .iter()
+        .map(|tool| {
+            json!({
+                "type": "function",
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": tool.parameters,
+                "strict": true,
+            })
+        })
+        .collect();
+    Ok(json!({
+        "model": model,
+        "instructions": request.instructions,
+        "input": input,
+        "tools": tools,
+        "tool_choice": "auto",
+        "parallel_tool_calls": false,
+        "max_output_tokens": request.max_output_tokens,
+        "store": false,
+    }))
+}
+
+fn chat_request(model: &str, request: &ModelRequest) -> Result<Value, ProviderError> {
+    let mut messages = vec![json!({
+        "role": "system",
+        "content": request.instructions,
+    })];
+    for message in &request.messages {
+        match message {
+            ModelMessage::User { content } => {
+                messages.push(json!({"role": "user", "content": content}));
+            }
+            ModelMessage::Assistant {
+                content,
+                tool_calls,
+            } => {
+                let calls: Vec<Value> = tool_calls
+                    .iter()
+                    .map(|call| {
+                        Ok(json!({
+                            "id": call.call_id,
+                            "type": "function",
+                            "function": {
+                                "name": call.name,
+                                "arguments": compact_json(&call.arguments)?,
+                            },
+                        }))
+                    })
+                    .collect::<Result<_, ProviderError>>()?;
+                messages.push(json!({
+                    "role": "assistant",
+                    "content": content,
+                    "tool_calls": calls,
+                }));
+            }
+            ModelMessage::ToolResult { call_id, output } => messages.push(json!({
+                "role": "tool",
+                "tool_call_id": call_id,
+                "content": compact_json(output)?,
+            })),
+        }
+    }
+    let tools: Vec<Value> = request
+        .tools
+        .iter()
+        .map(|tool| {
+            json!({
+                "type": "function",
+                "function": {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.parameters,
+                    "strict": true,
+                },
+            })
+        })
+        .collect();
+    Ok(json!({
+        "model": model,
+        "messages": messages,
+        "tools": tools,
+        "tool_choice": "auto",
+        "parallel_tool_calls": false,
+        "max_tokens": request.max_output_tokens,
+    }))
+}
+
+fn compact_json(value: &Value) -> Result<String, ProviderError> {
+    serde_json::to_string(value).map_err(|_| ProviderError::invalid_request())
+}
+
+#[derive(Deserialize)]
+struct ResponsesPayload {
+    #[serde(default)]
+    output: Vec<ResponsesOutput>,
+    #[serde(default)]
+    usage: ResponsesUsage,
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    incomplete_details: Option<IncompleteDetails>,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type")]
+enum ResponsesOutput {
+    #[serde(rename = "message")]
+    Message {
+        #[serde(default)]
+        content: Vec<ResponsesContent>,
+    },
+    #[serde(rename = "function_call")]
+    FunctionCall {
+        call_id: String,
+        name: String,
+        arguments: String,
+    },
+    #[serde(other)]
+    Other,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type")]
+enum ResponsesContent {
+    #[serde(rename = "output_text")]
+    OutputText { text: String },
+    #[serde(rename = "refusal")]
+    Refusal { refusal: String },
+    #[serde(other)]
+    Other,
+}
+
+#[derive(Default, Deserialize)]
+struct ResponsesUsage {
+    #[serde(default)]
+    input_tokens: u64,
+    #[serde(default)]
+    output_tokens: u64,
+    #[serde(default)]
+    total_tokens: u64,
+}
+
+#[derive(Deserialize)]
+struct IncompleteDetails {
+    #[serde(default)]
+    reason: Option<String>,
+}
+
+fn parse_responses_response(bytes: &[u8]) -> Result<ModelResponse, ProviderError> {
+    let payload: ResponsesPayload =
+        serde_json::from_slice(bytes).map_err(|_| ProviderError::invalid_response())?;
+    let mut text = Vec::new();
+    let mut tool_calls = Vec::new();
+    let mut refused = false;
+    for output in payload.output {
+        match output {
+            ResponsesOutput::Message { content } => {
+                for item in content {
+                    match item {
+                        ResponsesContent::OutputText { text: item } if !item.is_empty() => {
+                            text.push(item)
+                        }
+                        ResponsesContent::Refusal { refusal } if !refusal.is_empty() => {
+                            refused = true;
+                            text.push(refusal);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            ResponsesOutput::FunctionCall {
+                call_id,
+                name,
+                arguments,
+            } => tool_calls.push(parse_tool_call(call_id, name, &arguments)?),
+            ResponsesOutput::Other => {}
+        }
+    }
+    if text.is_empty() && tool_calls.is_empty() {
+        return Err(ProviderError::invalid_response());
+    }
+    let finish_reason = if !tool_calls.is_empty() {
+        FinishReason::ToolCalls
+    } else if refused {
+        FinishReason::Refusal
+    } else if payload.status.as_deref() == Some("incomplete") {
+        match payload
+            .incomplete_details
+            .and_then(|details| details.reason)
+            .as_deref()
+        {
+            Some("max_output_tokens") => FinishReason::Length,
+            Some("content_filter") => FinishReason::ContentFilter,
+            _ => FinishReason::Other,
+        }
+    } else {
+        FinishReason::Stop
+    };
+    Ok(ModelResponse {
+        assistant_text: (!text.is_empty()).then(|| text.join("\n")),
+        tool_calls,
+        finish_reason,
+        usage: TokenUsage {
+            input_tokens: payload.usage.input_tokens,
+            output_tokens: payload.usage.output_tokens,
+            total_tokens: payload.usage.total_tokens,
+        },
+    })
+}
+
+#[derive(Deserialize)]
+struct ChatPayload {
+    choices: Vec<ChatChoice>,
+    #[serde(default)]
+    usage: ChatUsage,
+}
+
+#[derive(Deserialize)]
+struct ChatChoice {
+    message: ChatMessage,
+    #[serde(default)]
+    finish_reason: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ChatMessage {
+    #[serde(default)]
+    content: Option<String>,
+    #[serde(default)]
+    refusal: Option<String>,
+    #[serde(default)]
+    tool_calls: Vec<ChatToolCall>,
+}
+
+#[derive(Deserialize)]
+struct ChatToolCall {
+    id: String,
+    function: ChatFunction,
+}
+
+#[derive(Deserialize)]
+struct ChatFunction {
+    name: String,
+    arguments: String,
+}
+
+#[derive(Default, Deserialize)]
+struct ChatUsage {
+    #[serde(default)]
+    prompt_tokens: u64,
+    #[serde(default)]
+    completion_tokens: u64,
+    #[serde(default)]
+    total_tokens: u64,
+}
+
+fn parse_chat_response(bytes: &[u8]) -> Result<ModelResponse, ProviderError> {
+    let payload: ChatPayload =
+        serde_json::from_slice(bytes).map_err(|_| ProviderError::invalid_response())?;
+    let choice = payload
+        .choices
+        .into_iter()
+        .next()
+        .ok_or_else(ProviderError::invalid_response)?;
+    let mut text = choice.message.content.filter(|value| !value.is_empty());
+    let refused = choice.message.refusal.is_some();
+    if text.is_none() {
+        text = choice.message.refusal.filter(|value| !value.is_empty());
+    }
+    let tool_calls: Vec<ProviderToolCall> = choice
+        .message
+        .tool_calls
+        .into_iter()
+        .map(|call| parse_tool_call(call.id, call.function.name, &call.function.arguments))
+        .collect::<Result<_, _>>()?;
+    if text.is_none() && tool_calls.is_empty() {
+        return Err(ProviderError::invalid_response());
+    }
+    let finish_reason = if !tool_calls.is_empty() {
+        FinishReason::ToolCalls
+    } else if refused {
+        FinishReason::Refusal
+    } else {
+        match choice.finish_reason.as_deref() {
+            Some("stop") | None => FinishReason::Stop,
+            Some("length") => FinishReason::Length,
+            Some("content_filter") => FinishReason::ContentFilter,
+            _ => FinishReason::Other,
+        }
+    };
+    Ok(ModelResponse {
+        assistant_text: text,
+        tool_calls,
+        finish_reason,
+        usage: TokenUsage {
+            input_tokens: payload.usage.prompt_tokens,
+            output_tokens: payload.usage.completion_tokens,
+            total_tokens: payload.usage.total_tokens,
+        },
+    })
+}
+
+fn parse_tool_call(
+    call_id: String,
+    name: String,
+    arguments: &str,
+) -> Result<ProviderToolCall, ProviderError> {
+    if !valid_identifier(&call_id) || !valid_identifier(&name) {
+        return Err(ProviderError::invalid_response());
+    }
+    let arguments: Value =
+        serde_json::from_str(arguments).map_err(|_| ProviderError::invalid_response())?;
+    if !arguments.is_object() {
+        return Err(ProviderError::invalid_response());
+    }
+    Ok(ProviderToolCall {
+        call_id,
+        name,
+        arguments,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agent::provider::ToolDefinition;
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+        sync::oneshot,
+    };
+
+    fn request() -> ModelRequest {
+        ModelRequest {
+            instructions: "Use grounded tool evidence only.".to_string(),
+            messages: vec![ModelMessage::User {
+                content: "Inspect the current scenario.".to_string(),
+            }],
+            tools: vec![ToolDefinition {
+                name: "get_current_scenario".to_string(),
+                description: "Read the immutable scenario.".to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": false
+                }),
+            }],
+            max_output_tokens: 512,
+        }
+    }
+
+    async fn mock_server(status: u16, body: &'static str) -> (String, oneshot::Receiver<String>) {
+        mock_server_with_delay(status, body, Duration::ZERO).await
+    }
+
+    async fn mock_server_with_delay(
+        status: u16,
+        body: &'static str,
+        delay: Duration,
+    ) -> (String, oneshot::Receiver<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (sender, receiver) = oneshot::channel();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let header_end;
+            loop {
+                let mut chunk = [0u8; 4096];
+                let read = stream.read(&mut chunk).await.unwrap();
+                if read == 0 {
+                    return;
+                }
+                request.extend_from_slice(&chunk[..read]);
+                if let Some(position) = request.windows(4).position(|window| window == b"\r\n\r\n")
+                {
+                    header_end = position + 4;
+                    break;
+                }
+            }
+            let headers = String::from_utf8_lossy(&request[..header_end]);
+            let content_length = headers
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().ok())
+                        .flatten()
+                })
+                .unwrap_or(0);
+            while request.len() < header_end + content_length {
+                let mut chunk = [0u8; 4096];
+                let read = stream.read(&mut chunk).await.unwrap();
+                if read == 0 {
+                    break;
+                }
+                request.extend_from_slice(&chunk[..read]);
+            }
+            let _ = sender.send(String::from_utf8_lossy(&request).into_owned());
+            tokio::time::sleep(delay).await;
+            let reason = if status == 200 { "OK" } else { "Error" };
+            let response = format!(
+                "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = stream.write_all(response.as_bytes()).await;
+        });
+        (format!("http://{address}/v1"), receiver)
+    }
+
+    #[tokio::test]
+    async fn responses_adapter_sends_stateless_serial_tool_request_and_parses_call() {
+        let body = r#"{
+            "status":"completed",
+            "output":[{"type":"function_call","call_id":"call-1","name":"get_current_scenario","arguments":"{}"}],
+            "usage":{"input_tokens":12,"output_tokens":7,"total_tokens":19}
+        }"#;
+        let (base_url, captured) = mock_server(200, body).await;
+        let provider = OpenAiResponsesProvider::new(
+            "openai".to_string(),
+            "example-model".to_string(),
+            base_url,
+            "test-secret-value".to_string(),
+        )
+        .unwrap();
+        let response = provider.complete(&request()).await.unwrap();
+        let captured = captured.await.unwrap();
+        let (_, request_body) = captured.split_once("\r\n\r\n").unwrap();
+        let request_body: Value = serde_json::from_str(request_body).unwrap();
+
+        assert_eq!(response.finish_reason, FinishReason::ToolCalls);
+        assert_eq!(response.tool_calls[0].name, "get_current_scenario");
+        assert_eq!(response.usage.total_tokens, 19);
+        assert_eq!(request_body["store"], false);
+        assert_eq!(request_body["parallel_tool_calls"], false);
+        assert_eq!(request_body["tools"][0]["strict"], true);
+        assert!(captured.starts_with("POST /v1/responses HTTP/1.1"));
+        assert!(captured
+            .to_ascii_lowercase()
+            .contains("authorization: bearer test-secret-value"));
+    }
+
+    #[tokio::test]
+    async fn chat_adapter_uses_compatible_tool_shape_and_parses_text() {
+        let body = r#"{
+            "choices":[{"message":{"content":"Grounded result.","tool_calls":[]},"finish_reason":"stop"}],
+            "usage":{"prompt_tokens":8,"completion_tokens":3,"total_tokens":11}
+        }"#;
+        let (base_url, captured) = mock_server(200, body).await;
+        let provider = OpenAiChatProvider::new(
+            "compatible".to_string(),
+            "example-chat-model".to_string(),
+            base_url,
+            "test-secret-value".to_string(),
+        )
+        .unwrap();
+        let response = provider.complete(&request()).await.unwrap();
+        let captured = captured.await.unwrap();
+        let (_, request_body) = captured.split_once("\r\n\r\n").unwrap();
+        let request_body: Value = serde_json::from_str(request_body).unwrap();
+
+        assert_eq!(response.assistant_text.as_deref(), Some("Grounded result."));
+        assert_eq!(response.finish_reason, FinishReason::Stop);
+        assert_eq!(response.usage.total_tokens, 11);
+        assert_eq!(request_body["tools"][0]["function"]["strict"], true);
+        assert_eq!(request_body["parallel_tool_calls"], false);
+        assert!(captured.starts_with("POST /v1/chat/completions HTTP/1.1"));
+    }
+
+    #[tokio::test]
+    async fn upstream_error_body_and_key_are_never_reflected() {
+        let (base_url, _captured) =
+            mock_server(429, r#"{"error":{"message":"leaked-upstream-body"}}"#).await;
+        let provider = OpenAiResponsesProvider::new(
+            "openai".to_string(),
+            "example-model".to_string(),
+            base_url,
+            "super-secret-credential".to_string(),
+        )
+        .unwrap();
+        let error = provider.complete(&request()).await.unwrap_err();
+        let serialized = serde_json::to_string(&error).unwrap();
+
+        assert_eq!(error.upstream_status, Some(429));
+        assert!(error.retryable);
+        assert!(!serialized.contains("super-secret-credential"));
+        assert!(!serialized.contains("leaked-upstream-body"));
+    }
+
+    #[tokio::test]
+    async fn upstream_5xx_is_retryable_and_body_is_not_reflected() {
+        let (base_url, _captured) =
+            mock_server(503, r#"{"error":{"message":"private-provider-detail"}}"#).await;
+        let provider = OpenAiChatProvider::new(
+            "compatible".to_string(),
+            "example-model".to_string(),
+            base_url,
+            "test-secret-value".to_string(),
+        )
+        .unwrap();
+        let error = provider.complete(&request()).await.unwrap_err();
+        let serialized = serde_json::to_string(&error).unwrap();
+
+        assert_eq!(error.upstream_status, Some(503));
+        assert!(error.retryable);
+        assert!(!serialized.contains("private-provider-detail"));
+    }
+
+    #[tokio::test]
+    async fn provider_timeout_has_a_fixed_safe_error() {
+        let (base_url, _captured) = mock_server_with_delay(
+            200,
+            r#"{"output":[{"type":"message","content":[{"type":"output_text","text":"late"}]}]}"#,
+            Duration::from_millis(100),
+        )
+        .await;
+        let provider = OpenAiResponsesProvider::new_with_timeout(
+            "openai".to_string(),
+            "example-model".to_string(),
+            base_url,
+            "test-secret-value".to_string(),
+            Duration::from_millis(10),
+        )
+        .unwrap();
+        let error = provider.complete(&request()).await.unwrap_err();
+
+        assert_eq!(error.code, "provider_timeout");
+        assert!(error.retryable);
+        assert!(!error.to_string().contains("test-secret-value"));
+    }
+
+    #[tokio::test]
+    async fn dropping_a_timed_out_request_cancels_the_in_flight_future() {
+        let (base_url, captured) = mock_server_with_delay(
+            200,
+            r#"{"output":[{"type":"message","content":[{"type":"output_text","text":"late"}]}]}"#,
+            Duration::from_millis(200),
+        )
+        .await;
+        let provider = OpenAiResponsesProvider::new(
+            "openai".to_string(),
+            "example-model".to_string(),
+            base_url,
+            "test-secret-value".to_string(),
+        )
+        .unwrap();
+
+        let result =
+            tokio::time::timeout(Duration::from_millis(10), provider.complete(&request())).await;
+        assert!(result.is_err());
+        assert!(captured.await.unwrap().starts_with("POST /v1/responses"));
+    }
+
+    #[tokio::test]
+    async fn duplicate_tool_calls_from_upstream_are_rejected() {
+        let body = r#"{
+            "status":"completed",
+            "output":[
+                {"type":"function_call","call_id":"call-1","name":"get_current_scenario","arguments":"{}"},
+                {"type":"function_call","call_id":"call-1","name":"get_current_scenario","arguments":"{}"}
+            ]
+        }"#;
+        let (base_url, _captured) = mock_server(200, body).await;
+        let provider = OpenAiResponsesProvider::new(
+            "openai".to_string(),
+            "example-model".to_string(),
+            base_url,
+            "test-secret-value".to_string(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            provider.complete(&request()).await.unwrap_err().code,
+            "provider_response_invalid"
+        );
+    }
+
+    #[test]
+    fn malformed_tool_arguments_are_rejected() {
+        let body = br#"{
+            "status":"completed",
+            "output":[{"type":"function_call","call_id":"call-1","name":"tool","arguments":"not-json"}]
+        }"#;
+        assert_eq!(
+            parse_responses_response(body).unwrap_err().code,
+            "provider_response_invalid"
+        );
+    }
+}

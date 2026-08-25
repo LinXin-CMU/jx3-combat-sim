@@ -707,6 +707,7 @@ name = "jx3-combat-sim"
 version = "2.0.10"
 dependencies = [
  "ahash",
+ "async-trait",
  "axum",
  "encoding_rs",
  "futures-util",

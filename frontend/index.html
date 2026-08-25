@@ -2661,7 +2661,11 @@
         .then(function (obj) {
           if (obj && typeof obj === 'object') {
             for (var k in obj) {
-              if (Object.prototype.hasOwnProperty.call(obj, k) && obj[k] != null) {
+              var normalizedKey = String(k || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+              var sensitiveKey = ['apikey', 'authorization', 'credential', 'password',
+                'accesstoken', 'refreshtoken', 'bearertoken', 'clientsecret', 'secret', 'token']
+                .some(function (marker) { return normalizedKey.indexOf(marker) >= 0; });
+              if (!sensitiveKey && Object.prototype.hasOwnProperty.call(obj, k) && obj[k] != null) {
                 try { localStorage.setItem(k, String(obj[k])); } catch (e) {}
               }
             }

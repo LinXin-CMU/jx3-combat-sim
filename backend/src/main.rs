@@ -4808,6 +4808,8 @@ pub struct SharedState {
     pub agent_context_gate: Arc<RwLock<()>>,
     /// 当前版本/心法运行时数据的稳定 provenance；只在启动或显式重载时计算。
     pub agent_provenance: Arc<RwLock<agent::ToolProvenance>>,
+    /// 服务端定义的模型供应商目录；安全摘要可见，凭据只在创建 adapter 时从环境变量解析。
+    pub agent_providers: Arc<agent::provider::ProviderCatalog>,
     /// 当前选中的武学版本（初始 V2025_10 山海源流）
     pub version: Arc<RwLock<GameVersion>>,
     /// 当前选中的心法（初始 分山劲）
@@ -5120,13 +5122,74 @@ async fn resume_load() -> String {
 // 登入后 GET 回来覆盖 localStorage → 设置跟账号走（换设备/换 origin/清缓存都跟随）。
 fn settings_path() -> std::path::PathBuf { user_data_path("settings.json") }
 async fn settings_save(Json(body): Json<serde_json::Value>) -> String {
+    let body = filter_sensitive_settings(body);
     match std::fs::write(settings_path(), serde_json::to_string_pretty(&body).unwrap_or_default()) {
         Ok(_) => "ok".into(),
         Err(e) => format!("error: {e}"),
     }
 }
 async fn settings_load() -> String {
-    std::fs::read_to_string(settings_path()).unwrap_or_else(|_| "null".into())
+    let Ok(source) = std::fs::read_to_string(settings_path()) else {
+        return "null".into();
+    };
+    let Ok(value) = serde_json::from_str(&source) else {
+        return "null".into();
+    };
+    serde_json::to_string(&filter_sensitive_settings(value)).unwrap_or_else(|_| "null".into())
+}
+
+fn filter_sensitive_settings(mut value: serde_json::Value) -> serde_json::Value {
+    if let Some(settings) = value.as_object_mut() {
+        settings.retain(|key, _| !is_sensitive_setting_key(key));
+    }
+    value
+}
+
+fn is_sensitive_setting_key(key: &str) -> bool {
+    let normalized: String = key
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect();
+    [
+        "apikey",
+        "authorization",
+        "credential",
+        "password",
+        "accesstoken",
+        "refreshtoken",
+        "bearertoken",
+        "clientsecret",
+        "secret",
+        "token",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker))
+}
+
+#[cfg(test)]
+mod settings_security_tests {
+    use super::*;
+
+    #[test]
+    fn sensitive_settings_are_removed_without_changing_normal_preferences() {
+        let filtered = filter_sensitive_settings(serde_json::json!({
+            "ui_theme": "indigo",
+            "agent_provider_profile": "offline",
+            "openai_api_key": "must-not-survive",
+            "Authorization": "must-not-survive",
+            "refresh-token": "must-not-survive",
+            "provider_secret": "must-not-survive",
+            "session_token": "must-not-survive"
+        }));
+        assert_eq!(filtered["ui_theme"], "indigo");
+        assert_eq!(filtered["agent_provider_profile"], "offline");
+        assert!(filtered.get("openai_api_key").is_none());
+        assert!(filtered.get("Authorization").is_none());
+        assert!(filtered.get("refresh-token").is_none());
+        assert!(filtered.get("provider_secret").is_none());
+        assert!(filtered.get("session_token").is_none());
+    }
 }
 
 // ─── 当前心法/版本 per-user 持久化 ──────────────────────────────────────
@@ -9295,6 +9358,17 @@ async fn main() {
         &team_buffs,
         &formations,
     );
+    let agent_providers = match agent::provider::ProviderCatalog::load_from_env() {
+        Ok(catalog) => catalog,
+        Err(error) => {
+            eprintln!(
+                "[agent] provider 配置不可用（{}），已降级为离线 provider",
+                error.code
+            );
+            agent::provider::ProviderCatalog::offline_default()
+        }
+    };
+    println!("[agent] 已加载 {} 个 provider profile", agent_providers.len());
 
     // 加载装备数据（优先 equip.json；否则回退 equip/*.tab 并自动生成 JSON 缓存）
     let equip_data = equip::load_equip_smart(Path::new(data_root()));
@@ -9310,6 +9384,7 @@ async fn main() {
     let state = SharedState {
         agent_context_gate: Arc::new(RwLock::new(())),
         agent_provenance: Arc::new(RwLock::new(agent_provenance)),
+        agent_providers: Arc::new(agent_providers),
         version: Arc::new(RwLock::new(version)),
         mount: Arc::new(RwLock::new(mount)),
         constants: Arc::new(RwLock::new(constants)),
@@ -9368,6 +9443,7 @@ async fn main() {
         .route("/api/agent/tools/simulate", post(agent::http::simulate_handler))
         .route("/api/agent/tools/compare", post(agent::http::compare_handler))
         .route("/api/agent/tools/timeline", post(agent::http::timeline_handler))
+        .route("/api/agent/providers", get(agent::provider::providers_handler))
         .route("/api/macro/presets", get(macro_presets))
         .route("/api/macro/save",    post(macro_save))
         .route("/api/macro/load",    get(macro_load))

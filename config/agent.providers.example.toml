@@ -1,0 +1,26 @@
+# Copy this file outside the repository (or to an ignored agent.providers.toml),
+# then point JX3_AGENT_CONFIG at it. Never put credential values in this file.
+
+[[profiles]]
+id = "offline"
+label = "离线测试"
+adapter = "fake"
+model = "deterministic-fixture-v1"
+
+[[profiles]]
+id = "openai"
+label = "OpenAI Responses"
+adapter = "openai_responses"
+model = "replace-with-approved-model"
+base_url = "https://api.openai.com/v1"
+api_key_env = "JX3_OPENAI_API_KEY"
+enabled = false
+
+[[profiles]]
+id = "compatible"
+label = "兼容服务商"
+adapter = "openai_compatible_chat"
+model = "replace-with-provider-model"
+base_url = "https://replace-with-provider.example/v1"
+api_key_env = "JX3_COMPATIBLE_API_KEY"
+enabled = false

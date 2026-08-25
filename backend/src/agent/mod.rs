@@ -8,6 +8,7 @@ pub mod compare;
 pub mod evidence;
 pub mod hash;
 pub mod http;
+pub mod provider;
 pub mod schema;
 pub mod timeline;
 pub mod tools;
