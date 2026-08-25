@@ -162,7 +162,10 @@ def tree_sha256(roots):
     for path in sorted(files, key=key):
         digest.update(key(path).encode("utf-8"))
         digest.update(b"\0")
-        digest.update(path.read_bytes())
+        # These roots contain text data/scripts. Git may check them out with
+        # CRLF or LF depending on the existing worktree and client settings;
+        # normalize line endings so the provenance hash is portable.
+        digest.update(path.read_bytes().replace(b"\r\n", b"\n"))
         digest.update(b"\0")
     return digest.hexdigest()
 
