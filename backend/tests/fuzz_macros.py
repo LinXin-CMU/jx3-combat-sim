@@ -19,7 +19,7 @@ import random
 import sys
 import urllib.request
 
-BACKEND = "http://localhost:3005"
+BACKEND = "http://127.0.0.1:3005"
 
 # 已知"安全"的技能名 + 触发条件池
 SHIELD_SKILLS = ["盾击", "盾压", "盾猛", "盾飞", "盾舞", "血怒", "业火麟光", "阵云结晦", "撼地"]

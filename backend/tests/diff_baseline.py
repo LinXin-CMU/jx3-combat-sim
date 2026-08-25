@@ -17,7 +17,7 @@ import os
 import sys
 import urllib.request
 
-BACKEND = "http://localhost:3005"
+BACKEND = "http://127.0.0.1:3005"
 GOLDEN_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden")
 
 
