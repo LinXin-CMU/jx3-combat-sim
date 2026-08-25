@@ -20,6 +20,7 @@
 - AI/搜索：宏生成与 GA、配装搜索、HTTP-RPC 强化学习环境、自研 PPO/行为克隆训练与分析。
 - 部署：同一 Rust 可执行文件支持本地、worker、router 三种模式；router 为每个用户启动隔离 worker。
 - 已验证基线：`cargo test` 为 68 个测试通过（Phase 0 原有 34 项 + Agent 工具/HTTP 层 34 项）；前端可用 `node --check frontend/app.js` 做语法检查。
+- Agent 离线评测：`tools/agent-eval.ps1` 运行 20 个工具级 fixture，必须保持 20/20、非法写入 0、userdata 不变且测试运行态可恢复。
 
 更完整的现状审计见 `docs/PROJECT_BASELINE.md`，作品集与 Agent 路线见 `docs/AGENT_PORTFOLIO_PLAN.md`。
 

@@ -4,7 +4,7 @@
 
 这是我面向 2027 届游戏策划岗位准备的个人作品集项目。项目重点不是复刻一个游戏界面，而是展示如何把复杂战斗规则转化为可以配置、验证、对比和部署的策划工具。
 
-当前已经实现战斗模拟、宏优化、配装搜索和强化学习环境；工具调用 Agent 正处于设计与开发阶段，不在本文中冒充已完成功能。
+当前已经实现战斗模拟、宏优化、配装搜索和强化学习环境；Agent 已完成四个只读工具、证据协议和 20 题无模型评测基线，模型编排与聊天界面尚未接入。
 
 ## 90 秒了解项目
 
@@ -152,6 +152,16 @@ python tests/diff_baseline.py
 
 当前两套版本共 8 个场景均通过确定性、Lite/Full 等价和 Golden v2 检查。旧 Golden 无法追溯到精确版本，已保留为历史证据；新基线记录了生成提交与场景/数据哈希。迁移证据见 [`docs/baselines/2026-08-25-versioned-golden-migration.md`](docs/baselines/2026-08-25-versioned-golden-migration.md)。
 
+### Agent 工具级评测
+
+保持后端运行后，在仓库根目录执行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\agent-eval.ps1
+```
+
+评测包含 4 题事实读取、6 题单变量 A/B、6 题时间线诊断、2 题非法/不可比较输入和 2 题越权请求。当前基线为 20/20；runner 同时验证工具白名单、数值 fingerprint、非法写入为 0、userdata 前后哈希一致，并在结束后恢复运行前的版本与心法。模型尚未接入，因此这里只声称工具和证据链通过，不声称自然语言回答质量。
+
 ## Game × AI 路线
 
 ### 已实现
@@ -170,7 +180,7 @@ Agent 将围绕明确目标自主调用高层工具：
 - `compare_scenarios`
 - `analyze_timeline`
 
-它负责拆解问题、提出假设和组织证据，不直接生成“看起来合理”的伤害数字。第一版会先建立 20–30 条离线评测题，再接模型和聊天界面。
+它负责拆解问题、提出假设和组织证据，不直接生成“看起来合理”的伤害数字。第一版已经建立 20 条无模型离线评测题；下一步先完成阶段性能与 trace 证据，再接模型和聊天界面。
 
 ### 差异化案例：RL → 宏蒸馏
 
@@ -193,6 +203,7 @@ Agent 将围绕明确目标自主调用高层工具：
 - [`docs/PROJECT_BASELINE.md`](docs/PROJECT_BASELINE.md)：项目模块、规模、技术债和已验证基线；
 - [`docs/AGENT_PORTFOLIO_PLAN.md`](docs/AGENT_PORTFOLIO_PLAN.md)：四套 Agent 方案和六周路线；
 - [`docs/AGENT_PHASE_1_PLAN.md`](docs/AGENT_PHASE_1_PLAN.md)：首批四个只读工具、证据协议与 20 题评测计划；
+- [`backend/tests/agent_eval/README.md`](backend/tests/agent_eval/README.md)：20 题无模型评测结构、运行方式与安全边界；
 - [`docs/PHASE_0_PLAN.md`](docs/PHASE_0_PLAN.md)：公开仓库卫生计划；
 - [`docs/baselines/2026-08-25-phase0.md`](docs/baselines/2026-08-25-phase0.md)：Agent 接入前的回归与性能锚点；
 - [`docs/baselines/2026-08-25-versioned-golden-migration.md`](docs/baselines/2026-08-25-versioned-golden-migration.md)：跨版本 Golden v2 迁移证据；

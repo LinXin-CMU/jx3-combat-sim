@@ -1,0 +1,186 @@
+{
+  "schema_version": "agent-eval-scenarios/v1",
+  "scenarios": {
+    "anying_basic": {
+      "version": "AnYingQianJi",
+      "mount": "FenShanJin",
+      "simulation": {
+        "haste_level": 42087,
+        "sequence": ["盾击", "盾压", "盾猛"],
+        "network_delay": 0,
+        "initial_rage": 50,
+        "attributes": {
+          "base_attack": 38466.0,
+          "weapon_damage": 10986.0,
+          "crit_level": 54841.0,
+          "crit_effect_level": 0.0,
+          "overcome_level": 29480.0,
+          "strain_level": 66031.0,
+          "haste_level": 42087.0
+        },
+        "target": {
+          "level": 134,
+          "defense_bonus": 0.0,
+          "damage_cof": 0.0
+        }
+      }
+    },
+    "shanhai_basic": {
+      "version": "ShanHaiYuanLiu",
+      "mount": "FenShanJin",
+      "simulation": {
+        "haste_level": 42087,
+        "sequence": ["盾击", "盾压", "盾猛"],
+        "network_delay": 0,
+        "initial_rage": 50,
+        "attributes": {
+          "base_attack": 38466.0,
+          "weapon_damage": 10986.0,
+          "crit_level": 54841.0,
+          "crit_effect_level": 0.0,
+          "overcome_level": 29480.0,
+          "strain_level": 66031.0,
+          "haste_level": 42087.0
+        },
+        "target": {
+          "level": 134,
+          "defense_bonus": 0.0,
+          "damage_cof": 0.0
+        }
+      }
+    },
+    "anying_network": {
+      "version": "AnYingQianJi",
+      "mount": "FenShanJin",
+      "simulation": {
+        "haste_level": 42087,
+        "sequence": ["盾击", "盾压", "盾猛"],
+        "network_delay": 100,
+        "initial_rage": 50,
+        "attributes": {
+          "base_attack": 38466.0,
+          "weapon_damage": 10986.0,
+          "crit_level": 54841.0,
+          "crit_effect_level": 0.0,
+          "overcome_level": 29480.0,
+          "strain_level": 66031.0,
+          "haste_level": 42087.0
+        },
+        "target": {
+          "level": 134,
+          "defense_bonus": 0.0,
+          "damage_cof": 0.0
+        }
+      }
+    },
+    "anying_cd_wait": {
+      "version": "AnYingQianJi",
+      "mount": "FenShanJin",
+      "simulation": {
+        "haste_level": 42087,
+        "sequence": ["盾压", "盾压"],
+        "network_delay": 0,
+        "initial_rage": 50,
+        "attributes": {
+          "base_attack": 38466.0,
+          "weapon_damage": 10986.0,
+          "crit_level": 54841.0,
+          "crit_effect_level": 0.0,
+          "overcome_level": 29480.0,
+          "strain_level": 66031.0,
+          "haste_level": 42087.0
+        },
+        "target": {
+          "level": 134,
+          "defense_bonus": 0.0,
+          "damage_cof": 0.0
+        }
+      }
+    },
+    "anying_buff": {
+      "version": "AnYingQianJi",
+      "mount": "FenShanJin",
+      "simulation": {
+        "haste_level": 42087,
+        "sequence": ["血怒", "盾击", "盾压"],
+        "network_delay": 0,
+        "initial_rage": 50,
+        "attributes": {
+          "base_attack": 38466.0,
+          "weapon_damage": 10986.0,
+          "crit_level": 54841.0,
+          "crit_effect_level": 0.0,
+          "overcome_level": 29480.0,
+          "strain_level": 66031.0,
+          "haste_level": 42087.0
+        },
+        "target": {
+          "level": 134,
+          "defense_bonus": 0.0,
+          "damage_cof": 0.0
+        }
+      }
+    },
+    "anying_skipped": {
+      "version": "AnYingQianJi",
+      "mount": "FenShanJin",
+      "simulation": {
+        "haste_level": 42087,
+        "sequence": ["不存在技能"],
+        "network_delay": 0,
+        "initial_rage": 50,
+        "attributes": {
+          "base_attack": 38466.0,
+          "weapon_damage": 10986.0,
+          "crit_level": 54841.0,
+          "crit_effect_level": 0.0,
+          "overcome_level": 29480.0,
+          "strain_level": 66031.0,
+          "haste_level": 42087.0
+        },
+        "target": {
+          "level": 134,
+          "defense_bonus": 0.0,
+          "damage_cof": 0.0
+        }
+      }
+    },
+    "anying_blade_rage": {
+      "version": "AnYingQianJi",
+      "mount": "FenShanJin",
+      "simulation": {
+        "haste_level": 42087,
+        "sequence": ["盾飞", "斩刀", "绝刀"],
+        "network_delay": 0,
+        "initial_rage": 50,
+        "attributes": {
+          "base_attack": 38466.0,
+          "weapon_damage": 10986.0,
+          "crit_level": 54841.0,
+          "crit_effect_level": 0.0,
+          "overcome_level": 29480.0,
+          "strain_level": 66031.0,
+          "haste_level": 42087.0
+        },
+        "target": {
+          "level": 134,
+          "defense_bonus": 0.0,
+          "damage_cof": 0.0
+        }
+      }
+    },
+    "missing_attributes": {
+      "version": "AnYingQianJi",
+      "mount": "FenShanJin",
+      "simulation": {
+        "haste_level": 42087,
+        "sequence": ["盾击"],
+        "target": {
+          "level": 134,
+          "defense_bonus": 0.0,
+          "damage_cof": 0.0
+        }
+      }
+    }
+  }
+}

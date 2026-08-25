@@ -4,7 +4,7 @@
 计划工期：5–7 个有效开发日  
 阶段目标：在不接入语言模型、不增加写入能力、不改变战斗数值的前提下，把现有模拟器封装为可独立测试的四个强类型只读工具，并建立 Agent 后续必须遵守的证据链与离线评测集。
 
-执行状态（2026-08-25）：架构节点已确认；P1-01 至 P1-05 已实现，包含 canonical SHA-256、`EvidenceEnvelopeV1`、四个强类型只读工具、原子模拟预算、确定性时间轴诊断和无状态 HTTP 适配层。Agent 工具/HTTP 层现有 34 项测试，完整 Rust 测试 68/68、两版本 Golden 8/8、原有 smoke 与 Agent HTTP smoke 均通过。下一工作包为 P1-06 离线评测；模型层采用可选服务商 + 服务端 API Key，仍在评测基线建立后接入。
+执行状态（2026-08-25）：架构节点已确认；P1-01 至 P1-06 已实现，包含 canonical SHA-256、`EvidenceEnvelopeV1`、四个强类型只读工具、原子模拟预算、确定性时间轴诊断、无状态 HTTP 适配层，以及 20 题无模型离线评测。Agent 工具/HTTP 层现有 34 项 Rust 测试，完整 Rust 测试 68/68；评测 fixture 20/20、非法写入 0、userdata 前后哈希一致、测试运行态可恢复。下一工作包为 P1-07 阶段回归与作品集证据；模型层采用可选服务商 + 服务端 API Key，仍在阶段证据冻结后接入。
 
 ## 1. 审计结论
 
@@ -193,7 +193,7 @@ duration_ms
 
 验收：四个端点 smoke 通过；非法字段、预算超限和场景不一致返回稳定错误码。
 
-### P1-06 先写评测，再接 Agent
+### P1-06 先写评测，再接 Agent（已完成）
 
 建立 `backend/tests/agent_eval/`：
 
@@ -206,6 +206,8 @@ duration_ms
 每题先记录 `scenario / question / allowed_tools / expected_evidence / forbidden_claims / pass_rule`，不记录预设文案。无模型 runner 先验证工具与证据；下一阶段再增加模型回答评分。
 
 验收：20/20 工具级 fixture 可复现；非法写入为 0；所有数值期望可追溯到 fingerprint。
+
+实现结果：`backend/tests/agent_eval/` 已固定 4+6+6+2+2 共 20 题；runner 强制工具白名单、数值 provenance、版本/心法恢复与 userdata 零写入审计，当前结果为 20/20。
 
 ### P1-07 阶段回归与作品集证据
 
