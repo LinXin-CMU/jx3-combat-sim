@@ -194,6 +194,7 @@ Agent 将围绕明确目标自主调用高层工具：
 - [`docs/PHASE_0_PLAN.md`](docs/PHASE_0_PLAN.md)：公开仓库卫生计划；
 - [`docs/baselines/2026-08-25-phase0.md`](docs/baselines/2026-08-25-phase0.md)：Agent 接入前的回归与性能锚点；
 - [`docs/baselines/2026-08-25-versioned-golden-migration.md`](docs/baselines/2026-08-25-versioned-golden-migration.md)：跨版本 Golden v2 迁移证据；
+- [`docs/baselines/2026-08-25-clean-clone-audit.md`](docs/baselines/2026-08-25-clean-clone-audit.md)：全新目录构建、smoke 与跨平台哈希复现；
 - [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md)：公开仓库与 Demo 的发布阻断项；
 - [`docs/security/SECRET_SCAN_REPORT.md`](docs/security/SECRET_SCAN_REPORT.md)：脱敏与秘密扫描结果；
 - [`backend/PERF.md`](backend/PERF.md)：模拟器性能记录；
