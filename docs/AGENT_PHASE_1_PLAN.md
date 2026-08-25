@@ -4,7 +4,7 @@
 计划工期：5–7 个有效开发日  
 阶段目标：在不接入语言模型、不增加写入能力、不改变战斗数值的前提下，把现有模拟器封装为可独立测试的四个强类型只读工具，并建立 Agent 后续必须遵守的证据链与离线评测集。
 
-执行状态（2026-08-25）：架构节点已确认；P1-01 场景快照与 P1-02 领域层已实现，包含 canonical SHA-256、`EvidenceEnvelopeV1`、`get_current_scenario`、`simulate_scenario` 和模拟预算。Agent 工具层现有 17 项测试，完整 Rust 测试 51/51、两版本 Golden 8/8 和 smoke 均通过。下一工作包为 P1-03 强类型 A/B 对比。
+执行状态（2026-08-25）：架构节点已确认；P1-01 至 P1-03 领域层已实现，包含 canonical SHA-256、`EvidenceEnvelopeV1`、`get_current_scenario`、`simulate_scenario`、强类型 `compare_scenarios` 和原子模拟预算。Agent 工具层现有 24 项测试，完整 Rust 测试 58/58、两版本 Golden 8/8 和 smoke 均通过。下一工作包为 P1-04 确定性时间轴诊断。
 
 ## 1. 审计结论
 
@@ -76,6 +76,7 @@ scenario_hash  = SHA-256(canonical JSON)
 第一版使用白名单字段，不开放 JSON Pointer 或任意对象覆盖：
 
 - `sequence / macro_text / macro_duration`
+- `haste_level / channel_ticks / timing_offsets / qijin_buffs / pauses`
 - `attributes / equipment`
 - `talents / recipes`
 - `target / network_delay / initial_rage`
@@ -165,7 +166,7 @@ duration_ms
 
 验收：工具结果与 `/api/simulate` 在相同请求下 DPS、总伤、fight time 和 fingerprint 完全一致。
 
-### P1-03 对比工具
+### P1-03 对比工具（领域层已完成）
 
 - 实现 `ScenarioPatchV1` 和显式 diff；
 - 一次最多比较 3 个候选；

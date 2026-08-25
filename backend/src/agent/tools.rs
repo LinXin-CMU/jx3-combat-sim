@@ -42,14 +42,14 @@ impl ToolBudget {
         self.max_simulations.saturating_sub(self.used_simulations)
     }
 
-    fn consume_simulation(&mut self) -> Result<(), ToolError> {
-        if self.used_simulations >= self.max_simulations {
+    pub(super) fn reserve_simulations(&mut self, count: u32) -> Result<(), ToolError> {
+        if count > self.remaining_simulations() {
             return Err(ToolError::BudgetExceeded {
                 resource: "simulations",
                 limit: self.max_simulations,
             });
         }
-        self.used_simulations += 1;
+        self.used_simulations += count;
         Ok(())
     }
 }
@@ -67,6 +67,17 @@ pub enum ToolError {
     BudgetExceeded {
         resource: &'static str,
         limit: u32,
+    },
+    InvalidCandidateCount {
+        count: usize,
+        max: usize,
+    },
+    InvalidCandidateLabel,
+    DuplicateCandidateLabel {
+        label: String,
+    },
+    NoScenarioChanges {
+        label: String,
     },
 }
 
@@ -86,6 +97,18 @@ impl std::fmt::Display for ToolError {
             ),
             Self::BudgetExceeded { resource, limit } => {
                 write!(f, "tool budget exceeded: {resource} limit is {limit}")
+            }
+            Self::InvalidCandidateCount { count, max } => {
+                write!(f, "candidate count must be 1..={max}, got {count}")
+            }
+            Self::InvalidCandidateLabel => {
+                write!(f, "candidate label must be 1..64 characters without controls")
+            }
+            Self::DuplicateCandidateLabel { label } => {
+                write!(f, "duplicate candidate label: {label}")
+            }
+            Self::NoScenarioChanges { label } => {
+                write!(f, "candidate '{label}' does not change the baseline scenario")
             }
         }
     }
@@ -225,18 +248,9 @@ pub fn simulate_scenario(
     snapshot.verify_hash()?;
     verify_runtime(snapshot, context)?;
     validate_trace_id(trace_id)?;
-    budget.consume_simulation()?;
+    budget.reserve_simulations(1)?;
 
-    let response = simulate_core(
-        &snapshot.simulation,
-        context.skills,
-        context.game_version,
-        context.mount,
-        context.constants,
-        context.recipes,
-        context.team_buffs,
-        context.formations,
-    );
+    let response = run_simulation(snapshot, context);
     let summary = summarize_simulation(&response);
     let evidence = EvidenceEnvelopeV1::new(
         trace_id,
@@ -251,7 +265,7 @@ pub fn simulate_scenario(
     Ok(SimulationExecution { evidence, response })
 }
 
-fn verify_runtime(
+pub(super) fn verify_runtime(
     snapshot: &ScenarioSnapshotV1,
     context: &SimulatorContext<'_>,
 ) -> Result<(), ToolError> {
@@ -269,7 +283,23 @@ fn verify_runtime(
     }
 }
 
-fn summarize_simulation(response: &SimulateResponse) -> SimulationSummary {
+pub(super) fn run_simulation(
+    snapshot: &ScenarioSnapshotV1,
+    context: &SimulatorContext<'_>,
+) -> SimulateResponse {
+    simulate_core(
+        &snapshot.simulation,
+        context.skills,
+        context.game_version,
+        context.mount,
+        context.constants,
+        context.recipes,
+        context.team_buffs,
+        context.formations,
+    )
+}
+
+pub(super) fn summarize_simulation(response: &SimulateResponse) -> SimulationSummary {
     let mut grouped: BTreeMap<(u32, String, bool), (u32, f64)> = BTreeMap::new();
     for event in &response.timeline {
         let entry = grouped
@@ -308,7 +338,7 @@ fn summarize_simulation(response: &SimulateResponse) -> SimulationSummary {
     }
 }
 
-fn elapsed_ms(started: Instant) -> u64 {
+pub(super) fn elapsed_ms(started: Instant) -> u64 {
     started.elapsed().as_millis().try_into().unwrap_or(u64::MAX)
 }
 
