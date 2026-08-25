@@ -182,9 +182,9 @@ Agent 将围绕明确目标自主调用高层工具：
 - `compare_scenarios`
 - `analyze_timeline`
 
-它负责拆解问题、提出假设和组织证据，不直接生成“看起来合理”的伤害数字。第一版已经建立 20 条无模型离线评测题并固化性能与 trace 基线；provider adapter 已完成，下一步按 [`docs/AGENT_PHASE_2_PLAN.md`](docs/AGENT_PHASE_2_PLAN.md) 实现有界工具循环、证据校验和用户隔离会话。
+它负责拆解问题、提出假设和组织证据，不直接生成“看起来合理”的伤害数字。第一版已经建立 20 条无模型离线评测题并固化性能与 trace 基线；provider adapter、有界工具循环和数值证据校验已完成，下一步按 [`docs/AGENT_PHASE_2_PLAN.md`](docs/AGENT_PHASE_2_PLAN.md) 实现 Run API、SSE 和用户隔离会话。
 
-Provider 默认只启用不联网的 `offline` profile；可选服务商配置见 [`config/agent.providers.example.toml`](config/agent.providers.example.toml)。API key 只从服务端环境变量读取，不进入网页或用户设置。实现与隔离验收见 [`docs/baselines/2026-08-25-agent-provider-layer.md`](docs/baselines/2026-08-25-agent-provider-layer.md)。
+Provider 默认只启用不联网的 `offline` profile；可选服务商配置见 [`config/agent.providers.example.toml`](config/agent.providers.example.toml)。API key 只从服务端环境变量读取，不进入网页或用户设置。Provider 实现与隔离验收见 [`docs/baselines/2026-08-25-agent-provider-layer.md`](docs/baselines/2026-08-25-agent-provider-layer.md)，编排与证据校验见 [`docs/baselines/2026-08-25-agent-orchestrator.md`](docs/baselines/2026-08-25-agent-orchestrator.md)。
 
 ### 差异化案例：RL → 宏蒸馏
 

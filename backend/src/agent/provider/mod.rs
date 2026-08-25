@@ -27,7 +27,7 @@ pub use config::{
 pub use fake::FakeProvider;
 pub use protocol::{
     FinishReason, ModelMessage, ModelRequest, ModelResponse, ProviderToolCall, TokenUsage,
-    ToolDefinition, PROVIDER_PROTOCOL_V1,
+    StructuredOutputDefinition, ToolDefinition, PROVIDER_PROTOCOL_V1,
 };
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]

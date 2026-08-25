@@ -283,7 +283,7 @@ fn responses_request(model: &str, request: &ModelRequest) -> Result<Value, Provi
             })
         })
         .collect();
-    Ok(json!({
+    let mut body = json!({
         "model": model,
         "instructions": request.instructions,
         "input": input,
@@ -292,7 +292,18 @@ fn responses_request(model: &str, request: &ModelRequest) -> Result<Value, Provi
         "parallel_tool_calls": false,
         "max_output_tokens": request.max_output_tokens,
         "store": false,
-    }))
+    });
+    if let Some(format) = &request.response_format {
+        body["text"] = json!({
+            "format": {
+                "type": "json_schema",
+                "name": format.name,
+                "schema": format.schema,
+                "strict": true
+            }
+        });
+    }
+    Ok(body)
 }
 
 fn chat_request(model: &str, request: &ModelRequest) -> Result<Value, ProviderError> {
@@ -350,14 +361,25 @@ fn chat_request(model: &str, request: &ModelRequest) -> Result<Value, ProviderEr
             })
         })
         .collect();
-    Ok(json!({
+    let mut body = json!({
         "model": model,
         "messages": messages,
         "tools": tools,
         "tool_choice": "auto",
         "parallel_tool_calls": false,
         "max_tokens": request.max_output_tokens,
-    }))
+    });
+    if let Some(format) = &request.response_format {
+        body["response_format"] = json!({
+            "type": "json_schema",
+            "json_schema": {
+                "name": format.name,
+                "schema": format.schema,
+                "strict": true
+            }
+        });
+    }
+    Ok(body)
 }
 
 fn compact_json(value: &Value) -> Result<String, ProviderError> {
@@ -598,7 +620,7 @@ fn parse_tool_call(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::provider::ToolDefinition;
+    use crate::agent::provider::{StructuredOutputDefinition, ToolDefinition};
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
         net::TcpListener,
@@ -620,8 +642,36 @@ mod tests {
                     "additionalProperties": false
                 }),
             }],
+            response_format: None,
             max_output_tokens: 512,
         }
+    }
+
+    #[test]
+    fn structured_output_schema_maps_to_both_adapter_shapes() {
+        let mut request = request();
+        request.response_format = Some(StructuredOutputDefinition {
+            name: "agent_report_v1".to_string(),
+            schema: json!({
+                "type": "object",
+                "properties": {"summary": {"type": "string"}},
+                "required": ["summary"],
+                "additionalProperties": false
+            }),
+        });
+
+        let responses = responses_request("model", &request).unwrap();
+        assert_eq!(responses["text"]["format"]["type"], "json_schema");
+        assert_eq!(responses["text"]["format"]["strict"], true);
+        assert_eq!(responses["text"]["format"]["name"], "agent_report_v1");
+
+        let chat = chat_request("model", &request).unwrap();
+        assert_eq!(chat["response_format"]["type"], "json_schema");
+        assert_eq!(chat["response_format"]["json_schema"]["strict"], true);
+        assert_eq!(
+            chat["response_format"]["json_schema"]["name"],
+            "agent_report_v1"
+        );
     }
 
     async fn mock_server(status: u16, body: &'static str) -> (String, oneshot::Receiver<String>) {

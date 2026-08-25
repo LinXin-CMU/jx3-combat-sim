@@ -5,16 +5,13 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    FormationEntry, GameVersion, Mount, MountConstants, RecipeEntry, SharedState, SimulateRequest,
-    SkillSpec, TeamBuffEntry,
-};
+use crate::{SharedState, SimulateRequest};
 
 use super::evidence::EvidenceError;
 use super::{
-    analyze_timeline, compare_scenarios, get_current_scenario, simulate_scenario, CandidatePatchV1,
-    ComparisonExecution, EvidenceEnvelopeV1, ScenarioError, ScenarioSnapshotV1, ScenarioSummary,
-    SimulationSummary, SimulatorContext, TimelineAnalysis, ToolBudget, ToolError, ToolProvenance,
+    analyze_timeline, compare_scenarios, get_current_scenario, simulate_scenario, AgentRuntime,
+    CandidatePatchV1, ComparisonExecution, EvidenceEnvelopeV1, ScenarioError, ScenarioSnapshotV1,
+    ScenarioSummary, SimulationSummary, TimelineAnalysis, ToolBudget, ToolError,
 };
 
 pub const AGENT_ERROR_SCHEMA_V1: &str = "agent-tool-error/v1";
@@ -96,45 +93,6 @@ pub struct AgentToolError {
     pub message: String,
 }
 
-struct OwnedSimulatorContext {
-    game_version: GameVersion,
-    mount: Mount,
-    constants: MountConstants,
-    skills: Vec<SkillSpec>,
-    recipes: Vec<RecipeEntry>,
-    team_buffs: Vec<TeamBuffEntry>,
-    formations: Vec<FormationEntry>,
-    provenance: ToolProvenance,
-}
-
-impl OwnedSimulatorContext {
-    fn as_context(&self) -> SimulatorContext<'_> {
-        SimulatorContext {
-            game_version: self.game_version,
-            mount: self.mount,
-            constants: self.constants,
-            skills: &self.skills,
-            recipes: &self.recipes,
-            team_buffs: &self.team_buffs,
-            formations: &self.formations,
-        }
-    }
-}
-
-async fn load_runtime(state: &SharedState) -> OwnedSimulatorContext {
-    let _gate = state.agent_context_gate.read().await;
-    OwnedSimulatorContext {
-        game_version: *state.version.read().await,
-        mount: *state.mount.read().await,
-        constants: *state.constants.read().await,
-        skills: state.skills.read().await.clone(),
-        recipes: state.recipes.read().await.clone(),
-        team_buffs: state.team_buffs.read().await.clone(),
-        formations: state.formations.read().await.clone(),
-        provenance: state.agent_provenance.read().await.clone(),
-    }
-}
-
 pub async fn scenario_handler(
     State(state): State<SharedState>,
     payload: Result<Json<ScenarioToolRequest>, JsonRejection>,
@@ -143,10 +101,10 @@ pub async fn scenario_handler(
         Ok(request) => request,
         Err(_) => return invalid_json_response("get_current_scenario"),
     };
-    let runtime = load_runtime(&state).await;
+    let runtime = AgentRuntime::load(&state).await;
     let scenario = match ScenarioSnapshotV1::capture(
-        runtime.game_version,
-        runtime.mount,
+        runtime.game_version(),
+        runtime.mount(),
         request.simulation,
     ) {
         Ok(scenario) => scenario,
@@ -159,7 +117,7 @@ pub async fn scenario_handler(
             )
         }
     };
-    match get_current_scenario(&request.trace_id, &scenario, &runtime.provenance) {
+    match get_current_scenario(&request.trace_id, &scenario, runtime.provenance()) {
         Ok(evidence) => json_response(ScenarioToolResponse { scenario, evidence }),
         Err(error) => tool_error_response(
             "get_current_scenario",
@@ -186,14 +144,14 @@ pub async fn simulate_handler(
             SIMULATE_MAX_SIMULATIONS,
         );
     }
-    let runtime = load_runtime(&state).await;
-    let context = runtime.as_context();
+    let runtime = AgentRuntime::load(&state).await;
+    let context = runtime.context();
     let mut budget = ToolBudget::new(request.max_simulations);
     match simulate_scenario(
         &request.trace_id,
         &request.scenario,
         &context,
-        &runtime.provenance,
+        runtime.provenance(),
         &mut budget,
     ) {
         Ok(execution) => json_response(SimulateToolResponse {
@@ -224,15 +182,15 @@ pub async fn compare_handler(
             COMPARE_MAX_SIMULATIONS,
         );
     }
-    let runtime = load_runtime(&state).await;
-    let context = runtime.as_context();
+    let runtime = AgentRuntime::load(&state).await;
+    let context = runtime.context();
     let mut budget = ToolBudget::new(request.max_simulations);
     let result: Result<ComparisonExecution, ToolError> = compare_scenarios(
         &request.trace_id,
         &request.baseline,
         &request.candidates,
         &context,
-        &runtime.provenance,
+        runtime.provenance(),
         &mut budget,
     );
     match result {
@@ -264,14 +222,14 @@ pub async fn timeline_handler(
             TIMELINE_MAX_SIMULATIONS,
         );
     }
-    let runtime = load_runtime(&state).await;
-    let context = runtime.as_context();
+    let runtime = AgentRuntime::load(&state).await;
+    let context = runtime.context();
     let mut budget = ToolBudget::new(request.max_simulations);
     let simulation = match simulate_scenario(
         &request.trace_id,
         &request.scenario,
         &context,
-        &runtime.provenance,
+        runtime.provenance(),
         &mut budget,
     ) {
         Ok(execution) => execution,
@@ -284,7 +242,7 @@ pub async fn timeline_handler(
             )
         }
     };
-    match analyze_timeline(&request.trace_id, &simulation, &runtime.provenance) {
+    match analyze_timeline(&request.trace_id, &simulation, runtime.provenance()) {
         Ok(timeline) => json_response(TimelineToolResponse {
             simulation: simulation.evidence,
             timeline: timeline.evidence,

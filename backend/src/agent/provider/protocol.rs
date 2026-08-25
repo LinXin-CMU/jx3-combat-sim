@@ -46,11 +46,20 @@ pub struct ToolDefinition {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+pub struct StructuredOutputDefinition {
+    pub name: String,
+    pub schema: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct ModelRequest {
     pub instructions: String,
     pub messages: Vec<ModelMessage>,
     #[serde(default)]
     pub tools: Vec<ToolDefinition>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_format: Option<StructuredOutputDefinition>,
     pub max_output_tokens: u32,
 }
 
@@ -124,6 +133,14 @@ impl ModelRequest {
                 "too_many_tools",
                 "no more than 16 tools may be exposed",
             ));
+        }
+        if let Some(format) = &self.response_format {
+            if !valid_identifier(&format.name) || !format.schema.is_object() {
+                return Err(protocol_error(
+                    "invalid_response_schema",
+                    "structured output requires a valid name and object schema",
+                ));
+            }
         }
 
         let mut tool_names = HashSet::new();
@@ -308,6 +325,7 @@ mod tests {
                 description: "Run a typed A/B comparison.".to_string(),
                 parameters: serde_json::json!({"type": "object"}),
             }],
+            response_format: None,
             max_output_tokens: 1024,
         }
     }

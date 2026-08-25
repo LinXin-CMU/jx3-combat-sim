@@ -8,7 +8,12 @@ pub mod compare;
 pub mod evidence;
 pub mod hash;
 pub mod http;
+pub mod orchestrator;
+pub mod prompt;
 pub mod provider;
+pub mod registry;
+pub mod report;
+pub mod runtime;
 pub mod schema;
 pub mod timeline;
 pub mod tools;
@@ -18,6 +23,7 @@ pub use compare::{
     ComparisonMetrics, FieldChange, PatchValueV1, ScenarioComparison, ScenarioPatchV1,
 };
 pub use evidence::{EvidenceEnvelopeV1, ToolProvenance, EVIDENCE_SCHEMA_V1};
+pub use runtime::AgentRuntime;
 pub use schema::{ScenarioError, ScenarioSnapshotV1, SCENARIO_SCHEMA_V1};
 pub use timeline::{
     analyze_timeline, BuffCoverage, GcdGapEvidence, RageObservation, TimeInterval,
