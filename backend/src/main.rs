@@ -4810,6 +4810,8 @@ pub struct SharedState {
     pub agent_provenance: Arc<RwLock<agent::ToolProvenance>>,
     /// 服务端定义的模型供应商目录；安全摘要可见，凭据只在创建 adapter 时从环境变量解析。
     pub agent_providers: Arc<agent::provider::ProviderCatalog>,
+    /// 当前 worker 的瞬态 Agent run；每个 worker 同时只允许一个活动 run。
+    pub agent_runs: Arc<agent::run::AgentRunManager>,
     /// 当前选中的武学版本（初始 V2025_10 山海源流）
     pub version: Arc<RwLock<GameVersion>>,
     /// 当前选中的心法（初始 分山劲）
@@ -9385,6 +9387,7 @@ async fn main() {
         agent_context_gate: Arc::new(RwLock::new(())),
         agent_provenance: Arc::new(RwLock::new(agent_provenance)),
         agent_providers: Arc::new(agent_providers),
+        agent_runs: agent::run::AgentRunManager::new(),
         version: Arc::new(RwLock::new(version)),
         mount: Arc::new(RwLock::new(mount)),
         constants: Arc::new(RwLock::new(constants)),
@@ -9444,6 +9447,10 @@ async fn main() {
         .route("/api/agent/tools/compare", post(agent::http::compare_handler))
         .route("/api/agent/tools/timeline", post(agent::http::timeline_handler))
         .route("/api/agent/providers", get(agent::provider::providers_handler))
+        .route("/api/agent/runs", post(agent::run::create_run_handler))
+        .route("/api/agent/runs/:run_id", get(agent::run::run_status_handler))
+        .route("/api/agent/runs/:run_id/stream", get(agent::run::run_stream_handler))
+        .route("/api/agent/runs/:run_id/cancel", post(agent::run::cancel_run_handler))
         .route("/api/macro/presets", get(macro_presets))
         .route("/api/macro/save",    post(macro_save))
         .route("/api/macro/load",    get(macro_load))

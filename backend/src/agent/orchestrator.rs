@@ -4,6 +4,7 @@ use std::sync::{
     Arc,
 };
 use std::time::{Duration, Instant};
+use tokio::sync::Notify;
 
 use super::evidence::validate_trace_id;
 use super::prompt::agent_prompt_v1;
@@ -103,18 +104,89 @@ pub struct AgentRunResultV1 {
     pub trace: Vec<AgentTraceEventV1>,
 }
 
-#[derive(Debug, Clone, Default)]
+pub type AgentTraceSink = Arc<dyn Fn(AgentTraceEventV1) + Send + Sync>;
+
+#[derive(Debug)]
+struct AgentCancellationInner {
+    cancelled: AtomicBool,
+    notify: Notify,
+}
+
+#[derive(Debug, Clone)]
 pub struct AgentCancellation {
-    cancelled: Arc<AtomicBool>,
+    inner: Arc<AgentCancellationInner>,
+}
+
+impl Default for AgentCancellation {
+    fn default() -> Self {
+        Self {
+            inner: Arc::new(AgentCancellationInner {
+                cancelled: AtomicBool::new(false),
+                notify: Notify::new(),
+            }),
+        }
+    }
 }
 
 impl AgentCancellation {
     pub fn cancel(&self) {
-        self.cancelled.store(true, Ordering::SeqCst);
+        self.inner.cancelled.store(true, Ordering::SeqCst);
+        self.inner.notify.notify_waiters();
     }
 
     pub fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::SeqCst)
+        self.inner.cancelled.load(Ordering::SeqCst)
+    }
+
+    pub async fn cancelled(&self) {
+        loop {
+            let notified = self.inner.notify.notified();
+            if self.is_cancelled() {
+                return;
+            }
+            notified.await;
+            if self.is_cancelled() {
+                return;
+            }
+        }
+    }
+}
+
+struct TraceCollector {
+    events: Vec<AgentTraceEventV1>,
+    sink: Option<AgentTraceSink>,
+}
+
+impl TraceCollector {
+    fn new(sink: Option<AgentTraceSink>) -> Self {
+        Self {
+            events: Vec::new(),
+            sink,
+        }
+    }
+
+    fn push(
+        &mut self,
+        kind: &str,
+        tool_name: Option<String>,
+        evidence_ids: Vec<String>,
+        code: Option<String>,
+    ) {
+        let event = AgentTraceEventV1 {
+            sequence: self.events.len() as u32 + 1,
+            kind: kind.to_string(),
+            tool_name,
+            evidence_ids,
+            code,
+        };
+        if let Some(sink) = &self.sink {
+            sink(event.clone());
+        }
+        self.events.push(event);
+    }
+
+    fn into_events(self) -> Vec<AgentTraceEventV1> {
+        self.events
     }
 }
 
@@ -125,10 +197,21 @@ pub async fn run_agent(
     limits: AgentRunLimits,
     cancellation: AgentCancellation,
 ) -> AgentRunResultV1 {
+    run_agent_observed(provider, runtime, input, limits, cancellation, None).await
+}
+
+pub async fn run_agent_observed(
+    provider: &dyn LlmProvider,
+    runtime: &AgentRuntime,
+    input: AgentRunInput,
+    limits: AgentRunLimits,
+    cancellation: AgentCancellation,
+    event_sink: Option<AgentTraceSink>,
+) -> AgentRunResultV1 {
     let started = Instant::now();
     let prompt = agent_prompt_v1();
     let mut accounting = AgentRunAccountingV1::default();
-    let mut trace = Vec::new();
+    let mut trace = TraceCollector::new(event_sink);
 
     if validate_input(&input, &limits).is_err() {
         return terminal(
@@ -153,7 +236,7 @@ pub async fn run_agent(
         content: input.question.clone(),
     }];
     let mut repairs = 0;
-    push_event(&mut trace, "planning", None, Vec::new(), None);
+    trace.push("planning", None, Vec::new(), None);
 
     loop {
         if cancellation.is_cancelled() {
@@ -236,9 +319,27 @@ pub async fn run_agent(
         accounting.model_turns += 1;
         let remaining =
             Duration::from_millis(limits.wall_time_ms).saturating_sub(started.elapsed());
-        let response = match tokio::time::timeout(remaining, provider.complete(&request)).await {
-            Ok(Ok(response)) => response,
-            Ok(Err(error)) => {
+        let provider_result = tokio::select! {
+            result = tokio::time::timeout(remaining, provider.complete(&request)) => Some(result),
+            _ = cancellation.cancelled() => None,
+        };
+        let response = match provider_result {
+            None => {
+                return terminal_with_registry(
+                    provider,
+                    &input,
+                    &prompt,
+                    AgentRunStatus::Cancelled,
+                    accounting,
+                    None,
+                    Some(fixed_error("run_cancelled", "Agent run was cancelled")),
+                    trace,
+                    started,
+                    &registry,
+                )
+            }
+            Some(Ok(Ok(response))) => response,
+            Some(Ok(Err(error))) => {
                 return terminal_with_registry(
                     provider,
                     &input,
@@ -252,7 +353,7 @@ pub async fn run_agent(
                     &registry,
                 )
             }
-            Err(_) => {
+            Some(Err(_)) => {
                 return terminal_with_registry(
                     provider,
                     &input,
@@ -342,16 +443,9 @@ pub async fn run_agent(
                     );
                 }
                 accounting.tool_calls += 1;
-                push_event(
-                    &mut trace,
-                    "tool_started",
-                    Some(call.name.clone()),
-                    Vec::new(),
-                    None,
-                );
+                trace.push("tool_started", Some(call.name.clone()), Vec::new(), None);
                 let outcome = registry.dispatch(&input.run_id, &call.name, call.arguments);
-                push_event(
-                    &mut trace,
+                trace.push(
                     "tool_finished",
                     Some(call.name.clone()),
                     outcome.evidence_ids.clone(),
@@ -401,7 +495,7 @@ pub async fn run_agent(
             );
         }
 
-        push_event(&mut trace, "validating", None, Vec::new(), None);
+        trace.push("validating", None, Vec::new(), None);
         let raw = response.assistant_text.as_deref().unwrap_or_default();
         match parse_and_validate_report(raw, registry.evidence()) {
             Ok(content) => {
@@ -427,8 +521,7 @@ pub async fn run_agent(
                         error.code
                     ),
                 });
-                push_event(
-                    &mut trace,
+                trace.push(
                     "report_repair_requested",
                     None,
                     Vec::new(),
@@ -459,7 +552,10 @@ fn validate_input(input: &AgentRunInput, limits: &AgentRunLimits) -> Result<(), 
     validate_trace_id(&input.run_id).map_err(|_| ())?;
     if input.question.trim().is_empty()
         || input.question.len() > MAX_QUESTION_BYTES
-        || input.question.chars().any(char::is_control)
+        || input
+            .question
+            .chars()
+            .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
         || limits.max_model_turns == 0
         || limits.max_model_turns > 6
         || limits.max_tool_calls == 0
@@ -483,7 +579,7 @@ fn completed_report(
     status: AgentRunStatus,
     accounting: AgentRunAccountingV1,
     content: AgentReportContentV1,
-    trace: Vec<AgentTraceEventV1>,
+    trace: TraceCollector,
     started: Instant,
     registry: &AgentToolRegistry<'_>,
 ) -> AgentRunResultV1 {
@@ -501,7 +597,7 @@ fn terminal_with_report(
     mut accounting: AgentRunAccountingV1,
     content: AgentReportContentV1,
     error: Option<AgentRunErrorV1>,
-    mut trace: Vec<AgentTraceEventV1>,
+    mut trace: TraceCollector,
     started: Instant,
     registry: &AgentToolRegistry<'_>,
 ) -> AgentRunResultV1 {
@@ -521,8 +617,7 @@ fn terminal_with_report(
         accounting: accounting.clone(),
         termination: termination.clone(),
     };
-    push_event(
-        &mut trace,
+    trace.push(
         status_name(&status),
         None,
         report.evidence_ids.clone(),
@@ -549,14 +644,13 @@ fn terminal_with_registry(
     mut accounting: AgentRunAccountingV1,
     report: Option<AgentReportV1>,
     error: Option<AgentRunErrorV1>,
-    mut trace: Vec<AgentTraceEventV1>,
+    mut trace: TraceCollector,
     started: Instant,
     registry: &AgentToolRegistry<'_>,
 ) -> AgentRunResultV1 {
     accounting.simulations = registry.used_simulations();
     accounting.duration_ms = elapsed_ms(started);
-    push_event(
-        &mut trace,
+    trace.push(
         status_name(&status),
         None,
         Vec::new(),
@@ -576,12 +670,11 @@ fn terminal(
     mut accounting: AgentRunAccountingV1,
     report: Option<AgentReportV1>,
     error: Option<AgentRunErrorV1>,
-    mut trace: Vec<AgentTraceEventV1>,
+    mut trace: TraceCollector,
     started: Instant,
 ) -> AgentRunResultV1 {
     accounting.duration_ms = elapsed_ms(started);
-    push_event(
-        &mut trace,
+    trace.push(
         status_name(&status),
         None,
         Vec::new(),
@@ -601,7 +694,7 @@ fn result(
     accounting: AgentRunAccountingV1,
     report: Option<AgentReportV1>,
     error: Option<AgentRunErrorV1>,
-    trace: Vec<AgentTraceEventV1>,
+    trace: TraceCollector,
 ) -> AgentRunResultV1 {
     AgentRunResultV1 {
         schema_version: AGENT_RUN_SCHEMA_V1.to_string(),
@@ -615,7 +708,7 @@ fn result(
         accounting,
         report,
         error,
-        trace,
+        trace: trace.into_events(),
     }
 }
 
@@ -641,22 +734,6 @@ fn add_usage(accounting: &mut AgentRunAccountingV1, usage: &TokenUsage) {
     accounting.input_tokens = accounting.input_tokens.saturating_add(usage.input_tokens);
     accounting.output_tokens = accounting.output_tokens.saturating_add(usage.output_tokens);
     accounting.total_tokens = accounting.total_tokens.saturating_add(usage.total_tokens);
-}
-
-fn push_event(
-    events: &mut Vec<AgentTraceEventV1>,
-    kind: &str,
-    tool_name: Option<String>,
-    evidence_ids: Vec<String>,
-    code: Option<String>,
-) {
-    events.push(AgentTraceEventV1 {
-        sequence: events.len() as u32 + 1,
-        kind: kind.to_string(),
-        tool_name,
-        evidence_ids,
-        code,
-    });
 }
 
 fn status_name(status: &AgentRunStatus) -> &'static str {

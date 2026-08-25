@@ -182,9 +182,9 @@ Agent 将围绕明确目标自主调用高层工具：
 - `compare_scenarios`
 - `analyze_timeline`
 
-它负责拆解问题、提出假设和组织证据，不直接生成“看起来合理”的伤害数字。第一版已经建立 20 条无模型离线评测题并固化性能与 trace 基线；provider adapter、有界工具循环和数值证据校验已完成，下一步按 [`docs/AGENT_PHASE_2_PLAN.md`](docs/AGENT_PHASE_2_PLAN.md) 实现 Run API、SSE 和用户隔离会话。
+它负责拆解问题、提出假设和组织证据，不直接生成“看起来合理”的伤害数字。第一版已经建立 20 条无模型离线评测题并固化性能与 trace 基线；provider adapter、有界工具循环、数值证据校验、Run API 和 SSE 生命周期已完成，下一步按 [`docs/AGENT_PHASE_2_PLAN.md`](docs/AGENT_PHASE_2_PLAN.md) 实现用户隔离的持久会话。
 
-Provider 默认只启用不联网的 `offline` profile；可选服务商配置见 [`config/agent.providers.example.toml`](config/agent.providers.example.toml)。API key 只从服务端环境变量读取，不进入网页或用户设置。Provider 实现与隔离验收见 [`docs/baselines/2026-08-25-agent-provider-layer.md`](docs/baselines/2026-08-25-agent-provider-layer.md)，编排与证据校验见 [`docs/baselines/2026-08-25-agent-orchestrator.md`](docs/baselines/2026-08-25-agent-orchestrator.md)。
+Provider 默认只启用不联网的 `offline` profile；可选服务商配置见 [`config/agent.providers.example.toml`](config/agent.providers.example.toml)。API key 只从服务端环境变量读取，不进入网页或用户设置。Provider 实现与隔离验收见 [`docs/baselines/2026-08-25-agent-provider-layer.md`](docs/baselines/2026-08-25-agent-provider-layer.md)，编排与证据校验见 [`docs/baselines/2026-08-25-agent-orchestrator.md`](docs/baselines/2026-08-25-agent-orchestrator.md)，Run/SSE 生命周期见 [`docs/baselines/2026-08-26-agent-run-lifecycle.md`](docs/baselines/2026-08-26-agent-run-lifecycle.md)。
 
 ### 差异化案例：RL → 宏蒸馏
 
@@ -208,6 +208,7 @@ Provider 默认只启用不联网的 `offline` profile；可选服务商配置�
 - [`docs/AGENT_PORTFOLIO_PLAN.md`](docs/AGENT_PORTFOLIO_PLAN.md)：四套 Agent 方案和六周路线；
 - [`docs/AGENT_PHASE_1_PLAN.md`](docs/AGENT_PHASE_1_PLAN.md)：首批四个只读工具、证据协议与 20 题评测计划；
 - [`docs/AGENT_PHASE_2_PLAN.md`](docs/AGENT_PHASE_2_PLAN.md)：模型供应商、工具循环、SSE、证据校验与持久会话计划；
+- [`docs/AGENT_RUN_HTTP_API.md`](docs/AGENT_RUN_HTTP_API.md)：Agent Run 创建、状态、SSE、取消与固定错误协议；
 - [`backend/tests/agent_eval/README.md`](backend/tests/agent_eval/README.md)：20 题无模型评测结构、运行方式与安全边界；
 - [`docs/PHASE_0_PLAN.md`](docs/PHASE_0_PLAN.md)：公开仓库卫生计划；
 - [`docs/baselines/2026-08-25-phase0.md`](docs/baselines/2026-08-25-phase0.md)：Agent 接入前的回归与性能锚点；

@@ -87,4 +87,55 @@ impl AgentRuntime {
             provenance,
         }
     }
+
+    #[cfg(test)]
+    pub fn fixture_scenario(&self) -> super::ScenarioSnapshotV1 {
+        use crate::{Attributes, TargetConfig};
+        use std::collections::HashMap;
+
+        super::ScenarioSnapshotV1::capture(
+            self.game_version,
+            self.mount,
+            crate::SimulateRequest {
+                haste_level: 42_087,
+                sequence: vec!["盾击".to_string(), "盾压".to_string()],
+                talents: Vec::new(),
+                channel_ticks: HashMap::new(),
+                timing_offsets: HashMap::new(),
+                network_delay: 0,
+                recipes: Vec::new(),
+                qijin_buffs: HashMap::new(),
+                macro_text: None,
+                macro_duration: None,
+                attributes: Some(Attributes {
+                    base_attack: 38_466.0,
+                    weapon_damage: 10_986.0,
+                    crit_level: 54_841.0,
+                    crit_effect_level: 0.0,
+                    overcome_level: 29_480.0,
+                    strain_level: 66_031.0,
+                    haste_level: 42_087.0,
+                    ..Attributes::default()
+                }),
+                target: Some(TargetConfig {
+                    level: 134,
+                    defense_bonus: 0.0,
+                    damage_cof: 0.0,
+                }),
+                initial_rage: Some(50),
+                pauses: Vec::new(),
+                boss_attack_interval: None,
+                hanjia_expectation: None,
+                tiegu_mode: 2,
+                experimental: false,
+                lite: false,
+                lite_keep_timeline: false,
+                equipment: HashMap::new(),
+                team_buffs: Vec::new(),
+                formation: None,
+                pre_releases: Vec::new(),
+            },
+        )
+        .unwrap()
+    }
 }

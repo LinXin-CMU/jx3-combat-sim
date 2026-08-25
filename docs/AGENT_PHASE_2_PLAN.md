@@ -1,6 +1,6 @@
 # Agent Phase 2：模型编排与持久会话计划
 
-状态：P2-00 已确认，P2-01/P2-02/P2-03 已完成。尚未接入真实模型，尚未创建 Agent 会话数据。Provider 基线见 [`baselines/2026-08-25-agent-provider-layer.md`](baselines/2026-08-25-agent-provider-layer.md)，Orchestrator 基线见 [`baselines/2026-08-25-agent-orchestrator.md`](baselines/2026-08-25-agent-orchestrator.md)。
+状态：P2-00 已确认，P2-01/P2-02/P2-03/P2-04 已完成。尚未接入真实模型，尚未创建 Agent 会话数据。Provider 基线见 [`baselines/2026-08-25-agent-provider-layer.md`](baselines/2026-08-25-agent-provider-layer.md)，Orchestrator 基线见 [`baselines/2026-08-25-agent-orchestrator.md`](baselines/2026-08-25-agent-orchestrator.md)，Run/SSE 基线见 [`baselines/2026-08-26-agent-run-lifecycle.md`](baselines/2026-08-26-agent-run-lifecycle.md)。
 
 ## 阶段目标
 
@@ -243,6 +243,8 @@ agent_sessions/
 
 ### P2-04：Run API、SSE 与取消
 
+状态：已完成。
+
 - 实现 run manager 和规范化 SSE 事件；
 - 每用户只允许一个活动 run；
 - 处理断线、取消、超时和 worker 重启；
@@ -304,4 +306,4 @@ agent_sessions/
 2. 会话新增到每用户 `agent_sessions/v1`，默认不自动删除，且不迁移旧数据；
 3. P2-01/P2-02 只做离线和 mock 测试；真实模型、profile 与费用上限在第一次外部调用前另行确认。
 
-P2-01/P2-02/P2-03 已按该边界完成。下一次阻断节点仍是首次真实模型调用；P2-04 可以继续使用 fake provider 实现 Run API、SSE 和取消生命周期，而不触发该节点。
+P2-01/P2-02/P2-03/P2-04 已按该边界完成。接下来进入阻断节点 B：P2-05 会首次向真实 `userdata` 增加 Agent 会话路径，实施前必须重新核对目录哈希、增量路径、脱敏字段和保留策略并由用户确认。首次真实模型调用的阻断节点 A 仍未触发。

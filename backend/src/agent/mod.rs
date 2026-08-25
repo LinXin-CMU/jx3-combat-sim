@@ -13,6 +13,7 @@ pub mod prompt;
 pub mod provider;
 pub mod registry;
 pub mod report;
+pub mod run;
 pub mod runtime;
 pub mod schema;
 pub mod timeline;
