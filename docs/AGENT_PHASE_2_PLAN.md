@@ -1,6 +1,6 @@
 # Agent Phase 2：模型编排与持久会话计划
 
-状态：P2-00 设计冻结候选稿，尚未接入真实模型，尚未创建 Agent 会话数据。
+状态：P2-00 已确认，P2-01/P2-02 已完成。尚未接入真实模型，尚未创建 Agent 会话数据。实现基线见 [`baselines/2026-08-25-agent-provider-layer.md`](baselines/2026-08-25-agent-provider-layer.md)。
 
 ## 阶段目标
 
@@ -208,7 +208,9 @@ agent_sessions/
 
 ### P2-01：配置骨架与离线 provider
 
-- 新建独立 `backend/src/agent/` 模块；
+状态：已完成。
+
+- 在现有 Agent 工具层下新建独立 `backend/src/agent/provider/` 模块；
 - 定义 provider profile schema、校验和安全的列表响应；
 - 实现 `fake` provider 与无网络单元测试；
 - 增加 settings 敏感字段防御，不迁移已有设置。
@@ -216,6 +218,8 @@ agent_sessions/
 验收：没有配置或 key 时主站照常运行；fake provider 可重复；前端和 API 均拿不到秘密。
 
 ### P2-02：规范化 provider 协议
+
+状态：已完成。
 
 - 定义与业务无关的 model message/tool call/result 协议；
 - 实现 `openai_responses` 与 `openai_compatible_chat` adapter；
@@ -290,10 +294,12 @@ agent_sessions/
 - 真实模型评测报告包含延迟、token、成本、成功率和失败样本；
 - 本地一键运行仍成立，公网默认关闭。
 
-## 当前待确认
+## 已确认边界与后续阻断点
 
-P2-00 建议在进入实现前冻结以下三点：
+以下三点已于 P2-00 确认：
 
 1. 首批 adapter 为 `fake + openai_responses + openai_compatible_chat`；
 2. 会话新增到每用户 `agent_sessions/v1`，默认不自动删除，且不迁移旧数据；
 3. P2-01/P2-02 只做离线和 mock 测试；真实模型、profile 与费用上限在第一次外部调用前另行确认。
+
+P2-01/P2-02 已按该边界完成。下一次阻断节点仍是首次真实模型调用；P2-03 可以继续使用 fake provider 实现 prompt、Orchestrator 和证据校验，而不触发该节点。

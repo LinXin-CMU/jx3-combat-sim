@@ -4,7 +4,7 @@
 
 这是我面向 2027 届游戏策划岗位准备的个人作品集项目。项目重点不是复刻一个游戏界面，而是展示如何把复杂战斗规则转化为可以配置、验证、对比和部署的策划工具。
 
-当前已经实现战斗模拟、宏优化、配装搜索和强化学习环境；Agent 已完成四个只读工具、证据协议和 20 题无模型评测基线。模型编排与持久会话的 P2 设计已经完成，真实模型与聊天界面尚未接入。
+当前已经实现战斗模拟、宏优化、配装搜索和强化学习环境；Agent 已完成四个只读工具、证据协议、20 题无模型评测，以及可替换的离线/OpenAI Responses/OpenAI-compatible Chat provider 层。真实模型、Orchestrator、持久会话与聊天界面尚未接入。
 
 ## 90 秒了解项目
 
@@ -125,7 +125,7 @@ Set-Location backend
 cargo test
 ```
 
-当前基线为 69 项通过、0 失败，其中包含 Agent 场景身份、证据 envelope、只读模拟、强类型 A/B 对比、确定性时间轴诊断和 HTTP 错误映射的 35 项测试；恢复 2025 独立脚本路由后共有 19 条编译 warning，计划作为后续工程卫生任务处理。
+当前基线为 88 项通过、0 失败：Phase 0 原有 34 项、Agent 工具/HTTP 层 35 项、provider 与设置安全 19 项；恢复 2025 独立脚本路由后共有 19 条编译 warning，计划作为后续工程卫生任务处理。
 
 ### 前端语法
 
@@ -182,7 +182,9 @@ Agent 将围绕明确目标自主调用高层工具：
 - `compare_scenarios`
 - `analyze_timeline`
 
-它负责拆解问题、提出假设和组织证据，不直接生成“看起来合理”的伤害数字。第一版已经建立 20 条无模型离线评测题并固化性能与 trace 基线；下一步按 [`docs/AGENT_PHASE_2_PLAN.md`](docs/AGENT_PHASE_2_PLAN.md) 实现 provider adapter、有界工具循环、证据校验和用户隔离会话。
+它负责拆解问题、提出假设和组织证据，不直接生成“看起来合理”的伤害数字。第一版已经建立 20 条无模型离线评测题并固化性能与 trace 基线；provider adapter 已完成，下一步按 [`docs/AGENT_PHASE_2_PLAN.md`](docs/AGENT_PHASE_2_PLAN.md) 实现有界工具循环、证据校验和用户隔离会话。
+
+Provider 默认只启用不联网的 `offline` profile；可选服务商配置见 [`config/agent.providers.example.toml`](config/agent.providers.example.toml)。API key 只从服务端环境变量读取，不进入网页或用户设置。实现与隔离验收见 [`docs/baselines/2026-08-25-agent-provider-layer.md`](docs/baselines/2026-08-25-agent-provider-layer.md)。
 
 ### 差异化案例：RL → 宏蒸馏
 
@@ -212,6 +214,7 @@ Agent 将围绕明确目标自主调用高层工具：
 - [`docs/baselines/2026-08-25-versioned-golden-migration.md`](docs/baselines/2026-08-25-versioned-golden-migration.md)：跨版本 Golden v2 迁移证据；
 - [`docs/baselines/2026-08-25-clean-clone-audit.md`](docs/baselines/2026-08-25-clean-clone-audit.md)：全新目录构建、smoke 与跨平台哈希复现；
 - [`docs/baselines/2026-08-25-agent-tool-layer.md`](docs/baselines/2026-08-25-agent-tool-layer.md)：P1 工具性能、证据确定性、成功/拒绝 trace 与完整回归；
+- [`docs/baselines/2026-08-25-agent-provider-layer.md`](docs/baselines/2026-08-25-agent-provider-layer.md)：P2 provider 协议、凭据边界、mock 与隔离 HTTP 验收；
 - [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md)：公开仓库与 Demo 的发布阻断项；
 - [`docs/security/SECRET_SCAN_REPORT.md`](docs/security/SECRET_SCAN_REPORT.md)：脱敏与秘密扫描结果；
 - [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)：MIT 适用范围、游戏数据与第三方来源边界；
