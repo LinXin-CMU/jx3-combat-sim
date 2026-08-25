@@ -12,7 +12,7 @@ pub fn cast_skill(player: &mut Player, _em: &mut ScriptEmitter, _t: f64) {
       + player.has_recipe(6005) as i32 * 5
       + player.has_recipe(6006) as i32 * 5;
     if extra_rage > 0 {
-        player.rage = (player.rage + extra_rage).min(100);
+        player.add_rage(extra_rage);
     }
 
     // 秘籍：持续时间增加（6001/6002/6003 各+1秒=16帧）
@@ -43,6 +43,6 @@ pub fn cast_skill(player: &mut Player, _em: &mut ScriptEmitter, _t: f64) {
     // 奇穴 血魄（38969）：清空斩刀 CD + 返 25 怒气
     if player.has_talent(38969) {
         player.reset_cd("cd_斩刀");
-        player.rage = (player.rage + 25).min(100);
+        player.add_rage(25);
     }
 }

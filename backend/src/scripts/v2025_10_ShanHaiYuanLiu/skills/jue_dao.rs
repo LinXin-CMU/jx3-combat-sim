@@ -69,13 +69,13 @@ pub fn cast_skill(player: &mut Player, em: &mut ScriptEmitter, t: f64) {
 
     // 狂绝：返还已消耗的怒气，消耗狂绝 buff
     if player.has_buff(BUFF_KUANG_JUE) {
-        player.rage = (player.rage + player.last_rage_cost as i32).min(100);
+        player.add_rage(player.last_rage_cost as i32);
         player.remove_buff(BUFF_KUANG_JUE);
     }
 
     // 橙武：擎刀绝刀消耗归零（事后返还，让 last_rage_cost 仍按段算秘籍/name）
     if player.has_buff(BUFF_CHENG_WU) {
-        player.rage = (player.rage + player.last_rage_cost as i32).min(100);
+        player.add_rage(player.last_rage_cost as i32);
     }
 
     // 嗜血奇穴：施展绝刀获得嗜血 buff

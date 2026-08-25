@@ -29,7 +29,7 @@ pub fn try_trigger(player: &mut Player, em: &mut ScriptEmitter, t: f64) {
             player.reset_cd("cd_绝刀");
             player.reset_cd("cd_劫刀");
             player.reset_cd("cd_闪刀");
-            player.rage = (player.rage + 65).min(100);
+            player.add_rage(65);
             player.add_target_buff(BUFF_XU_RUO);
             player.add_buff(BUFF_LIN_AN);
             player.remove_buff(BUFF_LIN_GUANG_COUNT);

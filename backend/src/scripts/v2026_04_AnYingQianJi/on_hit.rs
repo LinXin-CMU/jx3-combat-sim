@@ -52,9 +52,8 @@ pub fn on_player_hit(player: &mut Player, t: f64) -> Vec<CastEvent> {
         let cd_key = "formation_tiegu_block_cd";
         let cd_ready = player.active_cds.get(cd_key).copied().unwrap_or(0.0) <= t;
         if cd_ready {
-            let max_block = player.max_block_value();
-            player.block_value = (player.block_value + 5).min(max_block);
-            player.active_cds.insert(cd_key.to_string(), t + 30.0);
+            player.add_block_value(5);
+            player.add_protect_cd(cd_key, t + 30.0);
         }
     }
 

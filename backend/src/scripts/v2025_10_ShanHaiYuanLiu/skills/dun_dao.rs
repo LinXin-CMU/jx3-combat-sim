@@ -25,7 +25,7 @@ pub fn cast_skill(player: &mut Player, _em: &mut ScriptEmitter, _t: f64) {
             // 一段 grants_combo = "盾刀_2"，所以一段后 combo_2 存在
             // 只有三段后两个都不存在
             // 实际上上面已经排除了一段（一段后 combo_2 存在）
-            player.rage = (player.rage + 5).min(100);
+            player.add_rage(5);
         }
     }
 }

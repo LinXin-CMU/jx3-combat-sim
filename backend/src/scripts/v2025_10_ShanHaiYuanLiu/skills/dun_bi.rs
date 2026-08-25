@@ -12,6 +12,6 @@ pub fn cast_skill(player: &mut Player, _em: &mut ScriptEmitter, _t: f64) {
     if player.mount == Mount::TieGuYi && player.has_talent(18723) {
         let max_bv = player.max_block_value();
         let gain = max_bv * 30 / 100;
-        player.block_value = (player.block_value + gain).min(max_bv);
+        player.add_block_value(gain);
     }
 }

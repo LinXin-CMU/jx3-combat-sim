@@ -21,5 +21,5 @@ pub fn on_expire(player: &mut Player, em: &mut ScriptEmitter, t: f64) {
     player.set_stance(Stance::Shield);
     em.emit("盾回", 13051, t);
     // 自然到期盾回：触发保护CD（不获得坚定，只有主动盾回才给）
-    player.active_cds.insert("protect_盾飞盾回".to_string(), t + 1.0);
+    player.add_protect_cd("protect_盾飞盾回", t + 1.0);
 }

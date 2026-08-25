@@ -12,6 +12,6 @@ pub fn cast_skill(player: &mut Player, em: &mut ScriptEmitter, t: f64) {
 
     // 擎盾体态：每跳回1怒 × 实际跳数（单目标）
     if player.stance() == Stance::Shield {
-        player.rage = (player.rage + ticks as i32).min(100);
+        player.add_rage(ticks as i32);
     }
 }
