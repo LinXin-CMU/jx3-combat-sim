@@ -14,6 +14,7 @@ use tower_http::services::ServeDir;
 
 mod auth;
 mod router;
+pub mod agent;
 mod buffs;
 mod scripts;
 pub mod equip;
@@ -1683,7 +1684,7 @@ pub(crate) fn resolve_combo_follow<'a>(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// 模拟请求
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct SimulateRequest {
     pub haste_level: u32,
     pub sequence: Vec<String>,
@@ -1763,7 +1764,7 @@ pub struct SimulateRequest {
 }
 
 /// 预释放规格：一次"战前预读"
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct PreReleaseSpec {
     /// 技能名（按基础名匹配 skill_map）
     pub skill: String,
