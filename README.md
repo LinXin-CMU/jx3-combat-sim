@@ -162,6 +162,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\agent-eval.ps1
 
 评测包含 4 题事实读取、6 题单变量 A/B、6 题时间线诊断、2 题非法/不可比较输入和 2 题越权请求。当前基线为 20/20；runner 同时验证工具白名单、数值 fingerprint、非法写入为 0、userdata 前后哈希一致，并在结束后恢复运行前的版本与心法。模型尚未接入，因此这里只声称工具和证据链通过，不声称自然语言回答质量。
 
+300 秒 release 场景下，四个工具各采样 30 次的 HTTP P95 均低于 40 ms，证据身份与 fingerprint 全部重复一致；成功/拒绝 trace、响应体积和完整回归见 [`docs/baselines/2026-08-25-agent-tool-layer.md`](docs/baselines/2026-08-25-agent-tool-layer.md)。
+
 ## Game × AI 路线
 
 ### 已实现
@@ -208,6 +210,7 @@ Agent 将围绕明确目标自主调用高层工具：
 - [`docs/baselines/2026-08-25-phase0.md`](docs/baselines/2026-08-25-phase0.md)：Agent 接入前的回归与性能锚点；
 - [`docs/baselines/2026-08-25-versioned-golden-migration.md`](docs/baselines/2026-08-25-versioned-golden-migration.md)：跨版本 Golden v2 迁移证据；
 - [`docs/baselines/2026-08-25-clean-clone-audit.md`](docs/baselines/2026-08-25-clean-clone-audit.md)：全新目录构建、smoke 与跨平台哈希复现；
+- [`docs/baselines/2026-08-25-agent-tool-layer.md`](docs/baselines/2026-08-25-agent-tool-layer.md)：P1 工具性能、证据确定性、成功/拒绝 trace 与完整回归；
 - [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md)：公开仓库与 Demo 的发布阻断项；
 - [`docs/security/SECRET_SCAN_REPORT.md`](docs/security/SECRET_SCAN_REPORT.md)：脱敏与秘密扫描结果；
 - [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)：MIT 适用范围、游戏数据与第三方来源边界；

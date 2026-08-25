@@ -4,7 +4,7 @@
 计划工期：5–7 个有效开发日  
 阶段目标：在不接入语言模型、不增加写入能力、不改变战斗数值的前提下，把现有模拟器封装为可独立测试的四个强类型只读工具，并建立 Agent 后续必须遵守的证据链与离线评测集。
 
-执行状态（2026-08-25）：架构节点已确认；P1-01 至 P1-06 已实现，包含 canonical SHA-256、`EvidenceEnvelopeV1`、四个强类型只读工具、原子模拟预算、确定性时间轴诊断、无状态 HTTP 适配层，以及 20 题无模型离线评测。Agent 工具/HTTP 层现有 35 项 Rust 测试，完整 Rust 测试 69/69；评测 fixture 20/20、非法写入 0、userdata 前后哈希一致、测试运行态可恢复。下一工作包为 P1-07 阶段回归与作品集证据；模型层采用可选服务商 + 服务端 API Key，仍在阶段证据冻结后接入。
+执行状态（2026-08-25）：P1-01 至 P1-07 已全部完成。已实现 canonical SHA-256、`EvidenceEnvelopeV1`、四个强类型只读工具、原子模拟预算、确定性时间轴诊断、无状态 HTTP 适配层、20 题无模型评测，以及 release 性能/trace 证据。完整 Rust 测试 69/69、评测 fixture 20/20、两版本 Golden 8/8；非法写入 0、userdata 前后哈希一致、测试运行态可恢复。阶段证据见 `docs/baselines/2026-08-25-agent-tool-layer.md`。进入模型工具循环前停在 provider/会话数据确认节点。
 
 ## 1. 审计结论
 
@@ -209,12 +209,14 @@ duration_ms
 
 实现结果：`backend/tests/agent_eval/` 已固定 4+6+6+2+2 共 20 题；runner 强制工具白名单、数值 provenance、版本/心法恢复与 userdata 零写入审计，当前结果为 20/20。
 
-### P1-07 阶段回归与作品集证据
+### P1-07 阶段回归与作品集证据（已完成）
 
 - 运行 Rust、前端语法、状态写入守卫和两版本 Golden；
 - 记录工具延迟 P50/P95、响应体积与重复一致性；
 - 导出一份成功 trace 和至少一份被拒绝/无法归因的失败 trace；
 - 更新 README 能力状态，但在模型接入前仍称“工具层”，不称“Agent MVP 已完成”。
+
+实现结果：300 秒 release 场景下四工具各 30 次重复，HTTP P95 均低于 40 ms，scenario hash、evidence ID 与 fingerprint 全部一致；已导出成功和拒绝 trace。首次基准发现并修复 Buff 轨道无序导致的时间线 evidence 漂移，未改变任何战斗数值或 Golden。
 
 ## 6. 阻断与确认点
 
@@ -233,5 +235,5 @@ duration_ms
 - scenario hash 与 evidence envelope 稳定且包含版本/心法/数据 provenance；
 - 20 题工具级评测通过；
 - 没有战斗公式副本、任意写入工具或跨用户状态读取；
-- 原有 34 项 Rust 测试、两版本 8/8 Golden、前端语法和 smoke 不回归；
+- 69 项 Rust 测试、两版本 8/8 Golden、前端语法和 smoke 不回归；
 - 已公开记录至少一个工具拒绝回答或无法证明因果的失败案例。

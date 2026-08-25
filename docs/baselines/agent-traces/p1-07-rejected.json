@@ -1,0 +1,26 @@
+{
+  "schema_version": "agent-rejected-trace/v1",
+  "trace_id": "p1-07-rejected",
+  "captured_at": "2026-08-25T09:03:39.168710+00:00",
+  "engine_commit": "b887aa331df5674f88df00a11a7aa67480f97ab7",
+  "request_summary": {
+    "tool_name": "compare_scenarios",
+    "candidate_label": "noop",
+    "patch": {
+      "network_delay": 0
+    }
+  },
+  "http_status": 422,
+  "response_bytes": 289,
+  "response": {
+    "schema_version": "agent-tool-error/v1",
+    "trace_id": "p1-07-rejected",
+    "tool_name": "compare_scenarios",
+    "scenario_hash": "fef0b24b904634f9cf06d5399445058e40d3d8207b96c75d5aa5126639257850",
+    "error": {
+      "code": "no_scenario_changes",
+      "message": "candidate 'noop' does not change the baseline scenario"
+    }
+  },
+  "interpretation": "The candidate changed no gameplay field, so the tool rejected the comparison before spending simulation budget."
+}

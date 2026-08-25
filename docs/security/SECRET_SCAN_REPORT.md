@@ -14,6 +14,7 @@
 | Git 首次暂存集合二次扫描 | 430 个文本文件 + 6 个大型数据表 | 0 命中 |
 | Phase 0 后续变更复扫（detect-secrets 1.5.0） | README、基线/发布文档、smoke、启动与测试脚本，共 8 个文件 | 0 命中 |
 | Git 当前公开候选文本复扫（detect-secrets 1.5.0） | 443 个文本文件 | 6 个已解释误报，0 个秘密 |
+| Agent P1 证据复扫（detect-secrets 1.5.0） | 7 个新增/修改文档与 trace | 8 个已解释 provenance/fingerprint 候选，0 个秘密 |
 | 大型装备数据定向复扫 | 10 个 `.tab`/`.txt`/`.tsv` | 0 命中 |
 | 禁止路径/扩展检查 | `git ls-files` | 0 个 userdata、真实环境配置、日志、密钥或构建目录 |
 | Git 全历史体积检查 | 全部 blob | 最大 24.18 MiB，0 个超过 100 MiB |
@@ -23,6 +24,8 @@
 | Bash 语法 | VPS frps 安装脚本 | 通过 |
 
 `detect-secrets` 的 6 个候选全部来自两份 `jueyun_jiantie_hanjia.json` 的 `scenario_sha256`、`data_sha256` 与 `engine_commit` 字段，类型为 Hex High Entropy String。这些值是回归测试 provenance 元数据，不具备认证能力。
+
+Agent P1 证据的 8 个候选来自 `engine_commit`、`scenario_hash`、`data_hash` 和 `fingerprint_hex` 字段，同样是公开、不可用于认证的可复现性标识。扫描输出只核对字段名、文件和行号，没有发现 API Key、token 或其他凭据。
 
 ## 排除范围
 

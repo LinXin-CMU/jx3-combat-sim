@@ -1,0 +1,93 @@
+{
+  "schema_version": "agent-trace-projection/v1",
+  "trace_id": "p1-07-success",
+  "captured_at": "2026-08-25T09:03:39.168710+00:00",
+  "source": "backend/tests/benchmark_agent_tools.py",
+  "projection_note": "Evidence IDs bind the complete tool results; large per-event lists are projected to counts and aggregates in this portfolio artifact.",
+  "scenario_hash": "fef0b24b904634f9cf06d5399445058e40d3d8207b96c75d5aa5126639257850",
+  "engine_version": "2.0.10",
+  "engine_commit": "b887aa331df5674f88df00a11a7aa67480f97ab7",
+  "data_hash": "c77203888359e9c0dfa82feab4361bdb0ba10438f4a420e5b6798ced1a5a99e4",
+  "evidence": [
+    {
+      "tool_name": "get_current_scenario",
+      "evidence_id": "127aa14eff8bc2b4df3d6a9def81a44086029492f8216959c68af0bf8a59233b",
+      "duration_ms": 0,
+      "result_projection": {
+        "game_version": "2026_04_anying_qianji",
+        "mount": "fenshanjin",
+        "rotation_mode": "macro",
+        "sequence_entries": 1220,
+        "macro_characters": 282,
+        "macro_duration": 300.0,
+        "talent_count": 9,
+        "recipe_count": 36,
+        "target_level": 134,
+        "network_delay_ms": 0
+      }
+    },
+    {
+      "tool_name": "simulate_scenario",
+      "evidence_id": "af07ca5be949fba0031aef293c73f8aff1d36fb0b495165da401725562da578c",
+      "duration_ms": 11,
+      "result_projection": {
+        "dps": 949319.2666666667,
+        "total_damage": 284795780.0,
+        "fight_time": 300.0,
+        "skill_count": 1648,
+        "fingerprint_hex": "e43e87d24ff9aed2"
+      }
+    },
+    {
+      "tool_name": "compare_scenarios",
+      "evidence_id": "f7bf4c8ecef9f19056e665fbddbfae68cb85ae9fa676db1fab2182b70eb03f2b",
+      "duration_ms": 24,
+      "result_projection": {
+        "candidate_label": "network-25ms",
+        "change": {
+          "field": "simulation.network_delay",
+          "before": 0,
+          "after": 25
+        },
+        "candidate_scenario_hash": "65c7ee4b5be749bd5eb3a2ef330c5ef2be5e051a628e9a61f89dde66e437824f",
+        "candidate_fingerprint_hex": "d2291b09efd6a6b4",
+        "candidate_dps": 938396.1633333333,
+        "delta_dps": -10923.10333333339,
+        "delta_percent": -1.150624844230493
+      }
+    },
+    {
+      "tool_name": "analyze_timeline",
+      "evidence_id": "a8deb8d644262cf96b3efef32237629306f02db49cd4090ab4d59a7114c7da4d",
+      "source_evidence_id": "af07ca5be949fba0031aef293c73f8aff1d36fb0b495165da401725562da578c",
+      "duration_ms": 0,
+      "result_projection": {
+        "fingerprint_hex": "e43e87d24ff9aed2",
+        "active_event_count": 344,
+        "triggered_event_count": 1304,
+        "skill_groups": 21,
+        "total_cd_wait_seconds": 12.999999999999986,
+        "cd_wait_count": 35,
+        "total_observed_gcd_gap_seconds": 6.974999999999952,
+        "gcd_gap_count": 20,
+        "rage": {
+          "minimum": 0,
+          "maximum": 75,
+          "ending": 45,
+          "sample_count": 689,
+          "at_cap_observations": 0
+        },
+        "limitations": [
+          "rage_cap_observations_do_not_measure_lost_rage",
+          "timeline_correlations_are_not_causal_without_ab_test",
+          "buff_coverage_uses_visible_buff_timeline_only"
+        ]
+      }
+    }
+  ],
+  "chain_checks": {
+    "all_scenario_hashes_match": true,
+    "timeline_source_matches_simulation": true,
+    "repeat_simulation_evidence_matches": true
+  }
+}
