@@ -125,7 +125,7 @@ Set-Location backend
 cargo test
 ```
 
-当前基线为 64 项通过、0 失败，其中包含 Agent 场景身份、证据 envelope、只读模拟、强类型 A/B 对比与确定性时间轴诊断的 30 项测试；恢复 2025 独立脚本路由后共有 19 条编译 warning，计划作为后续工程卫生任务处理。
+当前基线为 68 项通过、0 失败，其中包含 Agent 场景身份、证据 envelope、只读模拟、强类型 A/B 对比、确定性时间轴诊断和 HTTP 错误映射的 34 项测试；恢复 2025 独立脚本路由后共有 19 条编译 warning，计划作为后续工程卫生任务处理。
 
 ### 前端语法
 
@@ -177,6 +177,7 @@ Agent 将围绕明确目标自主调用高层工具：
 让 PPO 策略作为教师，Agent 聚类关键决策与失败分歧，提出人类可读的宏规则，再交给现有宏验证器和 GA 复验。目标不是把神经网络伪装成解释，而是量化“理论策略”到“游戏内可执行宏”的性能差距与表达边界。
 
 总体路线见 [`docs/AGENT_PORTFOLIO_PLAN.md`](docs/AGENT_PORTFOLIO_PLAN.md)，第一阶段的工具协议与验收计划见 [`docs/AGENT_PHASE_1_PLAN.md`](docs/AGENT_PHASE_1_PLAN.md)。
+四个只读端点的请求、证据响应和错误码见 [`docs/AGENT_TOOL_HTTP_API.md`](docs/AGENT_TOOL_HTTP_API.md)。
 
 ## 项目边界
 

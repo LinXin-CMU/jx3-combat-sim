@@ -412,7 +412,7 @@ impl Default for GameVersion { fn default() -> Self { GameVersion::AnYingQianJi 
 
 /// 心法常量：主属性 → 副属性转化系数（仅外功线 buff 加成时使用）
 /// 从 school.toml 注入 Player（Phase 2）；当前全部默认分山劲值
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize)]
 pub struct MountConstants {
     pub shenfa_to_attack:  f64, // 身法 → 外功攻击
     pub shenfa_to_crit:    f64, // 身法 → 外功会心等级
@@ -4804,6 +4804,10 @@ fn snapshot_buffs(player: &Player) -> Vec<BuffSnapshot> {
 /// 全局共享状态
 #[derive(Clone)]
 pub struct SharedState {
+    /// Agent 读取运行时数据时持有读锁；心法切换/技能重载持有写锁，保证快照原子一致。
+    pub agent_context_gate: Arc<RwLock<()>>,
+    /// 当前版本/心法运行时数据的稳定 provenance；只在启动或显式重载时计算。
+    pub agent_provenance: Arc<RwLock<agent::ToolProvenance>>,
     /// 当前选中的武学版本（初始 V2025_10 山海源流）
     pub version: Arc<RwLock<GameVersion>>,
     /// 当前选中的心法（初始 分山劲）
@@ -5615,6 +5619,7 @@ async fn switch_mount(
     State(state): State<SharedState>,
     Json(req): Json<SwitchMountRequest>,
 ) -> impl IntoResponse {
+    let _agent_context_guard = state.agent_context_gate.write().await;
     let (consts, base_stats, mount_conv, ui, wa) = match load_school_toml(req.version, req.mount) {
         Ok(v) => v,
         Err(e) => return Json(SwitchMountResponse {
@@ -5626,6 +5631,15 @@ async fn switch_mount(
     let new_recipes = load_recipes(Path::new(&recipes_file(req.version)));
     let new_team_buffs = load_team_buffs(Path::new(&team_buffs_file(req.version)));
     let new_formations = load_formations(Path::new(&formations_file(req.version)));
+    let new_agent_provenance = agent::ToolProvenance::from_runtime_data(
+        req.version,
+        req.mount,
+        consts,
+        &new_skills,
+        &new_recipes,
+        &new_team_buffs,
+        &new_formations,
+    );
 
     *state.version.write().await = req.version;
     *state.mount.write().await = req.mount;
@@ -5639,6 +5653,7 @@ async fn switch_mount(
     *state.recipes.write().await = new_recipes;
     *state.team_buffs.write().await = new_team_buffs;
     *state.formations.write().await = new_formations;
+    *state.agent_provenance.write().await = new_agent_provenance;
 
     // 落盘当前心法/版本，worker 回收重建后启动读回（否则重置回默认 → 前端跳过恢复）
     if req.persist {
@@ -5693,12 +5708,23 @@ async fn mount_defaults(State(state): State<SharedState>) -> impl IntoResponse {
 }
 
 async fn reload_skills(State(state): State<SharedState>) -> impl IntoResponse {
+    let _agent_context_guard = state.agent_context_gate.write().await;
     let version = *state.version.read().await;
     let mount = *state.mount.read().await;
     let new_skills = load_skills(Path::new(&skills_dir(version, mount)));
     let names: Vec<String> = new_skills.iter().map(|s| s.name.clone()).collect();
     let loaded = new_skills.len();
+    let new_agent_provenance = agent::ToolProvenance::from_runtime_data(
+        version,
+        mount,
+        *state.constants.read().await,
+        &new_skills,
+        &state.recipes.read().await,
+        &state.team_buffs.read().await,
+        &state.formations.read().await,
+    );
     *state.skills.write().await = new_skills;
+    *state.agent_provenance.write().await = new_agent_provenance;
     Json(ReloadResult { loaded, skills: names })
 }
 
@@ -9260,6 +9286,15 @@ async fn main() {
     let recipes = load_recipes(Path::new(&recipes_file(version)));
     let team_buffs = load_team_buffs(Path::new(&team_buffs_file(version)));
     let formations = load_formations(Path::new(&formations_file(version)));
+    let agent_provenance = agent::ToolProvenance::from_runtime_data(
+        version,
+        mount,
+        constants,
+        &initial_skills,
+        &recipes,
+        &team_buffs,
+        &formations,
+    );
 
     // 加载装备数据（优先 equip.json；否则回退 equip/*.tab 并自动生成 JSON 缓存）
     let equip_data = equip::load_equip_smart(Path::new(data_root()));
@@ -9273,6 +9308,8 @@ async fn main() {
     }
 
     let state = SharedState {
+        agent_context_gate: Arc::new(RwLock::new(())),
+        agent_provenance: Arc::new(RwLock::new(agent_provenance)),
         version: Arc::new(RwLock::new(version)),
         mount: Arc::new(RwLock::new(mount)),
         constants: Arc::new(RwLock::new(constants)),
@@ -9327,6 +9364,10 @@ async fn main() {
         .route("/api/icon/:id",      get(icon_proxy))
         .route("/api/formations",    get(list_formations))
         .route("/api/simulate",      post(simulate))
+        .route("/api/agent/tools/scenario", post(agent::http::scenario_handler))
+        .route("/api/agent/tools/simulate", post(agent::http::simulate_handler))
+        .route("/api/agent/tools/compare", post(agent::http::compare_handler))
+        .route("/api/agent/tools/timeline", post(agent::http::timeline_handler))
         .route("/api/macro/presets", get(macro_presets))
         .route("/api/macro/save",    post(macro_save))
         .route("/api/macro/load",    get(macro_load))
@@ -9571,4 +9612,3 @@ mod player_setter_tests {
         assert!(p.decision_generation > g2);
     }
 }
-

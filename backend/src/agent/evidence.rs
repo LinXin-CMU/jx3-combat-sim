@@ -1,7 +1,12 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::{
+    FormationEntry, GameVersion, Mount, MountConstants, RecipeEntry, SkillSpec, TeamBuffEntry,
+};
+
 use super::hash::canonical_sha256;
+use super::schema::{game_version_id, mount_id};
 
 pub const EVIDENCE_SCHEMA_V1: &str = "agent-evidence/v1";
 
@@ -27,6 +32,31 @@ impl ToolProvenance {
         }
     }
 
+    /// Hash the immutable runtime tables once when a worker starts or its
+    /// version/mount is explicitly reloaded. Tool calls only clone the result.
+    pub fn from_runtime_data(
+        game_version: GameVersion,
+        mount: Mount,
+        constants: MountConstants,
+        skills: &[SkillSpec],
+        recipes: &[RecipeEntry],
+        team_buffs: &[TeamBuffEntry],
+        formations: &[FormationEntry],
+    ) -> Self {
+        let identity = RuntimeDataIdentity {
+            schema_version: "agent-runtime-data/v1",
+            game_version: game_version_id(game_version),
+            mount: mount_id(mount),
+            constants,
+            skills,
+            recipes,
+            team_buffs,
+            formations,
+        };
+        let data_hash = canonical_sha256(&identity).unwrap_or_else(|_| "unknown".to_string());
+        Self::from_build(data_hash)
+    }
+
     #[cfg(test)]
     pub fn fixture() -> Self {
         Self {
@@ -46,6 +76,18 @@ impl ToolProvenance {
         }
         warnings
     }
+}
+
+#[derive(Serialize)]
+struct RuntimeDataIdentity<'a> {
+    schema_version: &'static str,
+    game_version: &'static str,
+    mount: &'static str,
+    constants: MountConstants,
+    skills: &'a [SkillSpec],
+    recipes: &'a [RecipeEntry],
+    team_buffs: &'a [TeamBuffEntry],
+    formations: &'a [FormationEntry],
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -227,5 +269,40 @@ mod tests {
             evidence.warnings,
             vec!["engine_commit_unavailable", "data_hash_unavailable"]
         );
+    }
+
+    #[test]
+    fn runtime_data_hash_is_stable_and_bound_to_runtime_identity() {
+        let first = ToolProvenance::from_runtime_data(
+            GameVersion::AnYingQianJi,
+            Mount::FenShanJin,
+            MountConstants::fenshanjin_default(),
+            &[],
+            &[],
+            &[],
+            &[],
+        );
+        let repeated = ToolProvenance::from_runtime_data(
+            GameVersion::AnYingQianJi,
+            Mount::FenShanJin,
+            MountConstants::fenshanjin_default(),
+            &[],
+            &[],
+            &[],
+            &[],
+        );
+        let other_mount = ToolProvenance::from_runtime_data(
+            GameVersion::AnYingQianJi,
+            Mount::TieGuYi,
+            MountConstants::tieguyi_default(),
+            &[],
+            &[],
+            &[],
+            &[],
+        );
+
+        assert_eq!(first.data_hash, repeated.data_hash);
+        assert_ne!(first.data_hash, other_mount.data_hash);
+        assert_eq!(first.data_hash.len(), 64);
     }
 }

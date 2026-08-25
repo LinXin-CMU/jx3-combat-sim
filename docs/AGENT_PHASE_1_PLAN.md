@@ -4,7 +4,7 @@
 计划工期：5–7 个有效开发日  
 阶段目标：在不接入语言模型、不增加写入能力、不改变战斗数值的前提下，把现有模拟器封装为可独立测试的四个强类型只读工具，并建立 Agent 后续必须遵守的证据链与离线评测集。
 
-执行状态（2026-08-25）：架构节点已确认；P1-01 至 P1-04 领域层已实现，包含 canonical SHA-256、`EvidenceEnvelopeV1`、`get_current_scenario`、`simulate_scenario`、强类型 `compare_scenarios`、原子模拟预算和确定性 `analyze_timeline`。Agent 工具层现有 30 项测试，完整 Rust 测试 64/64、两版本 Golden 8/8 和 smoke 均通过。下一工作包为 P1-05 HTTP 薄适配层；模型层采用可选服务商 + 服务端 API Key，仍在工具层验收后接入。
+执行状态（2026-08-25）：架构节点已确认；P1-01 至 P1-05 已实现，包含 canonical SHA-256、`EvidenceEnvelopeV1`、四个强类型只读工具、原子模拟预算、确定性时间轴诊断和无状态 HTTP 适配层。Agent 工具/HTTP 层现有 34 项测试，完整 Rust 测试 68/68、两版本 Golden 8/8、原有 smoke 与 Agent HTTP smoke 均通过。下一工作包为 P1-06 离线评测；模型层采用可选服务商 + 服务端 API Key，仍在评测基线建立后接入。
 
 ## 1. 审计结论
 
@@ -184,7 +184,7 @@ duration_ms
 
 验收：固定 timeline 的指标有单元测试；Lite 模式缺少所需字段时明确失败，不返回假诊断。
 
-### P1-05 HTTP 薄适配层
+### P1-05 HTTP 薄适配层（已完成）
 
 - 新增 `/api/agent/tools/scenario`、`simulate`、`compare`、`timeline`；
 - 端点只负责 JSON/状态码映射，核心工具无需 HTTP 即可测试；
