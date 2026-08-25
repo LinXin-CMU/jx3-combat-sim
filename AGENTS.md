@@ -22,6 +22,7 @@
 - 已验证基线：`cargo test` 为 69 个测试通过（Phase 0 原有 34 项 + Agent 工具/HTTP 层 35 项）；前端可用 `node --check frontend/app.js` 做语法检查。
 - Agent 离线评测：`tools/agent-eval.ps1` 运行 20 个工具级 fixture，必须保持 20/20、非法写入 0、userdata 不变且测试运行态可恢复。
 - Agent P1 基线：`docs/baselines/2026-08-25-agent-tool-layer.md` 记录 release 性能、确定性、成功/拒绝 trace 和完整回归；后续模型层不得弱化这些边界。
+- Agent P2 设计：`docs/AGENT_PHASE_2_PLAN.md` 已定义 provider、工具循环、SSE、报告和会话持久化边界；真实模型调用与首次真实 userdata 会话写入仍是人工确认节点。
 
 更完整的现状审计见 `docs/PROJECT_BASELINE.md`，作品集与 Agent 路线见 `docs/AGENT_PORTFOLIO_PLAN.md`。
 
@@ -64,6 +65,8 @@
 - 评测：每个 Agent 功能同时设计离线题集、成功标准、延迟/成本指标和失败案例。作品集必须展示评测结果，而不只展示成功截图。
 - 部署：API key 只通过服务端环境变量注入；公共 Demo 必须有限流、超时、任务预算、日志脱敏和 HTTPS。
 - 供应商：Agent 层保持模型供应商可替换；业务工具协议与模型 API 解耦。
+- 凭据：API key 只由服务端环境变量解析，不得进入浏览器、`localStorage`、`/api/settings`、Agent 会话、trace、日志或 Git。
+- 会话：只在当前 worker 的 `JX3_USERDATA_DIR/agent_sessions/v1` 下增量存储；不得迁移、改名、删除或批量重写既有用户数据。首次写入真实 userdata 前必须确认。
 
 ## 开发与验证
 
