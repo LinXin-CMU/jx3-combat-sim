@@ -24,7 +24,7 @@
 
 ### 战斗规则与数值建模
 
-- 支持 `2025_10_山海源流`、`2026_04_暗影千机` 两套版本数据；
+- 支持 `2025_10_山海源流`、`2026_04_暗影千机` 两套独立职业数据与机制脚本；
 - 支持分山劲与铁骨衣心法、技能、奇穴、秘籍、Buff、团队增益和阵法；
 - 使用数据配置承载基础规则，使用版本化 Rust 脚本表达条件机制；
 - 共用九阶段伤害链，避免页面、宏、优化器和 RL 各算一套数值；
@@ -125,7 +125,7 @@ Set-Location backend
 cargo test
 ```
 
-第 0 阶段记录的基线为 34 项通过、0 失败；当前仍有 17 条编译 warning，计划作为后续工程卫生任务处理。
+当前基线为 34 项通过、0 失败；恢复 2025 独立脚本路由后共有 19 条编译 warning，计划作为后续工程卫生任务处理。
 
 ### 前端语法
 
@@ -142,15 +142,15 @@ Set-Location backend
 python tests/diff_baseline.py
 ```
 
-检查包括：
+默认会依次切换并检查 2025.10 与 2026.04 两套版本；测试切换不会写入本地用户选择。检查包括：
 
 - 同请求重复运行 fingerprint 一致；
 - lite/full 的 fingerprint、DPS 和总伤害一致；
-- 4 个代表场景与已知 golden 一致。
+- 每个版本 4 个代表场景的版本、心法、场景/数据哈希、fingerprint 和完整数值与 Golden v2 一致。
 
 除非确认规则行为发生了有意变化，否则不要使用 `--update` 覆盖 golden。
 
-当前 Phase 0 结果是确定性 4/4、Lite/Full 等价 4/4、golden 2/4；仓库因此仍处于发布阻断状态。失败详情和性能数据见 [`docs/baselines/2026-08-25-phase0.md`](docs/baselines/2026-08-25-phase0.md)。
+当前两套版本共 8 个场景均通过确定性与 Lite/Full 等价检查。旧 Golden 无法追溯到精确版本，已保留为历史证据；新的 Golden v2 候选值尚待人工确认，因此仓库仍处于发布阻断状态。迁移证据见 [`docs/baselines/2026-08-25-versioned-golden-migration.md`](docs/baselines/2026-08-25-versioned-golden-migration.md)。
 
 ## Game × AI 路线
 
@@ -182,6 +182,7 @@ Agent 将围绕明确目标自主调用高层工具：
 
 - 这是玩家研究与策划实验项目，不是官方客户端、插件或战斗服务器；
 - Boss 受击、仇恨、位移和完整团队战斗尚未全部建模；
+- 2025.10 归档未包含独立团辅与阵法表；旧版本核心职业模拟可用，但不会套用 2026 数据冒充完整赛季环境；
 - RL 当前主要研究分山劲离散技能决策；
 - 模拟准确性依赖版本数据和机制资料，跨版本结论必须重新验证；
 - 公网演示在完成 HTTPS、限流和最小权限检查前不会作为正式服务开放。
@@ -192,6 +193,7 @@ Agent 将围绕明确目标自主调用高层工具：
 - [`docs/AGENT_PORTFOLIO_PLAN.md`](docs/AGENT_PORTFOLIO_PLAN.md)：四套 Agent 方案和六周路线；
 - [`docs/PHASE_0_PLAN.md`](docs/PHASE_0_PLAN.md)：公开仓库卫生计划；
 - [`docs/baselines/2026-08-25-phase0.md`](docs/baselines/2026-08-25-phase0.md)：Agent 接入前的回归与性能锚点；
+- [`docs/baselines/2026-08-25-versioned-golden-migration.md`](docs/baselines/2026-08-25-versioned-golden-migration.md)：跨版本 Golden v2 迁移证据；
 - [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md)：公开仓库与 Demo 的发布阻断项；
 - [`docs/security/SECRET_SCAN_REPORT.md`](docs/security/SECRET_SCAN_REPORT.md)：脱敏与秘密扫描结果；
 - [`backend/PERF.md`](backend/PERF.md)：模拟器性能记录；

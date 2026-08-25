@@ -52,19 +52,15 @@ bash backend/tests/run_regression.sh --fuzz=100  # 高强度（CI 用）
 - `decision_generation` 严格单调递增
 - `reset_cd` / `reduce_cd` / `reduce_charge_cd` 都 bump
 
-### Layer 2：Golden fingerprint
-4 个标杆 case，fingerprint 必须与 `tests/golden/*.json` 完全匹配。详见 `tests/diff_baseline.py`：
+### Layer 2：Versioned Golden v2
 
-| Case | Stem | Fingerprint | DPS | 覆盖路径 |
-|------|------|-------------|-----|---------|
-| 绝云宏 standard | `jueyun_300s` | `9c0b1069c1106484` | 1064542.49 | 主流（绝刀怒气段、嗜血、援戈、麟光等） |
-| 简单循环 | `simple_loop` | `099ddb885b081c61` | 227021 | 单姿态最简循环 |
-| 纯刀系 | `blade_only` | `cbf29ce484222325` | 0 | 退化 case（盾刀场景） |
-| 坚铁寒甲(boss=2s) | `jueyun_jiantie_hanjia` | `8e679148d62245b5` | 1035553 | **expectation 子系统**：talent 13138/13134 + boss_attack_interval=2s 触发 `sync_expectation_buffs` 的 retain/push/mutate active_buffs 路径 |
+2025.10 与 2026.04 各自运行 4 个标杆 case。Golden v2 不只比较 fingerprint，还绑定版本、心法、场景哈希、数据/脚本哈希，并比较 DPS、总伤害、事件数和战斗时长。详见 `tests/diff_baseline.py` 与 `docs/baselines/2026-08-25-versioned-golden-migration.md`。
+
+2026-05-01 的四个旧快照缺少版本元数据，已保存在 `tests/golden/legacy_unversioned/`，不再作为权威基线。
 
 如果有意改了行为（新加 buff、改了 attack_coeff 等），跑：
 ```bash
-python backend/tests/diff_baseline.py --update
+python tests/diff_baseline.py --version all --update
 ```
 重新写入 golden，提交时一起 commit。**审核 PR 时务必看到金标准更新理由**。
 
@@ -110,15 +106,16 @@ python backend/tests/diff_baseline.py --update
 ## 调试 tips
 
 - **Debug build 自动跑不变量**：`cargo run` (不带 --release) 时，每个 setter 调用后会 `debug_assert!` 检查字段范围、buff 一致性等。Release build 编译期消除，零成本。
-- **fingerprint 漂了**：`python tests/diff_baseline.py` 会指出哪个 case 不匹配。从 git log 找到最近改的脚本 / Player 方法 / data 文件。
-- **DPS 对不上但 fingerprint 一样**：浮点精度问题。检查公式有没有改。
+- **fingerprint 漂了**：`python tests/diff_baseline.py` 会指出具体版本和 case。从 git log 找到最近改的脚本 / Player 方法 / data 文件。
+- **DPS 对不上但 fingerprint 一样**：施放序列可能没变，但公式、系数或属性链已经变化；Golden v2 会将其判为失败。
 - **DPS 对、fingerprint 不一样**：cast 顺序/时序变了。检查 `next_decision_time` 是不是漏了某个新加的事件源。
 
 ## 向后兼容承诺
 
-- 当前 fingerprint `9c0b1069c1106484` (绝云宏) 是 **DPS 1064542.49** 的金标准
-- 任何不影响 DPS 的微调（重构、加 log、加缓存）**fingerprint 必须不变**
-- 任何会变 DPS 的改动（公式、coef、新 buff effect）**必须**在 PR 描述里说明并附 `--update` 后的 golden diff
+- 每个游戏版本维护独立 Golden，不允许跨版本复用 fingerprint；
+- 任何不影响行为的微调（重构、日志、缓存）必须保持对应版本的 fingerprint 与数值不变；
+- 任何会改变数值的改动必须说明版本、规则来源和影响范围，并附 Golden v2 diff；
+- Golden 更新必须来自干净工作区，并记录生成提交与数据哈希。
 
 ## 第二轮修复的潜伏 bug（2026-05-01）
 
@@ -128,6 +125,4 @@ python backend/tests/diff_baseline.py --update
 - 第二轮新增 `buff_idx_cache` 也按 generation 失效 → 同样受影响
 
 **修复**：sync 末尾按 `mutated` 标志位条件 bump（仅当真改了 active_buffs 成员或 stacks 才 bump）。
-**回归覆盖**：新增 `jueyun_jiantie_hanjia` golden case 锁定该路径。如未来再次破坏 bump 不变量，fingerprint 立刻漂移。
-
-绝云宏 fingerprint `9c0b1069c1106484` 不受影响（其 talent 集未含 13138/13134，sync_expectation_buffs 走 early return 路径）。
+**回归覆盖**：`jueyun_jiantie_hanjia` case 锁定该路径。Versioned Golden v2 会同时检测施放序列与数值漂移。

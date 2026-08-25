@@ -578,14 +578,12 @@ fn data_path(dev: &str, release: &str) -> &'static str {
     Box::leak(release.to_string().into_boxed_str())
 }
 
-/// 版本目录名（对齐 `scripts/v{version}/` 命名风格）
-/// 旧版本（ShanHaiYuanLiu / AnYingQianJiTest）目录已归档为 zip，
-/// 反序列化时仍可识别枚举值，但运行时全部重定向到 2026_04_暗影千机 数据目录。
+/// 版本目录名（对齐 `scripts/v{version}/` 命名风格）。
+/// 测试服枚举保留用于旧存档兼容；测试服归档未作为可选版本公开，运行时回退正式服数据。
 pub fn version_dir_name(v: GameVersion) -> &'static str {
     match v {
-        GameVersion::ShanHaiYuanLiu
-        | GameVersion::AnYingQianJi
-        | GameVersion::AnYingQianJiTest  => "2026_04_暗影千机",
+        GameVersion::ShanHaiYuanLiu => "2025_10_山海源流",
+        GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest => "2026_04_暗影千机",
     }
 }
 
@@ -5552,16 +5550,15 @@ struct MountOption {
 
 fn version_label(v: GameVersion) -> &'static str {
     match v {
-        // 旧版本枚举保留以兼容旧存档反序列化；运行时归并到暗影千机
-        GameVersion::ShanHaiYuanLiu
-        | GameVersion::AnYingQianJi
-        | GameVersion::AnYingQianJiTest  => "暗影千机（2026.04）",
+        GameVersion::ShanHaiYuanLiu => "山海源流（2025.10）",
+        GameVersion::AnYingQianJi => "暗影千机（2026.04）",
+        GameVersion::AnYingQianJiTest => "暗影千机·测试服（归档兼容）",
     }
 }
 
-/// UI 暴露的版本列表：仅暗影千机（其他版本目录已归档为 zip）
+/// UI 暴露的正式服版本列表。
 fn all_versions() -> Vec<GameVersion> {
-    vec![GameVersion::AnYingQianJi]
+    vec![GameVersion::AnYingQianJi, GameVersion::ShanHaiYuanLiu]
 }
 
 fn all_mounts() -> Vec<Mount> {
@@ -5600,6 +5597,9 @@ async fn list_mounts() -> impl IntoResponse {
 struct SwitchMountRequest {
     version: GameVersion,
     mount:   Mount,
+    /// UI 切换默认持久化；测试可传 false，避免污染本地用户选择。
+    #[serde(default = "default_true")]
+    persist: bool,
 }
 
 #[derive(Serialize)]
@@ -5623,6 +5623,8 @@ async fn switch_mount(
     let new_skills = load_skills(Path::new(&skills_dir(req.version, req.mount)));
     let new_talents = load_talents(Path::new(&talents_file(req.version, req.mount)));
     let new_recipes = load_recipes(Path::new(&recipes_file(req.version)));
+    let new_team_buffs = load_team_buffs(Path::new(&team_buffs_file(req.version)));
+    let new_formations = load_formations(Path::new(&formations_file(req.version)));
 
     *state.version.write().await = req.version;
     *state.mount.write().await = req.mount;
@@ -5634,9 +5636,13 @@ async fn switch_mount(
     *state.skills.write().await = new_skills;
     *state.talents.write().await = new_talents;
     *state.recipes.write().await = new_recipes;
+    *state.team_buffs.write().await = new_team_buffs;
+    *state.formations.write().await = new_formations;
 
     // 落盘当前心法/版本，worker 回收重建后启动读回（否则重置回默认 → 前端跳过恢复）
-    save_mount_state(req.version, req.mount);
+    if req.persist {
+        save_mount_state(req.version, req.mount);
+    }
 
     Json(SwitchMountResponse {
         ok: true, error: None,

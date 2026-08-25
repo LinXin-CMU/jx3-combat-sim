@@ -43,6 +43,7 @@ pub fn process_swings(player: &mut Player, to_time: f64) -> Vec<CastEvent> {
             state_before: None, state_after: None,
             damage: None, damage_normal: None, damage_crit: None, damage_total: None,
             runtime_recipes: Vec::new(),
+            applied_recipes: Vec::new(),
             runtime_stats: None,
             override_attack_coeff: None,
         });

@@ -4,10 +4,10 @@
 //! 同版本内，脚本跨心法共享，内部用 `player.mount` 分支心法差异。
 //! Buff 脚本同样按版本分发。
 //!
-//! 旧版本（2025.10 山海源流 / 2026.04 暗影千机·测试服）已归档为 zip 移到
-//! `src/scripts/v2025_10_ShanHaiYuanLiu.zip` 和 `data/2026_04_暗影千机测试服.zip`。
-//! 枚举变体保留以兼容旧 plaza/loops 存档的反序列化；所有 match arm fallthrough 到 AnYingQianJi。
+//! 2025.10 山海源流和 2026.04 暗影千机均保留独立脚本。
+//! 测试服枚举仅用于旧存档兼容，运行时回退到 2026.04 正式服脚本。
 
+pub mod v2025_10_ShanHaiYuanLiu;
 pub mod v2026_04_AnYingQianJi;
 
 use crate::{Player, ScriptEmitter, SkillSpec, GameVersion, BuffDef};
@@ -20,7 +20,9 @@ pub type SkillScriptFn = fn(&mut Player, &mut ScriptEmitter, f64);
 /// 按版本查找 BuffDef 静态实例
 pub fn get_buff_def(player: &Player, buff_id: u32) -> Option<&'static BuffDef> {
     match player.version {
-        GameVersion::ShanHaiYuanLiu | GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest =>
+        GameVersion::ShanHaiYuanLiu =>
+            v2025_10_ShanHaiYuanLiu::buffs::defs::get_buff_def(buff_id),
+        GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest =>
             v2026_04_AnYingQianJi::buffs::defs::get_buff_def(buff_id),
     }
 }
@@ -28,7 +30,9 @@ pub fn get_buff_def(player: &Player, buff_id: u32) -> Option<&'static BuffDef> {
 /// 仅按版本枚举查（供不便传 Player 的地方用，如 aggregate/序列化）
 pub fn get_buff_def_by_version(version: GameVersion, buff_id: u32) -> Option<&'static BuffDef> {
     match version {
-        GameVersion::ShanHaiYuanLiu | GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest =>
+        GameVersion::ShanHaiYuanLiu =>
+            v2025_10_ShanHaiYuanLiu::buffs::defs::get_buff_def(buff_id),
+        GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest =>
             v2026_04_AnYingQianJi::buffs::defs::get_buff_def(buff_id),
     }
 }
@@ -37,7 +41,9 @@ pub fn get_buff_def_by_version(version: GameVersion, buff_id: u32) -> Option<&'s
 /// 启动时扫描用，避免对每个 buff_id 单独 match
 pub fn all_buff_defs_by_version(version: GameVersion) -> Vec<&'static BuffDef> {
     match version {
-        GameVersion::ShanHaiYuanLiu | GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest =>
+        GameVersion::ShanHaiYuanLiu =>
+            v2025_10_ShanHaiYuanLiu::buffs::defs::all_buff_defs(),
+        GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest =>
             v2026_04_AnYingQianJi::buffs::defs::all_buff_defs(),
     }
 }
@@ -155,7 +161,9 @@ pub fn collect_buff_attr_desc(version: GameVersion)
 
 fn get_skill_script(player: &Player, skill_id: u32) -> Option<SkillScriptFn> {
     match player.version {
-        GameVersion::ShanHaiYuanLiu | GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest =>
+        GameVersion::ShanHaiYuanLiu =>
+            v2025_10_ShanHaiYuanLiu::skills::get_skill_script(skill_id),
+        GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest =>
             v2026_04_AnYingQianJi::skills::get_skill_script(skill_id),
     }
 }
@@ -177,21 +185,27 @@ pub fn run_scripts(player: &mut Player, skill: &SkillSpec, cast_time: f64) -> Sc
 
 pub fn get_buff_on_tick(player: &Player, buff_id: u32) -> Option<SkillScriptFn> {
     match player.version {
-        GameVersion::ShanHaiYuanLiu | GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest =>
+        GameVersion::ShanHaiYuanLiu =>
+            v2025_10_ShanHaiYuanLiu::buffs::get_buff_on_tick(buff_id),
+        GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest =>
             v2026_04_AnYingQianJi::buffs::get_buff_on_tick(buff_id),
     }
 }
 
 pub fn get_buff_on_expire(player: &Player, buff_id: u32) -> Option<SkillScriptFn> {
     match player.version {
-        GameVersion::ShanHaiYuanLiu | GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest =>
+        GameVersion::ShanHaiYuanLiu =>
+            v2025_10_ShanHaiYuanLiu::buffs::get_buff_on_expire(buff_id),
+        GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest =>
             v2026_04_AnYingQianJi::buffs::get_buff_on_expire(buff_id),
     }
 }
 
 pub fn get_buff_on_remove(player: &Player, buff_id: u32) -> Option<SkillScriptFn> {
     match player.version {
-        GameVersion::ShanHaiYuanLiu | GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest =>
+        GameVersion::ShanHaiYuanLiu =>
+            v2025_10_ShanHaiYuanLiu::buffs::get_buff_on_remove(buff_id),
+        GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest =>
             v2026_04_AnYingQianJi::buffs::get_buff_on_remove(buff_id),
     }
 }
@@ -221,7 +235,9 @@ pub fn override_attack_coeff(player: &Player, spec: &SkillSpec) -> Option<f64> {
 pub fn juan_xue_attack_coeff(player: &Player) -> f64 {
     let haste = player.effective_haste_level();
     match player.version {
-        GameVersion::ShanHaiYuanLiu | GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest =>
+        GameVersion::ShanHaiYuanLiu =>
+            v2025_10_ShanHaiYuanLiu::skills::juan_xue_attack_coeff(haste),
+        GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest =>
             v2026_04_AnYingQianJi::skills::juan_xue_attack_coeff(haste),
     }
 }
@@ -229,7 +245,9 @@ pub fn juan_xue_attack_coeff(player: &Player) -> f64 {
 /// 卷雪刀（平砍）产卡
 pub fn juan_xue_process_swings(player: &mut Player, to_time: f64) -> Vec<crate::CastEvent> {
     match player.version {
-        GameVersion::ShanHaiYuanLiu | GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest =>
+        GameVersion::ShanHaiYuanLiu =>
+            v2025_10_ShanHaiYuanLiu::skills::juan_xue_process_swings(player, to_time),
+        GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest =>
             v2026_04_AnYingQianJi::skills::juan_xue_process_swings(player, to_time),
     }
 }
@@ -237,7 +255,9 @@ pub fn juan_xue_process_swings(player: &mut Player, to_time: f64) -> Vec<crate::
 /// 绝刀运行时附加秘籍
 pub fn jue_dao_runtime_recipes(player: &Player) -> Vec<u32> {
     match player.version {
-        GameVersion::ShanHaiYuanLiu | GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest =>
+        GameVersion::ShanHaiYuanLiu =>
+            v2025_10_ShanHaiYuanLiu::skills::jue_dao_runtime_recipes(player),
+        GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest =>
             v2026_04_AnYingQianJi::skills::jue_dao_runtime_recipes(player),
     }
 }
@@ -245,7 +265,9 @@ pub fn jue_dao_runtime_recipes(player: &Player) -> Vec<u32> {
 /// 绝刀按怒气段 effective_rage_cost
 pub fn jue_dao_effective_rage_cost(player: &Player, skill: &SkillSpec) -> u32 {
     match player.version {
-        GameVersion::ShanHaiYuanLiu | GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest =>
+        GameVersion::ShanHaiYuanLiu =>
+            v2025_10_ShanHaiYuanLiu::skills::jue_dao_effective_rage_cost(player, skill),
+        GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest =>
             v2026_04_AnYingQianJi::skills::jue_dao_effective_rage_cost(player, skill),
     }
 }
@@ -253,7 +275,9 @@ pub fn jue_dao_effective_rage_cost(player: &Player, skill: &SkillSpec) -> u32 {
 /// 盾挡按怒气分摊 10~100
 pub fn dun_dang_effective_rage_cost(player: &Player) -> u32 {
     match player.version {
-        GameVersion::ShanHaiYuanLiu | GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest =>
+        GameVersion::ShanHaiYuanLiu =>
+            v2025_10_ShanHaiYuanLiu::skills::dun_dang::effective_rage_cost(player),
+        GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest =>
             v2026_04_AnYingQianJi::skills::dun_dang::effective_rage_cost(player),
     }
 }
@@ -261,7 +285,9 @@ pub fn dun_dang_effective_rage_cost(player: &Player) -> u32 {
 /// 战斗开始钩子（simulate 入口调用）：按奇穴激活心法/版本特有的常驻 buff
 pub fn on_battle_start(player: &mut Player) {
     match player.version {
-        GameVersion::ShanHaiYuanLiu | GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest =>
+        GameVersion::ShanHaiYuanLiu =>
+            v2025_10_ShanHaiYuanLiu::buffs::on_battle_start(player),
+        GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest =>
             v2026_04_AnYingQianJi::buffs::on_battle_start(player),
     }
 }
@@ -270,7 +296,9 @@ pub fn on_battle_start(player: &mut Player) {
 /// 处理坚铁叠层、招架判定、寒甲刷新等受击效果
 pub fn on_player_hit(player: &mut Player, t: f64) -> Vec<crate::CastEvent> {
     match player.version {
-        GameVersion::ShanHaiYuanLiu | GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest =>
+        GameVersion::ShanHaiYuanLiu =>
+            v2025_10_ShanHaiYuanLiu::on_hit::on_player_hit(player, t),
+        GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest =>
             v2026_04_AnYingQianJi::on_hit::on_player_hit(player, t),
     }
 }

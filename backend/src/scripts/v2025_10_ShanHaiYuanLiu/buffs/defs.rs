@@ -26,6 +26,7 @@ static EFFECTS_SHI_XUE: &[EffectEntry] = &[
 ];
 
 pub static BUFF_DUN_FEI_DEF: BuffDef = BuffDef {
+    icon: "https://icon.jx3box.com/icon/6344.png",
     buff_id: BUFF_DUN_FEI, name: "盾飞",
     description: "盾牌飞出攻击目标，每秒造成一次伤害",
     duration_frames: 240, tick_interval: 16, max_stacks: 1, is_debuff: true,
@@ -37,6 +38,7 @@ static EFFECTS_XUE_NU: &[EffectEntry] = &[
     EffectEntry { field: AttribField::PhysicsAttackPowerPercent, value: 102.0 }, // 102/1024 ≈ 10%
 ];
 pub static BUFF_XUE_NU_DEF: BuffDef = BuffDef {
+    icon: "https://icon.jx3box.com/icon/6432.png",
     buff_id: BUFF_XUE_NU, name: "血怒",
     description: "外功基础攻击力提高10%，招式威胁值降低20%",
     duration_frames: 160, tick_interval: 0, max_stacks: 3, is_debuff: false,
@@ -54,6 +56,7 @@ static EFFECTS_XUE_NU_JY: &[EffectEntry] = &[
 ];
 
 pub static BUFF_XUE_NU_JY_DEF: BuffDef = BuffDef {
+    icon: "https://icon.jx3box.com/icon/6351.png",
     buff_id: BUFF_XUE_NU_JY, name: "血怒·惊涌",
     description: "外功攻击+10%，无双+30%，斩/绝/盾舞破招+20%",
     duration_frames: 160, tick_interval: 0, max_stacks: 1, is_debuff: false,
@@ -64,6 +67,7 @@ pub static BUFF_XUE_NU_JY_DEF: BuffDef = BuffDef {
 };
 
 pub static BUFF_JIE_HUA_DEF: BuffDef = BuffDef {
+    icon: "https://icon.jx3box.com/icon/6346.png",
     buff_id: BUFF_JIE_HUA, name: "劫化",
     description: "免疫控制效果（击退/被拉除外）",
     duration_frames: 64, tick_interval: 0, max_stacks: 1, is_debuff: false,
@@ -75,6 +79,7 @@ static EFFECTS_XU_RUO: &[EffectEntry] = &[
     EffectEntry { field: AttribField::TargetPhysicsShieldPercent, value: -51.0 }, // -5%
 ];
 pub static BUFF_XU_RUO_DEF: BuffDef = BuffDef {
+    icon: "https://icon.jx3box.com/icon/6347.png",
     buff_id: BUFF_XU_RUO, name: "虚弱",
     description: "外功基础防御等级降低5%",
     duration_frames: 400, tick_interval: 0, max_stacks: 1, is_debuff: true,
@@ -83,6 +88,7 @@ pub static BUFF_XU_RUO_DEF: BuffDef = BuffDef {
 };
 
 pub static BUFF_JIAN_DING_DEF: BuffDef = BuffDef {
+    icon: "https://icon.jx3box.com/icon/6293.png",
     buff_id: BUFF_JIAN_DING, name: "坚定",
     description: "受到的伤害降低10%",
     duration_frames: 128, tick_interval: 0, max_stacks: 1, is_debuff: false,
@@ -97,6 +103,7 @@ static EFFECTS_FENG_MING: &[EffectEntry] = &[
     EffectEntry { field: AttribField::PhysicsOvercomePercent, value: 154.0 }, // 154/1024 ≈ 15%
 ];
 pub static BUFF_FENG_MING_DEF: BuffDef = BuffDef {
+    icon: "https://icon.jx3box.com/icon/6326.png",
     buff_id: BUFF_FENG_MING, name: "锋鸣",
     description: "外功破防+15%，盾飞伤害+100%",
     duration_frames: 480, tick_interval: 0, max_stacks: 1, is_debuff: false,
@@ -107,6 +114,7 @@ pub static BUFF_FENG_MING_DEF: BuffDef = BuffDef {
 };
 
 pub static BUFF_DUN_FEI_DELAY_DEF: BuffDef = BuffDef {
+    icon: "https://icon.jx3box.com/icon/6344.png",
     buff_id: BUFF_DUN_FEI_DELAY, name: "盾飞延迟",
     description: "盾牌飞出中，即将切换擎刀体态",
     duration_frames: 6, tick_interval: 0, max_stacks: 1, is_debuff: true,
@@ -115,6 +123,7 @@ pub static BUFF_DUN_FEI_DELAY_DEF: BuffDef = BuffDef {
 };
 
 pub static BUFF_LIU_XUE_DEF: BuffDef = BuffDef {
+    icon: "https://icon.jx3box.com/icon/6323.png",
     buff_id: BUFF_LIU_XUE, name: "流血",
     description: "每2秒受到外功伤害（tick_interval 和 duration 受加速影响，总跳数不变）",
     duration_frames: 416, tick_interval: 32, max_stacks: 1, is_debuff: true,
@@ -123,6 +132,7 @@ pub static BUFF_LIU_XUE_DEF: BuffDef = BuffDef {
 };
 
 pub static BUFF_KUANG_JUE_DEF: BuffDef = BuffDef {
+    icon: "https://icon.jx3box.com/icon/6317.png",
     buff_id: BUFF_KUANG_JUE, name: "狂绝",
     description: "绝刀未击杀返还怒气，可额外施展一次绝刀",
     duration_frames: 96, tick_interval: 0, max_stacks: 1, is_debuff: false,
@@ -131,6 +141,7 @@ pub static BUFF_KUANG_JUE_DEF: BuffDef = BuffDef {
 };
 
 pub static BUFF_XU_RUO_DELAY_DEF: BuffDef = BuffDef {
+    icon: "https://icon.jx3box.com/icon/6347.png",
     buff_id: BUFF_XU_RUO_DELAY, name: "虚弱延迟",
     description: "即将给目标添加虚弱",
     duration_frames: 2, tick_interval: 0, max_stacks: 1, is_debuff: true,
@@ -139,6 +150,7 @@ pub static BUFF_XU_RUO_DELAY_DEF: BuffDef = BuffDef {
 };
 
 pub static BUFF_YUAN_GE: BuffDef = BuffDef {
+    icon: "https://icon.jx3box.com/icon/20064.png",
     buff_id: BUFF_YUAN_GE_ID, name: "援戈",
     description: "施展苍雪刀套路下招式将附带一次外功伤害并消耗一层",
     duration_frames: 160, tick_interval: 0, max_stacks: 7, is_debuff: false,
@@ -147,6 +159,7 @@ pub static BUFF_YUAN_GE: BuffDef = BuffDef {
 };
 
 pub static BUFF_XUE_SHI_COUNT_DEF: BuffDef = BuffDef {
+    icon: "",
     buff_id: BUFF_XUE_SHI_COUNT, name: "以血盟誓",
     description: "苍雪刀命中叠层，满2层后再次命中触发血誓",
     duration_frames: 96, tick_interval: 0, max_stacks: 2, is_debuff: true,
@@ -155,6 +168,7 @@ pub static BUFF_XUE_SHI_COUNT_DEF: BuffDef = BuffDef {
 };
 
 pub static BUFF_XUE_SHI_DEF: BuffDef = BuffDef {
+    icon: "",
     buff_id: BUFF_XUE_SHI, name: "血誓",
     description: "被疗伤成效额外降低30%",
     duration_frames: 48, tick_interval: 0, max_stacks: 1, is_debuff: true,
@@ -163,6 +177,7 @@ pub static BUFF_XUE_SHI_DEF: BuffDef = BuffDef {
 };
 
 pub static BUFF_LIN_GUANG_DEF: BuffDef = BuffDef {
+    icon: "https://icon.jx3box.com/icon/19154.png",
     buff_id: BUFF_LIN_GUANG, name: "麟光玄甲",
     description: "施展苍雪刀套路附带麟光甲寒额外伤害和一次破招伤害",
     duration_frames: 224, tick_interval: 0, max_stacks: 1, is_debuff: true,
@@ -171,6 +186,7 @@ pub static BUFF_LIN_GUANG_DEF: BuffDef = BuffDef {
 };
 
 pub static BUFF_LIN_GUANG_COUNT_DEF: BuffDef = BuffDef {
+    icon: "https://icon.jx3box.com/icon/6315.png",
     buff_id: BUFF_LIN_GUANG_COUNT, name: "麟光计数",
     description: "累计触发麟光甲寒次数",
     duration_frames: 224, tick_interval: 0, max_stacks: 3, is_debuff: true,
@@ -179,6 +195,7 @@ pub static BUFF_LIN_GUANG_COUNT_DEF: BuffDef = BuffDef {
 };
 
 pub static BUFF_LIN_AN_DEF: BuffDef = BuffDef {
+    icon: "",
     buff_id: BUFF_LIN_AN, name: "麟黯",
     description: "本次麟光玄甲内无法再次重置苍雪刀调息和获得额外怒气",
     duration_frames: 400, tick_interval: 0, max_stacks: 1, is_debuff: true,
@@ -187,6 +204,7 @@ pub static BUFF_LIN_AN_DEF: BuffDef = BuffDef {
 };
 
 pub static BUFF_XUE_NU_CD_DEF: BuffDef = BuffDef {
+    icon: "https://icon.jx3box.com/icon/6432.png",
     buff_id: BUFF_XUE_NU_CD, name: "血怒叠层",
     description: "2秒内再次施展血怒可叠加层数",
     duration_frames: 32, tick_interval: 0, max_stacks: 1, is_debuff: true,
@@ -195,6 +213,7 @@ pub static BUFF_XUE_NU_CD_DEF: BuffDef = BuffDef {
 };
 
 pub static BUFF_CHENG_WU_DEF: BuffDef = BuffDef {
+    icon: "https://icon.jx3box.com/icon/23384.png",
     buff_id: BUFF_CHENG_WU, name: "橙武",
     description: "擎刀：绝刀伤害+30%/消耗-100%；擎盾：盾压无调息/怒气+100%",
     duration_frames: 64, tick_interval: 0, max_stacks: 1, is_debuff: false,
@@ -203,6 +222,7 @@ pub static BUFF_CHENG_WU_DEF: BuffDef = BuffDef {
 };
 
 pub static BUFF_SHI_XUE_DEF: BuffDef = BuffDef {
+    icon: "https://icon.jx3box.com/icon/6288.png",
     buff_id: BUFF_SHI_XUE, name: "嗜血",
     description: "造成伤害提高5%（双会+绝刀+40% 由奇穴 21281 常驻，不依赖本 buff）",
     duration_frames: 192, tick_interval: 0, max_stacks: 1, is_debuff: false,
@@ -213,6 +233,7 @@ pub static BUFF_SHI_XUE_DEF: BuffDef = BuffDef {
 };
 
 pub static BUFF_JUAN_YUN_DEF: BuffDef = BuffDef {
+    icon: "https://icon.jx3box.com/icon/6345.png",
     buff_id: BUFF_JUAN_YUN, name: "卷云",
     description: "移动速度降低60%",
     duration_frames: 128, tick_interval: 0, max_stacks: 1, is_debuff: true,
@@ -225,6 +246,7 @@ static EFFECTS_ZHAN_JUE: &[EffectEntry] = &[
     EffectEntry { field: AttribField::UnlimitedAdditionalHastePercent, value: 154.0 },
 ];
 pub static BUFF_ZHAN_JUE_DEF: BuffDef = BuffDef {
+    icon: "https://icon.jx3box.com/icon/102041.png",
     buff_id: BUFF_ZHAN_JUE, name: "战绝",
     description: "加速率+15%，每3秒回复100点怒气",
     duration_frames: 144, tick_interval: 48, max_stacks: 1, is_debuff: false,
@@ -233,6 +255,7 @@ pub static BUFF_ZHAN_JUE_DEF: BuffDef = BuffDef {
 };
 
 pub static BUFF_BU_CAN_DEF: BuffDef = BuffDef {
+    icon: "https://icon.jx3box.com/icon/6284.png",
     buff_id: BUFF_BU_CAN, name: "步残",
     description: "无法施展轻功",
     duration_frames: 64, tick_interval: 0, max_stacks: 1, is_debuff: true,
@@ -242,6 +265,7 @@ pub static BUFF_BU_CAN_DEF: BuffDef = BuffDef {
 
 // 普通盾挡（8499）：1~10 级由 BuffInstance.level 区分；动态加 ParryValueBase（见 main.rs buff_dynamic_effects）
 pub static BUFF_DUN_DANG_DEF: BuffDef = BuffDef {
+    icon: "https://icon.jx3box.com/icon/6301.png",
     buff_id: BUFF_DUN_DANG, name: "盾挡",
     description: "消耗怒气按级提高拆招值（系数见 atVitalityToParryValueCof 表）",
     duration_frames: 176, tick_interval: 0, max_stacks: 1, is_debuff: false,
@@ -251,6 +275,7 @@ pub static BUFF_DUN_DANG_DEF: BuffDef = BuffDef {
 
 // 千山盾挡（8448）：同上但有 千山奇穴 13421 时获得的强化版（系数约 1.25x）
 pub static BUFF_DUN_DANG_QIAN_SHAN_DEF: BuffDef = BuffDef {
+    icon: "https://icon.jx3box.com/icon/6301.png",
     buff_id: BUFF_DUN_DANG_QIAN_SHAN, name: "盾挡",
     description: "千山奇穴强化：消耗怒气按级提高拆招值（1.25x 普通盾挡）",
     duration_frames: 176, tick_interval: 0, max_stacks: 1, is_debuff: false,
@@ -259,6 +284,7 @@ pub static BUFF_DUN_DANG_QIAN_SHAN_DEF: BuffDef = BuffDef {
 };
 
 pub static BUFF_HUAN_SHEN_DEF: BuffDef = BuffDef {
+    icon: "https://icon.jx3box.com/icon/6332.png",
     buff_id: BUFF_HUAN_SHEN, name: "缓深",
     description: "效果期间施展盾压无法触发封轻功效果",
     duration_frames: 240, tick_interval: 0, max_stacks: 1, is_debuff: true,
@@ -271,6 +297,7 @@ static EFFECTS_HAN_XIAO: &[EffectEntry] = &[
     EffectEntry { field: AttribField::StrainPercent, value: 51.0 }, // 51/1024 ≈ +5% 无双率
 ];
 pub static BUFF_HAN_XIAO_DEF: BuffDef = BuffDef {
+    icon: "https://icon.jx3box.com/icon/7514.png",
     buff_id: BUFF_HAN_XIAO, name: "寒啸千军",
     description: "无双率提高5%",
     duration_frames: 240, tick_interval: 0, max_stacks: 1, is_debuff: false,
@@ -284,6 +311,7 @@ static EFFECTS_ZHEN_FEN: &[EffectEntry] = &[
     EffectEntry { field: AttribField::StrainBase, value: 101.0 },
 ];
 pub static BUFF_ZHEN_FEN_DEF: BuffDef = BuffDef {
+    icon: "https://icon.jx3box.com/icon/6436.png",
     buff_id: BUFF_ZHEN_FEN, name: "振奋",
     description: "每 2820 基础体质 +101 无双等级（每层 +101 StrainBase，上限 100 层），持续 30 秒",
     duration_frames: 480, tick_interval: 0, max_stacks: 100, is_debuff: false,
@@ -297,6 +325,7 @@ static EFFECTS_MIE_SHI: &[EffectEntry] = &[
     EffectEntry { field: AttribField::AllShieldIgnorePercent, value: 512.0 },
 ];
 pub static BUFF_MIE_SHI_DEF: BuffDef = BuffDef {
+    icon: "https://icon.jx3box.com/icon/7428.png",
     buff_id: BUFF_MIE_SHI, name: "蔑视",
     description: "无视目标 50% 外功防御等级",
     duration_frames: 160, tick_interval: 0, max_stacks: 1, is_debuff: false,
@@ -308,6 +337,7 @@ pub static BUFF_MIE_SHI_DEF: BuffDef = BuffDef {
 // 主 buff（时间轴可见），12s 持续，tick 每 3s 触发 on_tick 重算 8271/17772 层数
 // 任意方式结束时通过 on_expire/on_remove 清除 8271/17772
 pub static BUFF_HAN_JIA_DEF: BuffDef = BuffDef {
+    icon: "https://icon.jx3box.com/icon/6309.png",
     buff_id: BUFF_HAN_JIA, name: "寒甲",
     description: "提升自身外功攻击力",
     duration_frames: 192, tick_interval: 48, max_stacks: 1, is_debuff: false,
@@ -320,6 +350,7 @@ static EFFECTS_HAN_JIA_SMALL: &[EffectEntry] = &[
     EffectEntry { field: AttribField::PhysicsAttackPowerBase, value: 300.0 },
 ];
 pub static BUFF_HAN_JIA_SMALL_DEF: BuffDef = BuffDef {
+    icon: "https://icon.jx3box.com/icon/6309.png",
     buff_id: BUFF_HAN_JIA_SMALL, name: "寒甲·小",
     description: "寒甲内部层（每层 +300 外功攻击）",
     duration_frames: 192, tick_interval: 0, max_stacks: 125, is_debuff: false,
@@ -332,6 +363,7 @@ static EFFECTS_HAN_JIA_LARGE: &[EffectEntry] = &[
     EffectEntry { field: AttribField::PhysicsAttackPowerBase, value: 30000.0 },
 ];
 pub static BUFF_HAN_JIA_LARGE_DEF: BuffDef = BuffDef {
+    icon: "https://icon.jx3box.com/icon/6309.png",
     buff_id: BUFF_HAN_JIA_LARGE, name: "寒甲·大",
     description: "寒甲内部层（每层 +30000 外功攻击）",
     duration_frames: 192, tick_interval: 0, max_stacks: 125, is_debuff: false,
@@ -344,6 +376,7 @@ static EFFECTS_JIAN_TIE: &[EffectEntry] = &[
     EffectEntry { field: AttribField::ParryValuePercent, value: 600.0 }, // 6% = 600/10000
 ];
 pub static BUFF_JIAN_TIE_DEF: BuffDef = BuffDef {
+    icon: "https://icon.jx3box.com/icon/6353.png",
     buff_id: BUFF_JIAN_TIE, name: "坚铁",
     description: "每层使自身招架率提高6%",
     duration_frames: 128, tick_interval: 0, max_stacks: 5, is_debuff: false,
@@ -353,6 +386,7 @@ pub static BUFF_JIAN_TIE_DEF: BuffDef = BuffDef {
 
 // 恋战内置 CD (8321)：132 帧 = 8.25s；存在期间坚铁不叠层
 pub static BUFF_LIAN_ZHAN_CD_DEF: BuffDef = BuffDef {
+    icon: "https://icon.jx3box.com/icon/6303.png",
     buff_id: BUFF_LIAN_ZHAN_CD, name: "恋战CD",
     description: "坚铁招架成功后内置冷却，期间不再叠层",
     duration_frames: 132, tick_interval: 0, max_stacks: 1, is_debuff: false,
@@ -362,6 +396,7 @@ pub static BUFF_LIAN_ZHAN_CD_DEF: BuffDef = BuffDef {
 
 // 怒炎 (24755)：斩刀命中虚弱目标后 6 秒内下次绝刀返还怒气
 pub static BUFF_NU_YAN_DEF: BuffDef = BuffDef {
+    icon: "https://icon.jx3box.com/icon/6348.png",
     buff_id: BUFF_NU_YAN, name: "怒炎",
     description: "下一次施展绝刀可返还所消耗的怒气",
     duration_frames: 96, tick_interval: 0, max_stacks: 1, is_debuff: false,
@@ -371,6 +406,7 @@ pub static BUFF_NU_YAN_DEF: BuffDef = BuffDef {
 
 // 无惧 (8247)：免疫控制 6 秒（PVE 无实际属性效果，仅状态显示）
 pub static BUFF_WU_JU_DEF: BuffDef = BuffDef {
+    icon: "https://icon.jx3box.com/icon/6299.png",
     buff_id: BUFF_WU_JU, name: "无惧",
     description: "免疫恐惧和控制效果",
     duration_frames: 96, tick_interval: 0, max_stacks: 1, is_debuff: false,
@@ -385,6 +421,7 @@ static EFFECTS_JI_ANG: &[EffectEntry] = &[
     EffectEntry { field: AttribField::SurplusValueBase, value: 331.0 },
 ];
 pub static BUFF_JI_ANG_DEF: BuffDef = BuffDef {
+    icon: "https://icon.jx3box.com/icon/2037.png",
     buff_id: BUFF_JI_ANG, name: "激昂",
     description: "每层提高招架等级、拆招值、破招值",
     duration_frames: 96, tick_interval: 0, max_stacks: 100, is_debuff: false,
@@ -394,6 +431,7 @@ pub static BUFF_JI_ANG_DEF: BuffDef = BuffDef {
 
 // 盾威 (8397)：目标 debuff，伤害输出-5%（纯防御，无 DPS 属性），15s
 pub static BUFF_DUN_WEI_DEF: BuffDef = BuffDef {
+    icon: "https://icon.jx3box.com/icon/6285.png",
     buff_id: BUFF_DUN_WEI, name: "盾威",
     description: "目标伤害输出降低5%",
     duration_frames: 240, tick_interval: 0, max_stacks: 1, is_debuff: true,
@@ -406,6 +444,7 @@ static EFFECTS_YAN_ZHEN: &[EffectEntry] = &[
     EffectEntry { field: AttribField::SurplusPercent, value: 512.0 },
 ];
 pub static BUFF_YAN_ZHEN_DEF: BuffDef = BuffDef {
+    icon: "",
     buff_id: BUFF_YAN_ZHEN, name: "严阵",
     description: "每层提高50%破招",
     duration_frames: 320, tick_interval: 0, max_stacks: 3, is_debuff: false,
@@ -419,6 +458,7 @@ static EFFECTS_TIE_GU: &[EffectEntry] = &[
     EffectEntry { field: AttribField::VitalityToOvercomeCof, value: 0.152 },
 ];
 pub static BUFF_TIE_GU_DEF: BuffDef = BuffDef {
+    icon: "https://icon.jx3box.com/icon/6315.png",
     buff_id: BUFF_TIE_GU, name: "铁骨",
     description: "每点体质提高0.198攻击力、0.152破防等级",
     duration_frames: 0, tick_interval: 0, max_stacks: 1, is_debuff: false,
@@ -432,6 +472,7 @@ static EFFECTS_TIE_GU_SU_DI: &[EffectEntry] = &[
     EffectEntry { field: AttribField::VitalityToOvercomeCof, value: 0.456 },
 ];
 pub static BUFF_TIE_GU_SU_DI_DEF: BuffDef = BuffDef {
+    icon: "https://icon.jx3box.com/icon/6315.png",
     buff_id: BUFF_TIE_GU_SU_DI, name: "铁骨·宿敌",
     description: "每点体质提高0.594攻击力、0.456破防等级（第一仇恨）",
     duration_frames: 0, tick_interval: 0, max_stacks: 1, is_debuff: false,
@@ -442,6 +483,53 @@ pub static BUFF_TIE_GU_SU_DI_DEF: BuffDef = BuffDef {
 // ─────────────────────────────────────────────────────────────────────────────
 // 注册表
 // ─────────────────────────────────────────────────────────────────────────────
+
+/// 列出本版本的全部 Buff 定义，供 UI 元数据与属性来源分析使用。
+pub fn all_buff_defs() -> Vec<&'static BuffDef> {
+    vec![
+        &BUFF_DUN_FEI_DEF,
+        &BUFF_XUE_NU_DEF,
+        &BUFF_XUE_NU_JY_DEF,
+        &BUFF_JIE_HUA_DEF,
+        &BUFF_XU_RUO_DEF,
+        &BUFF_JIAN_DING_DEF,
+        &BUFF_FENG_MING_DEF,
+        &BUFF_DUN_FEI_DELAY_DEF,
+        &BUFF_LIU_XUE_DEF,
+        &BUFF_KUANG_JUE_DEF,
+        &BUFF_XU_RUO_DELAY_DEF,
+        &BUFF_YUAN_GE,
+        &BUFF_XUE_SHI_COUNT_DEF,
+        &BUFF_XUE_SHI_DEF,
+        &BUFF_LIN_GUANG_DEF,
+        &BUFF_LIN_GUANG_COUNT_DEF,
+        &BUFF_LIN_AN_DEF,
+        &BUFF_XUE_NU_CD_DEF,
+        &BUFF_CHENG_WU_DEF,
+        &BUFF_SHI_XUE_DEF,
+        &BUFF_JUAN_YUN_DEF,
+        &BUFF_ZHAN_JUE_DEF,
+        &BUFF_BU_CAN_DEF,
+        &BUFF_DUN_DANG_DEF,
+        &BUFF_DUN_DANG_QIAN_SHAN_DEF,
+        &BUFF_HUAN_SHEN_DEF,
+        &BUFF_HAN_XIAO_DEF,
+        &BUFF_ZHEN_FEN_DEF,
+        &BUFF_MIE_SHI_DEF,
+        &BUFF_HAN_JIA_DEF,
+        &BUFF_HAN_JIA_SMALL_DEF,
+        &BUFF_HAN_JIA_LARGE_DEF,
+        &BUFF_JIAN_TIE_DEF,
+        &BUFF_LIAN_ZHAN_CD_DEF,
+        &BUFF_NU_YAN_DEF,
+        &BUFF_WU_JU_DEF,
+        &BUFF_JI_ANG_DEF,
+        &BUFF_DUN_WEI_DEF,
+        &BUFF_YAN_ZHEN_DEF,
+        &BUFF_TIE_GU_DEF,
+        &BUFF_TIE_GU_SU_DI_DEF,
+    ]
+}
 
 pub fn get_buff_def(buff_id: u32) -> Option<&'static BuffDef> {
     match buff_id {
