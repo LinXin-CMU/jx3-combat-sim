@@ -23,12 +23,14 @@ function Invoke-AgentTool {
   )
   $json = $Payload | ConvertTo-Json -Depth 30 -Compress
   $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
-  Invoke-RestMethod `
+  $response = Invoke-WebRequest `
     -Uri "$base$Path" `
     -Method Post `
     -ContentType 'application/json; charset=utf-8' `
     -Body $bytes `
+    -UseBasicParsing `
     -TimeoutSec $TimeoutSec
+  $response.Content | ConvertFrom-Json
 }
 
 $shieldStrike = [string][char]0x76FE + [string][char]0x51FB
@@ -114,7 +116,19 @@ try {
   $response = $_.Exception.Response
   Assert-True ($null -ne $response) 'Budget rejection did not return an HTTP response.'
   Assert-True ([int]$response.StatusCode -eq 400) 'Budget rejection did not return HTTP 400.'
-  $body = $_.ErrorDetails.Message | ConvertFrom-Json
+  $errorText = $_.ErrorDetails.Message
+  if ([string]::IsNullOrWhiteSpace($errorText) -and
+      $response.PSObject.Methods.Name -contains 'GetResponseStream') {
+    $stream = $response.GetResponseStream()
+    $reader = New-Object System.IO.StreamReader($stream, [System.Text.Encoding]::UTF8)
+    try {
+      $errorText = $reader.ReadToEnd()
+    } finally {
+      $reader.Dispose()
+    }
+  }
+  Assert-True (-not [string]::IsNullOrWhiteSpace($errorText)) 'Budget rejection returned no JSON body.'
+  $body = $errorText | ConvertFrom-Json
   Assert-True ($body.error.code -eq 'invalid_budget_limit') 'Budget rejection returned the wrong stable error code.'
 }
 

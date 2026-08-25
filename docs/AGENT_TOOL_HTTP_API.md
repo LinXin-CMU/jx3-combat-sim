@@ -6,6 +6,7 @@
 ## 共同约束
 
 - 四个端点均为 `POST`，由现有认证/router 转发到用户独立 worker；
+- 成功与错误响应均显式使用 `application/json; charset=utf-8`，兼容 Windows PowerShell 5.1 的中文 JSON 往返；
 - 客户端先提交完整 `SimulateRequest` 获取不可变场景快照，后续调用必须携带该快照；
 - 场景以 canonical SHA-256 标识，版本或心法切换后旧快照会返回 `runtime_mismatch`，不会静默混算；
 - `trace_id` 只允许 1–64 字节的 ASCII 字母、数字、`_`、`-`；服务端不保存 trace；

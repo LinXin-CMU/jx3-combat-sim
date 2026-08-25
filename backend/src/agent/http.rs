@@ -1,6 +1,6 @@
 use axum::{
     extract::{rejection::JsonRejection, Json, State},
-    http::StatusCode,
+    http::{header::CONTENT_TYPE, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
@@ -160,7 +160,7 @@ pub async fn scenario_handler(
         }
     };
     match get_current_scenario(&request.trace_id, &scenario, &runtime.provenance) {
-        Ok(evidence) => Json(ScenarioToolResponse { scenario, evidence }).into_response(),
+        Ok(evidence) => json_response(ScenarioToolResponse { scenario, evidence }),
         Err(error) => tool_error_response(
             "get_current_scenario",
             &request.trace_id,
@@ -196,10 +196,9 @@ pub async fn simulate_handler(
         &runtime.provenance,
         &mut budget,
     ) {
-        Ok(execution) => Json(SimulateToolResponse {
+        Ok(execution) => json_response(SimulateToolResponse {
             evidence: execution.evidence,
-        })
-        .into_response(),
+        }),
         Err(error) => tool_error_response(
             "simulate_scenario",
             &request.trace_id,
@@ -237,10 +236,9 @@ pub async fn compare_handler(
         &mut budget,
     );
     match result {
-        Ok(execution) => Json(CompareToolResponse {
+        Ok(execution) => json_response(CompareToolResponse {
             evidence: execution.evidence,
-        })
-        .into_response(),
+        }),
         Err(error) => tool_error_response(
             "compare_scenarios",
             &request.trace_id,
@@ -287,11 +285,10 @@ pub async fn timeline_handler(
         }
     };
     match analyze_timeline(&request.trace_id, &simulation, &runtime.provenance) {
-        Ok(timeline) => Json(TimelineToolResponse {
+        Ok(timeline) => json_response(TimelineToolResponse {
             simulation: simulation.evidence,
             timeline: timeline.evidence,
-        })
-        .into_response(),
+        }),
         Err(error) => tool_error_response(
             "analyze_timeline",
             &request.trace_id,
@@ -411,7 +408,7 @@ fn error_response(
     code: &'static str,
     message: String,
 ) -> Response {
-    (
+    let mut response = (
         status,
         Json(AgentToolErrorEnvelope {
             schema_version: AGENT_ERROR_SCHEMA_V1,
@@ -421,7 +418,22 @@ fn error_response(
             error: AgentToolError { code, message },
         }),
     )
-        .into_response()
+        .into_response();
+    set_json_utf8(&mut response);
+    response
+}
+
+fn json_response<T: Serialize>(value: T) -> Response {
+    let mut response = Json(value).into_response();
+    set_json_utf8(&mut response);
+    response
+}
+
+fn set_json_utf8(response: &mut Response) {
+    response.headers_mut().insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("application/json; charset=utf-8"),
+    );
 }
 
 #[cfg(test)]
@@ -455,6 +467,10 @@ mod tests {
             }),
         );
         assert_eq!(response.status(), StatusCode::CONFLICT);
+        assert_eq!(
+            response.headers().get(CONTENT_TYPE).unwrap(),
+            "application/json; charset=utf-8"
+        );
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(body["schema_version"], AGENT_ERROR_SCHEMA_V1);
