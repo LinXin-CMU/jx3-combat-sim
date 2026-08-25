@@ -79,6 +79,7 @@ pub enum ToolError {
     NoScenarioChanges {
         label: String,
     },
+    TimelineDetailsUnavailable,
 }
 
 impl std::fmt::Display for ToolError {
@@ -109,6 +110,9 @@ impl std::fmt::Display for ToolError {
             }
             Self::NoScenarioChanges { label } => {
                 write!(f, "candidate '{label}' does not change the baseline scenario")
+            }
+            Self::TimelineDetailsUnavailable => {
+                write!(f, "full timeline details are required for deterministic analysis")
             }
         }
     }
