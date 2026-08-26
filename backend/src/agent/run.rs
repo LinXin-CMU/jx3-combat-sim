@@ -12,7 +12,7 @@ use std::{
     collections::{HashMap, VecDeque},
     convert::Infallible,
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex as StdMutex,
     },
     time::{SystemTime, UNIX_EPOCH},
@@ -27,6 +27,7 @@ use super::{
         AgentRunStatus, AgentTraceEventV1, AgentTraceSink,
     },
     provider::LlmProvider,
+    session::{contains_likely_secret, AgentSessionEventV1, AgentSessionStore},
     AgentRuntime, ScenarioSnapshotV1,
 };
 
@@ -43,6 +44,8 @@ const MAX_QUESTION_BYTES: usize = 16 * 1024;
 pub struct CreateAgentRunRequest {
     pub question: String,
     pub provider_profile: String,
+    #[serde(default)]
+    pub session_id: Option<String>,
     pub simulation: SimulateRequest,
 }
 
@@ -51,11 +54,13 @@ pub struct CreateAgentRunRequest {
 pub struct CreateAgentRunResponse {
     pub schema_version: &'static str,
     pub run_id: String,
+    pub session_id: String,
     pub scenario_hash: String,
     pub status: &'static str,
     pub stream_url: String,
     pub status_url: String,
     pub cancel_url: String,
+    pub session_url: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -73,6 +78,8 @@ pub struct AgentRunStreamEventV1 {
     pub code: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<AgentRunResultV1>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub persistence_error: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -80,9 +87,11 @@ pub struct AgentRunStreamEventV1 {
 pub struct AgentRunStatusResponseV1 {
     pub schema_version: &'static str,
     pub run_id: String,
+    pub session_id: String,
     pub scenario_hash: String,
     pub running: bool,
     pub cancellation_requested: bool,
+    pub persistence_error: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<AgentRunStatus>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -122,8 +131,11 @@ struct RunLifecycle {
 
 struct AgentRunRecord {
     run_id: String,
+    session_id: String,
     scenario_hash: String,
+    sessions: Arc<AgentSessionStore>,
     cancellation: AgentCancellation,
+    persistence_error: AtomicBool,
     lifecycle: StdMutex<RunLifecycle>,
     events: StdMutex<Vec<AgentRunStreamEventV1>>,
     broadcaster: broadcast::Sender<AgentRunStreamEventV1>,
@@ -131,12 +143,20 @@ struct AgentRunRecord {
 }
 
 impl AgentRunRecord {
-    fn new(run_id: String, scenario_hash: String) -> Arc<Self> {
+    fn new(
+        run_id: String,
+        session_id: String,
+        scenario_hash: String,
+        sessions: Arc<AgentSessionStore>,
+    ) -> Arc<Self> {
         let (broadcaster, _) = broadcast::channel(EVENT_CAPACITY);
         Arc::new(Self {
             run_id,
+            session_id,
             scenario_hash,
+            sessions,
             cancellation: AgentCancellation::default(),
+            persistence_error: AtomicBool::new(false),
             lifecycle: StdMutex::new(RunLifecycle::default()),
             events: StdMutex::new(Vec::new()),
             broadcaster,
@@ -154,6 +174,7 @@ impl AgentRunRecord {
             evidence_ids: event.evidence_ids,
             code: event.code,
             result: None,
+            persistence_error: false,
         });
     }
 
@@ -167,6 +188,7 @@ impl AgentRunRecord {
             evidence_ids: Vec::new(),
             code: None,
             result: None,
+            persistence_error: false,
         });
     }
 
@@ -176,6 +198,30 @@ impl AgentRunRecord {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         event.sequence = events.len() as u32 + 1;
+        let session_event = match event.result.as_ref() {
+            Some(result) => AgentSessionEventV1::run_result(result),
+            None if event.kind == "cancel_requested" => {
+                AgentSessionEventV1::control(&self.run_id, "cancel_requested")
+            }
+            None => AgentSessionEventV1::trace(
+                &self.run_id,
+                &AgentTraceEventV1 {
+                    sequence: event.sequence,
+                    kind: event.kind.clone(),
+                    tool_name: event.tool_name.clone(),
+                    evidence_ids: event.evidence_ids.clone(),
+                    code: event.code.clone(),
+                },
+            ),
+        };
+        if self
+            .sessions
+            .append_event(&self.session_id, session_event)
+            .is_err()
+        {
+            self.persistence_error.store(true, Ordering::SeqCst);
+            event.persistence_error = true;
+        }
         events.push(event.clone());
         let _ = self.broadcaster.send(event);
     }
@@ -204,6 +250,7 @@ impl AgentRunRecord {
                 .unwrap_or_default(),
             code: result.error.as_ref().map(|error| error.code.clone()),
             result: Some(result),
+            persistence_error: false,
         });
         self.terminal_notify.notify_waiters();
     }
@@ -232,9 +279,11 @@ impl AgentRunRecord {
         AgentRunStatusResponseV1 {
             schema_version: AGENT_RUN_STATUS_SCHEMA_V1,
             run_id: self.run_id.clone(),
+            session_id: self.session_id.clone(),
             scenario_hash: self.scenario_hash.clone(),
             running: lifecycle.result.is_none(),
             cancellation_requested: lifecycle.cancellation_requested,
+            persistence_error: self.persistence_error.load(Ordering::SeqCst),
             status: lifecycle
                 .result
                 .as_ref()
@@ -280,6 +329,7 @@ struct RunManagerState {
 pub struct AgentRunManager {
     state: Mutex<RunManagerState>,
     counter: AtomicU64,
+    sessions: Arc<AgentSessionStore>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -289,10 +339,11 @@ pub struct StartRunError {
 }
 
 impl AgentRunManager {
-    pub fn new() -> Arc<Self> {
+    pub fn new(sessions: Arc<AgentSessionStore>) -> Arc<Self> {
         Arc::new(Self {
             state: Mutex::new(RunManagerState::default()),
             counter: AtomicU64::new(0),
+            sessions,
         })
     }
 
@@ -311,9 +362,10 @@ impl AgentRunManager {
         runtime: AgentRuntime,
         input: AgentRunInput,
         limits: AgentRunLimits,
+        requested_session_id: Option<&str>,
     ) -> Result<Arc<AgentRunRecord>, StartRunError> {
-        let record =
-            AgentRunRecord::new(input.run_id.clone(), input.scenario.scenario_hash.clone());
+        let provider_profile = provider.profile_id().to_string();
+        let model = provider.model().to_string();
         {
             let mut state = self.state.lock().await;
             if state.active_run_id.is_some() {
@@ -322,30 +374,51 @@ impl AgentRunManager {
                     message: "another Agent run is already active for this worker",
                 });
             }
+            let session_id = self
+                .sessions
+                .create_or_resume_run(
+                    requested_session_id,
+                    &input.run_id,
+                    &input.question,
+                    &input.scenario.scenario_hash,
+                    &provider_profile,
+                    &model,
+                )
+                .map_err(|error| StartRunError {
+                    code: error.code,
+                    message: error.message,
+                })?;
+            let record = AgentRunRecord::new(
+                input.run_id.clone(),
+                session_id,
+                input.scenario.scenario_hash.clone(),
+                self.sessions.clone(),
+            );
             state.active_run_id = Some(input.run_id.clone());
             state.order.push_back(input.run_id.clone());
             state.runs.insert(input.run_id.clone(), record.clone());
-        }
+            drop(state);
 
-        let manager = self.clone();
-        let task_record = record.clone();
-        tokio::spawn(async move {
-            let sink_record = task_record.clone();
-            let sink: AgentTraceSink = Arc::new(move |event| sink_record.publish_trace(event));
-            let result = run_agent_observed(
-                provider.as_ref(),
-                &runtime,
-                input,
-                limits,
-                task_record.cancellation.clone(),
-                Some(sink),
-            )
-            .await;
-            let run_id = result.run_id.clone();
-            task_record.complete(result);
-            manager.finish(&run_id).await;
-        });
-        Ok(record)
+            let manager = self.clone();
+            let task_record = record.clone();
+            tokio::spawn(async move {
+                let sink_record = task_record.clone();
+                let sink: AgentTraceSink = Arc::new(move |event| sink_record.publish_trace(event));
+                let result = run_agent_observed(
+                    provider.as_ref(),
+                    &runtime,
+                    input,
+                    limits,
+                    task_record.cancellation.clone(),
+                    Some(sink),
+                )
+                .await;
+                let run_id = result.run_id.clone();
+                task_record.complete(result);
+                manager.finish(&run_id).await;
+            });
+            return Ok(record);
+        }
     }
 
     async fn finish(&self, run_id: &str) {
@@ -393,6 +466,14 @@ pub async fn create_run_handler(
             "question must be non-empty and within the configured limit",
         );
     }
+    if contains_likely_secret(&request.question) {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            None,
+            "sensitive_input_rejected",
+            "question appears to contain a credential; remove it before starting the Agent",
+        );
+    }
     let provider = match state
         .agent_providers
         .create_provider(&request.provider_profile)
@@ -431,22 +512,37 @@ pub async fn create_run_handler(
     };
     match state
         .agent_runs
-        .start(provider, runtime, input, AgentRunLimits::default())
+        .start(
+            provider,
+            runtime,
+            input,
+            AgentRunLimits::default(),
+            request.session_id.as_deref(),
+        )
         .await
     {
-        Ok(_) => json_response(
+        Ok(record) => json_response(
             StatusCode::ACCEPTED,
             CreateAgentRunResponse {
                 schema_version: AGENT_RUN_CREATED_SCHEMA_V1,
                 run_id: run_id.clone(),
+                session_id: record.session_id.clone(),
                 scenario_hash: scenario.scenario_hash,
                 status: "accepted",
                 stream_url: format!("/api/agent/runs/{run_id}/stream"),
                 status_url: format!("/api/agent/runs/{run_id}"),
                 cancel_url: format!("/api/agent/runs/{run_id}/cancel"),
+                session_url: format!("/api/agent/sessions/{}", record.session_id),
             },
         ),
-        Err(error) => error_response(StatusCode::CONFLICT, None, error.code, error.message),
+        Err(error) => {
+            let status = match error.code {
+                "agent_run_conflict" | "agent_session_corrupted" => StatusCode::CONFLICT,
+                "agent_session_not_found" => StatusCode::NOT_FOUND,
+                _ => StatusCode::SERVICE_UNAVAILABLE,
+            };
+            error_response(status, None, error.code, error.message)
+        }
     }
 }
 
@@ -594,10 +690,25 @@ fn json_response<T: Serialize>(status: StatusCode, value: T) -> Response {
 mod tests {
     use super::*;
     use crate::agent::provider::FakeProvider;
+    use std::path::PathBuf;
+
+    fn test_manager(name: &str) -> (Arc<AgentRunManager>, PathBuf) {
+        let root = std::env::temp_dir().join(format!(
+            "jx3-agent-run-{name}-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let sessions = AgentSessionStore::open(root.clone()).unwrap();
+        (AgentRunManager::new(sessions), root)
+    }
 
     #[tokio::test]
     async fn manager_completes_fake_run_and_replays_terminal_stream() {
-        let manager = AgentRunManager::new();
+        let (manager, root) = test_manager("success");
         let runtime = AgentRuntime::fixture();
         let scenario = runtime.fixture_scenario();
         let run_id = "run-manager-success".to_string();
@@ -615,6 +726,7 @@ mod tests {
                 runtime,
                 input,
                 AgentRunLimits::default(),
+                None,
             )
             .await
             .unwrap();
@@ -626,6 +738,10 @@ mod tests {
         assert!(snapshot
             .windows(2)
             .all(|pair| pair[0].sequence + 1 == pair[1].sequence));
+        assert!(!record.status().persistence_error);
+        let session = manager.sessions.load_session(&record.session_id).unwrap();
+        assert_eq!(session.summary.status, "completed");
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]
@@ -650,7 +766,7 @@ mod tests {
             }
         }
 
-        let manager = AgentRunManager::new();
+        let (manager, root) = test_manager("cancel");
         let runtime = AgentRuntime::fixture();
         let first = AgentRunInput {
             run_id: "run-active-first".to_string(),
@@ -663,6 +779,7 @@ mod tests {
                 runtime,
                 first,
                 AgentRunLimits::default(),
+                None,
             )
             .await
             .unwrap();
@@ -679,6 +796,7 @@ mod tests {
                 second_runtime,
                 second,
                 AgentRunLimits::default(),
+                None,
             )
             .await
         {
@@ -701,6 +819,7 @@ mod tests {
                 .count(),
             1
         );
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

@@ -6,6 +6,7 @@
   <title>剑网3 苍云PVE循环模拟器</title>
   <link rel="icon" href="favicon.ico" type="image/x-icon">
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="agent.css">
 </head>
 <body>
   <div class="container">
@@ -56,6 +57,7 @@
             <div class="sim-dropdown-item" data-quick-page="page-equip">⚔️ 配装器</div>
             <div class="sim-dropdown-item" data-quick-page="page-wizard-c">🔍 配装搜索</div>
             <div class="sim-dropdown-item" data-quick-page="page-plaza">🏟️ 战斗广场</div>
+            <div class="sim-dropdown-item" data-quick-page="page-agent">✦ AI 战斗分析</div>
           </div>
         </div>
       </div>
@@ -124,6 +126,7 @@
       <button class="tab" data-page="page-equip">配装器</button>
       <button class="tab" data-page="page-wizard-c">配装搜索</button>
       <button class="tab" data-page="page-plaza">战斗广场</button>
+      <button class="tab" data-page="page-agent">AI 战斗分析</button>
     </nav>
 
     <!-- ═══════ Hub 页面（默认落地，PR 1 新增）═══════ -->
@@ -164,6 +167,13 @@
             <p class="hub-card-desc">枚举候选装备组合，按当前循环跑模拟，找出最优配装</p>
             <button class="hub-card-btn">开始 →</button>
           </div>
+          <div class="hub-card hub-card-agent" data-hub-action="workflow-agent">
+            <div class="hub-card-icon">✦</div>
+            <h2 class="hub-card-title">AI 战斗分析</h2>
+            <p class="hub-card-desc">模型负责提出假设，确定性模拟器负责数字，所有结论都带可复现证据</p>
+            <div class="hub-card-badge agent-safe-badge">本地 · 只读工具</div>
+            <button class="hub-card-btn">开始分析 →</button>
+          </div>
         </div>
         <div class="hub-tools">
           <div class="hub-tools-title">独立工具</div>
@@ -172,6 +182,88 @@
             <button class="hub-tool" id="hub_macro_settings">📝 宏设置</button>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- ═══════ Agent 实验面板 ═══════ -->
+    <div id="page-agent" class="page">
+      <div class="agent-shell">
+        <aside class="agent-sidebar">
+          <div class="agent-sidebar-head">
+            <div>
+              <div class="agent-eyebrow">PERSISTED EXPERIMENTS</div>
+              <h2>分析会话</h2>
+            </div>
+            <button class="agent-icon-button" id="agent_new_session" title="新建会话" aria-label="新建会话">＋</button>
+          </div>
+          <div class="agent-session-list" id="agent_session_list">
+            <div class="agent-empty">正在读取本地会话…</div>
+          </div>
+          <div class="agent-storage-note">
+            <span class="agent-dot"></span>
+            会话按账号隔离保存；不会记录 API key、隐藏推理或原始模型 payload。
+          </div>
+        </aside>
+
+        <main class="agent-workspace">
+          <header class="agent-hero">
+            <div>
+              <div class="agent-eyebrow">GAME × AI / GROUNDED ANALYSIS</div>
+              <h1>苍云战斗分析 Agent</h1>
+              <p>语言模型理解策划问题并选择实验；Rust 模拟器计算事实；证据校验器阻止无来源数字进入结论。</p>
+            </div>
+            <div class="agent-boundary-stack">
+              <span>只读工具 × 4</span>
+              <span>单任务 ≤ 60s</span>
+              <span>并发任务 × 1</span>
+            </div>
+          </header>
+
+          <section class="agent-flow" aria-label="Agent 工作流">
+            <div><b>01</b><span>策划问题</span></div><i>→</i>
+            <div><b>02</b><span>模型规划</span></div><i>→</i>
+            <div><b>03</b><span>模拟实验</span></div><i>→</i>
+            <div><b>04</b><span>证据校验</span></div><i>→</i>
+            <div><b>05</b><span>结构化结论</span></div>
+          </section>
+
+          <div class="agent-toolbar">
+            <div class="agent-scenario-state" id="agent_scenario_state">
+              <span class="agent-status-light"></span>
+              尚未捕获循环场景
+            </div>
+            <button class="sim-btn" id="agent_go_sim">打开循环模拟</button>
+            <button class="sim-btn" id="agent_copy_summary" disabled>复制实验摘要</button>
+          </div>
+
+          <section class="agent-transcript" id="agent_transcript" aria-live="polite">
+            <div class="agent-welcome">
+              <div class="agent-welcome-mark">✦</div>
+              <h3>从一个可验证的问题开始</h3>
+              <p>先在“循环模拟”准备场景，再问 Agent 当前基线、候选改动或时间轴异常。离线 profile 可完整演示工具与证据闭环，不产生模型费用。</p>
+              <div class="agent-starter-grid">
+                <button data-agent-question="分析当前循环的输出基线，并说明证据边界。">分析当前基线</button>
+                <button data-agent-question="找出当前循环中值得进一步验证的时间轴问题。">诊断时间轴</button>
+                <button data-agent-question="说明这个场景还缺少哪些证据，避免给出未经验证的结论。">检查证据边界</button>
+              </div>
+            </div>
+          </section>
+
+          <footer class="agent-composer">
+            <div class="agent-provider-row">
+              <label for="agent_provider">模型 Profile</label>
+              <select id="agent_provider" aria-label="模型 Profile"><option value="offline">离线测试</option></select>
+              <span id="agent_provider_model">deterministic-fixture-v1</span>
+              <span class="agent-provider-note">凭据仅存在于服务端环境变量</span>
+            </div>
+            <div class="agent-input-row">
+              <textarea id="agent_question" rows="3" maxlength="16000" placeholder="例如：当前循环的主要输出基线是什么？请只引用模拟器证据。"></textarea>
+              <button class="agent-run-button" id="agent_run">运行分析</button>
+              <button class="agent-cancel-button" id="agent_cancel" hidden>取消</button>
+            </div>
+            <div class="agent-composer-status" id="agent_composer_status">就绪 · 公网关闭 · 尚未调用真实模型</div>
+          </footer>
+        </main>
       </div>
     </div>
 
@@ -2653,7 +2745,7 @@
       s.onload = next; s.onerror = next;
       document.body.appendChild(s);
     }
-    var SCRIPTS = ['state.js', 'app.js'];
+    var SCRIPTS = ['state.js', 'app.js', 'agent.js'];
     var go = function () { loadSeq(SCRIPTS); };
     try {
       fetch('/api/settings', { cache: 'no-store' })

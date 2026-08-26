@@ -14364,6 +14364,7 @@ window.Jx3Nav = {
     'page-history': '📚 历史库',
     'page-equip': '⚔️ 配装器',
     'page-plaza': '🏟️ 战斗广场',
+    'page-agent': '✦ AI 战斗分析',
     'page-plaza-step2': '🏟️ 战斗广场 · 第1步',
     'page-plaza-step4': '🏟️ 战斗广场 · 第4步',
   };
@@ -14392,6 +14393,8 @@ window.Jx3Nav = {
         window.Jx3Nav?.switchPage('page-sim');
       } else if (action === 'workflow-equip-search') {
         window.Jx3Nav?.switchPage('page-wizard-c');
+      } else if (action === 'workflow-agent') {
+        window.Jx3Nav?.switchPage('page-agent');
       }
     });
   });

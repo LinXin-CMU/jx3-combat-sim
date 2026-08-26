@@ -53,7 +53,7 @@ $simulation = @{
   tiegu_mode = 2
 }
 
-Write-Host '[1/5] Create offline Agent run'
+Write-Host '[1/6] Create offline Agent run'
 $created = Invoke-JsonRequest 'POST' '/api/agent/runs' @{
   question = 'Analyze the deterministic baseline and explain the evidence boundary.'
   provider_profile = 'offline'
@@ -61,9 +61,10 @@ $created = Invoke-JsonRequest 'POST' '/api/agent/runs' @{
 }
 Assert-True ($created.schema_version -eq 'agent-run-created/v1') 'Unexpected create schema.'
 Assert-True ($created.run_id -match '^run-[a-f0-9]+-[a-f0-9]+$') 'Unsafe run id.'
+Assert-True ($created.session_id -match '^session-[a-f0-9]+-[a-f0-9]+$') 'Unsafe session id.'
 Assert-True ($created.scenario_hash.Length -eq 64) 'Scenario hash is invalid.'
 
-Write-Host '[2/5] Poll terminal status'
+Write-Host '[2/6] Poll terminal status'
 $status = $null
 for ($i = 0; $i -lt 40; $i++) {
   $status = Invoke-JsonRequest 'GET' $created.status_url
@@ -75,8 +76,10 @@ Assert-True (-not $status.running) 'Offline Agent run did not finish.'
 Assert-True ($status.status -eq 'completed') 'Offline Agent run did not complete.'
 Assert-True ($status.result.report.evidence_ids.Count -eq 1) 'Grounded report evidence is missing.'
 Assert-True ($status.result.accounting.tool_calls -eq 2) 'Unexpected tool-call count.'
+Assert-True ($status.session_id -eq $created.session_id) 'Run status lost its session id.'
+Assert-True (-not $status.persistence_error) 'Run reported a persistence failure.'
 
-Write-Host '[3/5] Replay SSE after completion'
+Write-Host '[3/6] Replay SSE after completion'
 $stream = Invoke-WebRequest `
   -Uri "$base$($created.stream_url)" `
   -Method Get `
@@ -88,12 +91,28 @@ Assert-True ($stream.Content -match 'event: tool_started') 'Tool event was not r
 Assert-True ($stream.Content -match 'event: run_result') 'Terminal result event was not replayed.'
 Assert-True (-not ($stream.Content -match 'Authorization|api_key|hidden_reasoning')) 'Sensitive field leaked into SSE.'
 
-Write-Host '[4/5] Cancel is safe after terminal state'
+Write-Host '[4/6] Restore persisted session'
+$detailRaw = Invoke-WebRequest `
+  -Uri "$base$($created.session_url)" `
+  -Method Get `
+  -UseBasicParsing `
+  -TimeoutSec $TimeoutSec
+$detail = $detailRaw.Content | ConvertFrom-Json
+Assert-True ($detail.schema_version -eq 'agent-session-detail/v1') 'Unexpected session detail schema.'
+Assert-True ($detail.summary.status -eq 'completed') 'Persisted session status is incorrect.'
+Assert-True (@($detail.events | Where-Object { $_.kind -eq 'user_message' }).Count -eq 1) 'User message was not persisted once.'
+Assert-True (@($detail.events | Where-Object { $_.kind -eq 'run_result' }).Count -eq 1) 'Run result was not persisted once.'
+Assert-True ((($detail.events | Select-Object -ExpandProperty sequence) -join ',') -eq ((1..$detail.events.Count) -join ',')) 'Session event sequence is not continuous.'
+Assert-True (-not ($detailRaw.Content -match 'Authorization|api_key|hidden_reasoning|provider_request|provider_response')) 'Sensitive field leaked into session.'
+$sessions = Invoke-JsonRequest 'GET' '/api/agent/sessions'
+Assert-True (@($sessions.sessions | Where-Object { $_.session_id -eq $created.session_id }).Count -eq 1) 'Session list is missing the new session.'
+
+Write-Host '[5/6] Cancel is safe after terminal state'
 $cancelled = Invoke-JsonRequest 'POST' $created.cancel_url @{}
 Assert-True (-not $cancelled.accepted) 'Terminal run unexpectedly accepted cancellation.'
 Assert-True ($cancelled.already_terminal) 'Terminal cancellation state is incorrect.'
 
-Write-Host '[5/5] Reject unavailable run id'
+Write-Host '[6/6] Reject unavailable run id'
 $notFound = $false
 try {
   Invoke-WebRequest `
@@ -106,5 +125,5 @@ try {
 }
 Assert-True $notFound 'Unknown run id did not return 404.'
 
-Write-Host '[OK] Agent Run API/SSE smoke test passed.'
-Write-Host "     run=$($created.run_id) scenario=$($created.scenario_hash)"
+Write-Host '[OK] Agent Run/session API and SSE smoke test passed.'
+Write-Host "     run=$($created.run_id) session=$($created.session_id) scenario=$($created.scenario_hash)"

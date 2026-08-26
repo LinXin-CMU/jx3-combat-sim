@@ -19,12 +19,12 @@
 - 前端：原生 HTML/CSS/JavaScript，无构建步骤；主要逻辑集中在 `frontend/app.js`。
 - AI/搜索：宏生成与 GA、配装搜索、HTTP-RPC 强化学习环境、自研 PPO/行为克隆训练与分析。
 - 部署：同一 Rust 可执行文件支持本地、worker、router 三种模式；router 为每个用户启动隔离 worker。
-- 已验证基线：`cargo test` 为 109 个测试通过；前端可用 `node --check frontend/app.js` 做语法检查。
+- 已验证基线：`cargo test` 为 113 个测试通过；前端可用 `node --check frontend/app.js` 与 `node --check frontend/agent.js` 做语法检查。
 - Agent 离线评测：`tools/agent-eval.ps1` 运行 20 个工具级 fixture，必须保持 20/20、非法写入 0、userdata 不变且测试运行态可恢复。
 - Agent P1 基线：`docs/baselines/2026-08-25-agent-tool-layer.md` 记录 release 性能、确定性、成功/拒绝 trace 和完整回归；后续模型层不得弱化这些边界。
-- Agent P2 设计：`docs/AGENT_PHASE_2_PLAN.md` 已定义 provider、工具循环、SSE、报告和会话持久化边界；真实模型调用与首次真实 userdata 会话写入仍是人工确认节点。
-- Agent P2 provider 基线：`docs/baselines/2026-08-25-agent-provider-layer.md` 记录 P2-01/P2-02 的 adapter、凭据、mock、隔离 HTTP 与完整回归；当前仍未调用真实模型或写入 Agent 会话。
-- Agent P2 编排基线：`docs/baselines/2026-08-25-agent-orchestrator.md` 记录 prompt、四工具循环、报告和数值证据校验；`docs/baselines/2026-08-26-agent-run-lifecycle.md` 记录 Run API、SSE、取消、并发与 Router 代理回归。当前仍未调用真实模型或写入 Agent 会话。
+- Agent P2 设计：`docs/AGENT_PHASE_2_PLAN.md` 已定义 provider、工具循环、SSE、报告和会话持久化边界；P2 离线闭环已完成，真实模型调用仍是人工确认节点。
+- Agent P2 provider 基线：`docs/baselines/2026-08-25-agent-provider-layer.md` 记录 adapter、凭据、mock、隔离 HTTP 与完整回归；当前仍未调用真实模型。
+- Agent P2 离线基线：`docs/baselines/2026-08-26-agent-phase2-offline.md` 记录 113 项 Rust 测试、20/20 工具评测、12/12 模型级离线评测、会话恢复和 userdata 写保护。真实 Agent 会话已在用户确认后仅增量写入 `agent_sessions/v1`，既有 178 个文件及其清单哈希不变。
 
 更完整的现状审计见 `docs/PROJECT_BASELINE.md`，作品集与 Agent 路线见 `docs/AGENT_PORTFOLIO_PLAN.md`。
 

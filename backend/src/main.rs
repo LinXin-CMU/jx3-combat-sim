@@ -4812,6 +4812,8 @@ pub struct SharedState {
     pub agent_providers: Arc<agent::provider::ProviderCatalog>,
     /// 当前 worker 的瞬态 Agent run；每个 worker 同时只允许一个活动 run。
     pub agent_runs: Arc<agent::run::AgentRunManager>,
+    /// 当前 worker 用户目录内的 append-only Agent 会话。
+    pub agent_sessions: Arc<agent::session::AgentSessionStore>,
     /// 当前选中的武学版本（初始 V2025_10 山海源流）
     pub version: Arc<RwLock<GameVersion>>,
     /// 当前选中的心法（初始 分山劲）
@@ -9383,11 +9385,25 @@ async fn main() {
         spawn_icon_prefetch(&team_buffs, &formations, version);
     }
 
+    let agent_userdata_root = userdata_base();
+    let agent_sessions = match agent::session::AgentSessionStore::open(agent_userdata_root.clone()) {
+        Ok(store) => store,
+        Err(error) => {
+            eprintln!(
+                "[agent] 会话存储不可用（{}），主站继续运行，Agent Run 将返回固定错误",
+                error.code
+            );
+            agent::session::AgentSessionStore::unavailable(agent_userdata_root)
+        }
+    };
+    let agent_runs = agent::run::AgentRunManager::new(agent_sessions.clone());
+
     let state = SharedState {
         agent_context_gate: Arc::new(RwLock::new(())),
         agent_provenance: Arc::new(RwLock::new(agent_provenance)),
         agent_providers: Arc::new(agent_providers),
-        agent_runs: agent::run::AgentRunManager::new(),
+        agent_runs,
+        agent_sessions,
         version: Arc::new(RwLock::new(version)),
         mount: Arc::new(RwLock::new(mount)),
         constants: Arc::new(RwLock::new(constants)),
@@ -9451,6 +9467,8 @@ async fn main() {
         .route("/api/agent/runs/:run_id", get(agent::run::run_status_handler))
         .route("/api/agent/runs/:run_id/stream", get(agent::run::run_stream_handler))
         .route("/api/agent/runs/:run_id/cancel", post(agent::run::cancel_run_handler))
+        .route("/api/agent/sessions", get(agent::session::list_sessions_handler))
+        .route("/api/agent/sessions/:session_id", get(agent::session::get_session_handler))
         .route("/api/macro/presets", get(macro_presets))
         .route("/api/macro/save",    post(macro_save))
         .route("/api/macro/load",    get(macro_load))

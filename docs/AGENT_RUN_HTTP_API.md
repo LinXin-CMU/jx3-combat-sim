@@ -1,6 +1,6 @@
 # Agent Run API v1
 
-本接口把 P2-03 的只读 Orchestrator 暴露为瞬态任务。当前默认使用 `offline` fake provider；真实模型仍需单独确认。Run 只保存在当前 worker 内存，不会创建 `agent_sessions`，worker 重启后旧 run 返回稳定的 `agent_run_not_found`。
+本接口把只读 Orchestrator 暴露为有界任务。当前默认使用 `offline` fake provider；真实模型仍需单独确认。Run 的活动状态保存在当前 worker 内存中，同时创建或续接一个持久 Agent 会话。worker 重启后旧 run 返回稳定的 `agent_run_not_found`，但会话和规范化事件仍可通过 Session API 恢复；未完成 run 会被标记为 `interrupted`，不会自动重发外部请求。
 
 ## 创建 Run
 
@@ -13,6 +13,7 @@ Content-Type: application/json; charset=utf-8
 {
   "question": "分析当前循环的确定性输出，并说明证据边界。",
   "provider_profile": "offline",
+  "session_id": "session-...（续接时可选）",
   "simulation": {
     "haste_level": 42087,
     "sequence": ["盾击", "盾压"],
@@ -41,8 +42,10 @@ Content-Type: application/json; charset=utf-8
 {
   "schema_version": "agent-run-created/v1",
   "run_id": "run-...",
+  "session_id": "session-...",
   "scenario_hash": "...",
   "status": "accepted",
+  "session_url": "/api/agent/sessions/session-...",
   "stream_url": "/api/agent/runs/run-.../stream",
   "status_url": "/api/agent/runs/run-...",
   "cancel_url": "/api/agent/runs/run-.../cancel"
@@ -57,7 +60,7 @@ Content-Type: application/json; charset=utf-8
 GET /api/agent/runs/:run_id
 ```
 
-运行中返回 `running=true`。终止后 `result` 是完整 `AgentRunResultV1`，包括报告、证据索引、预算用量和固定终止状态。
+运行中返回 `running=true`。终止后 `result` 是完整 `AgentRunResultV1`，包括报告、证据索引、预算用量和固定终止状态。响应同时包含 `session_id` 与 `persistence_error`；后者只在会话落盘失败时出现，Agent 会降级但主站仍可用。
 
 ## SSE
 
@@ -96,7 +99,10 @@ POST /api/agent/runs/:run_id/cancel
 | ---: | --- | --- |
 | 400 | `invalid_json` | 请求 JSON 不符合 schema |
 | 400 | `invalid_question` | 问题为空、过长或包含非法控制字符 |
+| 400 | `sensitive_input_rejected` | 问题疑似包含 API key、Authorization 或其他凭据 |
 | 400 | `provider_not_found` / `provider_disabled` | profile 不在服务端允许列表 |
+| 400 | `invalid_session_id` | session id 不符合安全标识格式 |
+| 404 | `agent_session_not_found` | 指定续接的会话不存在 |
 | 409 | `agent_run_conflict` | 当前 worker 已有活动 run |
 | 422 | `invalid_scenario` | simulation 无法冻结为合法场景 |
 | 503 | `provider_key_unavailable` | 网络 profile 的服务端凭据不可用 |
@@ -111,3 +117,5 @@ POST /api/agent/runs/:run_id/cancel
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\agent-run-smoke.ps1
 ```
+
+会话列表、详情、事件格式与落盘边界见 [`AGENT_SESSION_HTTP_API.md`](AGENT_SESSION_HTTP_API.md)。

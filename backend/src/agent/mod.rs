@@ -16,6 +16,7 @@ pub mod report;
 pub mod run;
 pub mod runtime;
 pub mod schema;
+pub mod session;
 pub mod timeline;
 pub mod tools;
 

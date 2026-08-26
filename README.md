@@ -4,7 +4,7 @@
 
 这是我面向 2027 届游戏策划岗位准备的个人作品集项目。项目重点不是复刻一个游戏界面，而是展示如何把复杂战斗规则转化为可以配置、验证、对比和部署的策划工具。
 
-当前已经实现战斗模拟、宏优化、配装搜索和强化学习环境；Agent 已完成四个只读工具、证据协议、20 题无模型评测，以及可替换的离线/OpenAI Responses/OpenAI-compatible Chat provider 层。真实模型、Orchestrator、持久会话与聊天界面尚未接入。
+当前已经实现战斗模拟、宏优化、配装搜索和强化学习环境；战斗分析 Agent 已完成四个只读工具、有界编排、证据校验、Run/SSE、用户隔离持久会话和实验面板，并支持可替换的离线/OpenAI Responses/OpenAI-compatible Chat provider。真实模型调用与公网演示仍保持关闭，等待单独确认模型、费用和发布安全边界。
 
 ## 90 秒了解项目
 
@@ -125,12 +125,13 @@ Set-Location backend
 cargo test
 ```
 
-当前基线为 88 项通过、0 失败：Phase 0 原有 34 项、Agent 工具/HTTP 层 35 项、provider 与设置安全 19 项；恢复 2025 独立脚本路由后共有 19 条编译 warning，计划作为后续工程卫生任务处理。
+当前基线为 113 项通过、0 失败；恢复 2025 独立脚本路由后共有 19 条既有编译 warning，计划作为后续工程卫生任务处理。
 
 ### 前端语法
 
 ```powershell
 node --check frontend/app.js
+node --check frontend/agent.js
 ```
 
 ### 确定性与 golden
@@ -173,18 +174,24 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\agent-eval.ps1
 - Pareto 配装搜索；
 - 确定性模拟、时间轴和回归证据。
 
-### 下一案例：战斗分析 Agent
+### 已实现案例：战斗分析 Agent
 
-Agent 将围绕明确目标自主调用高层工具：
+Agent 围绕明确目标自主调用高层工具：
 
 - `get_current_scenario`
 - `simulate_scenario`
 - `compare_scenarios`
 - `analyze_timeline`
 
-它负责拆解问题、提出假设和组织证据，不直接生成“看起来合理”的伤害数字。第一版已经建立 20 条无模型离线评测题并固化性能与 trace 基线；provider adapter、有界工具循环、数值证据校验、Run API 和 SSE 生命周期已完成，下一步按 [`docs/AGENT_PHASE_2_PLAN.md`](docs/AGENT_PHASE_2_PLAN.md) 实现用户隔离的持久会话。
+它负责拆解问题、提出假设和组织证据，不直接生成“看起来合理”的伤害数字。当前离线闭环包括 provider adapter、有界工具循环、数值证据校验、Run API/SSE、append-only 持久会话、历史恢复和面试用实验面板。Phase 1 工具评测保持 20/20；Phase 2 离线模型级评测为 12/12，证据引用率和工具边界通过率均为 100%。这证明的是系统编排与证据边界，不等同于真实模型自然语言质量。
 
-Provider 默认只启用不联网的 `offline` profile；可选服务商配置见 [`config/agent.providers.example.toml`](config/agent.providers.example.toml)。API key 只从服务端环境变量读取，不进入网页或用户设置。Provider 实现与隔离验收见 [`docs/baselines/2026-08-25-agent-provider-layer.md`](docs/baselines/2026-08-25-agent-provider-layer.md)，编排与证据校验见 [`docs/baselines/2026-08-25-agent-orchestrator.md`](docs/baselines/2026-08-25-agent-orchestrator.md)，Run/SSE 生命周期见 [`docs/baselines/2026-08-26-agent-run-lifecycle.md`](docs/baselines/2026-08-26-agent-run-lifecycle.md)。
+一键复验完整离线闭环：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\agent-phase2-verify.ps1
+```
+
+Provider 默认只启用不联网的 `offline` profile；可选服务商配置见 [`config/agent.providers.example.toml`](config/agent.providers.example.toml)。API key 只从服务端环境变量读取，不进入网页或用户设置。完整离线验收见 [`docs/baselines/2026-08-26-agent-phase2-offline.md`](docs/baselines/2026-08-26-agent-phase2-offline.md)，作品集叙事与演示流程见 [`docs/AGENT_PORTFOLIO_CASE_STUDY.md`](docs/AGENT_PORTFOLIO_CASE_STUDY.md) 和 [`docs/AGENT_90S_DEMO_SCRIPT.md`](docs/AGENT_90S_DEMO_SCRIPT.md)。下一阻断节点是首次真实模型调用：必须先确认 profile、模型与费用上限。
 
 ### 差异化案例：RL → 宏蒸馏
 
@@ -209,13 +216,18 @@ Provider 默认只启用不联网的 `offline` profile；可选服务商配置�
 - [`docs/AGENT_PHASE_1_PLAN.md`](docs/AGENT_PHASE_1_PLAN.md)：首批四个只读工具、证据协议与 20 题评测计划；
 - [`docs/AGENT_PHASE_2_PLAN.md`](docs/AGENT_PHASE_2_PLAN.md)：模型供应商、工具循环、SSE、证据校验与持久会话计划；
 - [`docs/AGENT_RUN_HTTP_API.md`](docs/AGENT_RUN_HTTP_API.md)：Agent Run 创建、状态、SSE、取消与固定错误协议；
+- [`docs/AGENT_SESSION_HTTP_API.md`](docs/AGENT_SESSION_HTTP_API.md)：持久会话、append-only 事件、恢复与脱敏边界；
+- [`docs/AGENT_PORTFOLIO_CASE_STUDY.md`](docs/AGENT_PORTFOLIO_CASE_STUDY.md)：战斗分析 Agent 的问题—设计—结果—反思案例；
+- [`docs/AGENT_90S_DEMO_SCRIPT.md`](docs/AGENT_90S_DEMO_SCRIPT.md)：90 秒面试演示脚本；
 - [`backend/tests/agent_eval/README.md`](backend/tests/agent_eval/README.md)：20 题无模型评测结构、运行方式与安全边界；
+- [`backend/tests/agent_model_eval/README.md`](backend/tests/agent_model_eval/README.md)：12 题离线模型级评测、长会话和越权测试；
 - [`docs/PHASE_0_PLAN.md`](docs/PHASE_0_PLAN.md)：公开仓库卫生计划；
 - [`docs/baselines/2026-08-25-phase0.md`](docs/baselines/2026-08-25-phase0.md)：Agent 接入前的回归与性能锚点；
 - [`docs/baselines/2026-08-25-versioned-golden-migration.md`](docs/baselines/2026-08-25-versioned-golden-migration.md)：跨版本 Golden v2 迁移证据；
 - [`docs/baselines/2026-08-25-clean-clone-audit.md`](docs/baselines/2026-08-25-clean-clone-audit.md)：全新目录构建、smoke 与跨平台哈希复现；
 - [`docs/baselines/2026-08-25-agent-tool-layer.md`](docs/baselines/2026-08-25-agent-tool-layer.md)：P1 工具性能、证据确定性、成功/拒绝 trace 与完整回归；
 - [`docs/baselines/2026-08-25-agent-provider-layer.md`](docs/baselines/2026-08-25-agent-provider-layer.md)：P2 provider 协议、凭据边界、mock 与隔离 HTTP 验收；
+- [`docs/baselines/2026-08-26-agent-phase2-offline.md`](docs/baselines/2026-08-26-agent-phase2-offline.md)：P2 离线闭环、真实 userdata 增量和一键验收基线；
 - [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md)：公开仓库与 Demo 的发布阻断项；
 - [`docs/security/SECRET_SCAN_REPORT.md`](docs/security/SECRET_SCAN_REPORT.md)：脱敏与秘密扫描结果；
 - [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)：MIT 适用范围、游戏数据与第三方来源边界；
