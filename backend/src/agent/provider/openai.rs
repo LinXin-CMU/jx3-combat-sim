@@ -199,9 +199,10 @@ impl LlmProvider for OpenAiResponsesProvider {
         let body = responses_request(&self.transport.model, request)?;
         let bytes = self.transport.post_json("responses", &body).await?;
         let response = parse_responses_response(&bytes)?;
-        response
-            .validate_against(request)
-            .map_err(|error| ProviderError::invalid_response_protocol(error.code, error.message))?;
+        response.validate_against(request).map_err(|error| {
+            ProviderError::invalid_response_protocol(error.code, error.message)
+                .with_usage(response.usage.clone())
+        })?;
         Ok(response)
     }
 }
@@ -260,9 +261,10 @@ impl LlmProvider for OpenAiChatProvider {
             chat_request_with_compatibility(&self.transport.model, request, self.compatibility)?;
         let bytes = self.transport.post_json("chat/completions", &body).await?;
         let response = parse_chat_response(&bytes)?;
-        response
-            .validate_against(request)
-            .map_err(|error| ProviderError::invalid_response_protocol(error.code, error.message))?;
+        response.validate_against(request).map_err(|error| {
+            ProviderError::invalid_response_protocol(error.code, error.message)
+                .with_usage(response.usage.clone())
+        })?;
         Ok(response)
     }
 }
@@ -617,11 +619,17 @@ fn parse_chat_response(bytes: &[u8]) -> Result<ModelResponse, ProviderError> {
             "provider response was not valid Chat Completions JSON",
         )
     })?;
+    let usage = TokenUsage {
+        input_tokens: payload.usage.prompt_tokens,
+        output_tokens: payload.usage.completion_tokens,
+        total_tokens: payload.usage.total_tokens,
+    };
     let choice = payload.choices.into_iter().next().ok_or_else(|| {
         ProviderError::invalid_response_protocol(
             "provider_response_empty",
             "provider response did not contain a choice",
         )
+        .with_usage(usage.clone())
     })?;
     let mut text = choice
         .message
@@ -636,12 +644,14 @@ fn parse_chat_response(bytes: &[u8]) -> Result<ModelResponse, ProviderError> {
         .tool_calls
         .into_iter()
         .map(|call| parse_tool_call(call.id, call.function.name, &call.function.arguments))
-        .collect::<Result<_, _>>()?;
+        .collect::<Result<_, _>>()
+        .map_err(|error| error.with_usage(usage.clone()))?;
     if text.is_none() && tool_calls.is_empty() {
         return Err(ProviderError::invalid_response_protocol(
             "provider_response_empty",
             "provider response contained neither text nor tool calls",
-        ));
+        )
+        .with_usage(usage));
     }
     let finish_reason = if !tool_calls.is_empty() {
         FinishReason::ToolCalls
@@ -659,11 +669,7 @@ fn parse_chat_response(bytes: &[u8]) -> Result<ModelResponse, ProviderError> {
         assistant_text: text,
         tool_calls,
         finish_reason,
-        usage: TokenUsage {
-            input_tokens: payload.usage.prompt_tokens,
-            output_tokens: payload.usage.completion_tokens,
-            total_tokens: payload.usage.total_tokens,
-        },
+        usage,
     })
 }
 
@@ -900,6 +906,47 @@ mod tests {
         assert_eq!(request_body["tools"][0]["function"]["strict"], true);
         assert_eq!(request_body["parallel_tool_calls"], false);
         assert!(captured.starts_with("POST /v1/chat/completions HTTP/1.1"));
+    }
+
+    #[test]
+    fn empty_chat_response_retains_usage_for_accounting() {
+        let body = br#"{
+            "choices":[{"message":{"content":"","tool_calls":[]},"finish_reason":"stop"}],
+            "usage":{"prompt_tokens":120,"completion_tokens":7,"total_tokens":127}
+        }"#;
+        let error = parse_chat_response(body).unwrap_err();
+
+        assert_eq!(error.code, "provider_response_empty");
+        assert_eq!(error.usage.input_tokens, 120);
+        assert_eq!(error.usage.output_tokens, 7);
+        assert_eq!(error.usage.total_tokens, 127);
+        assert!(!serde_json::to_string(&error)
+            .unwrap()
+            .contains("total_tokens"));
+    }
+
+    #[tokio::test]
+    async fn blocked_chat_tool_attempt_retains_usage_for_accounting() {
+        let body = r#"{
+            "choices":[{"message":{"content":null,"tool_calls":[{
+                "id":"call-shell",
+                "type":"function",
+                "function":{"name":"shell","arguments":"{}"}
+            }]},"finish_reason":"tool_calls"}],
+            "usage":{"prompt_tokens":80,"completion_tokens":9,"total_tokens":89}
+        }"#;
+        let (base_url, _captured) = mock_server(200, body).await;
+        let provider = OpenAiChatProvider::new(
+            "compatible".to_string(),
+            "example-chat-model".to_string(),
+            base_url,
+            "test-secret-value".to_string(),
+        )
+        .unwrap();
+        let error = provider.complete(&request()).await.unwrap_err();
+
+        assert_eq!(error.code, "unregistered_provider_tool");
+        assert_eq!(error.usage.total_tokens, 89);
     }
 
     #[tokio::test]

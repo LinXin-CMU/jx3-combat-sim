@@ -37,6 +37,8 @@ pub struct ProviderError {
     pub retryable: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub upstream_status: Option<u16>,
+    #[serde(skip_serializing)]
+    pub usage: TokenUsage,
 }
 
 impl ProviderError {
@@ -46,6 +48,7 @@ impl ProviderError {
             message,
             retryable: false,
             upstream_status: None,
+            usage: TokenUsage::default(),
         }
     }
 
@@ -55,6 +58,7 @@ impl ProviderError {
             message: "model request failed local protocol validation",
             retryable: false,
             upstream_status: None,
+            usage: TokenUsage::default(),
         }
     }
 
@@ -65,6 +69,7 @@ impl ProviderError {
                 message: "provider request timed out",
                 retryable: true,
                 upstream_status: None,
+                usage: TokenUsage::default(),
             }
         } else {
             Self {
@@ -72,6 +77,7 @@ impl ProviderError {
                 message: "provider request failed",
                 retryable: true,
                 upstream_status: None,
+                usage: TokenUsage::default(),
             }
         }
     }
@@ -95,6 +101,7 @@ impl ProviderError {
             message: "provider returned an unsuccessful status",
             retryable: status == 408 || status == 429 || status >= 500,
             upstream_status: Some(status),
+            usage: TokenUsage::default(),
         }
     }
 
@@ -142,6 +149,7 @@ impl ProviderError {
                     message,
                     retryable: false,
                     upstream_status: Some(status),
+                    usage: TokenUsage::default(),
                 };
             }
         }
@@ -154,6 +162,7 @@ impl ProviderError {
             message: "provider response exceeded the configured limit",
             retryable: false,
             upstream_status: None,
+            usage: TokenUsage::default(),
         }
     }
 
@@ -163,6 +172,7 @@ impl ProviderError {
             message: "provider returned an invalid response",
             retryable: false,
             upstream_status: None,
+            usage: TokenUsage::default(),
         }
     }
 
@@ -172,7 +182,13 @@ impl ProviderError {
             message,
             retryable: false,
             upstream_status: None,
+            usage: TokenUsage::default(),
         }
+    }
+
+    pub fn with_usage(mut self, usage: TokenUsage) -> Self {
+        self.usage = usage;
+        self
     }
 }
 

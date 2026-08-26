@@ -1,7 +1,8 @@
 param(
-  [int]$Port = 3017,
+  [int]$Port = 3005,
   [string]$ConfigPath = '',
   [string]$UserdataPath = '',
+  [string]$KnowledgeRoot = '',
   [string]$ApiKeyEnv = 'JX3_DEEPSEEK_API_KEY'
 )
 
@@ -11,6 +12,15 @@ $backendRoot = Join-Path $repoRoot 'backend'
 $exe = Join-Path $backendRoot 'target\release\jx3-combat-sim.exe'
 if (-not $ConfigPath) { $ConfigPath = Join-Path $repoRoot 'agent.providers.toml' }
 if (-not $UserdataPath) { $UserdataPath = Join-Path $backendRoot 'userdata' }
+if (-not $KnowledgeRoot) {
+  $documentsRoot = Join-Path $env:USERPROFILE 'Documents'
+  $manifests = @(Get-ChildItem -LiteralPath $documentsRoot -Filter '_migration-manifest.json' -Recurse -File -ErrorAction SilentlyContinue)
+  if ($manifests.Count -eq 1) {
+    $KnowledgeRoot = $manifests[0].DirectoryName
+  } elseif ($manifests.Count -gt 1) {
+    throw "Found multiple knowledge manifests below $documentsRoot. Use -KnowledgeRoot."
+  }
+}
 
 if (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue) {
   throw "Port $Port is already in use."
@@ -18,6 +28,7 @@ if (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyCon
 $resolvedExe = (Resolve-Path -LiteralPath $exe).Path
 $resolvedConfig = (Resolve-Path -LiteralPath $ConfigPath).Path
 $resolvedUserdata = (Resolve-Path -LiteralPath $UserdataPath).Path
+$resolvedKnowledge = if ($KnowledgeRoot) { (Resolve-Path -LiteralPath $KnowledgeRoot).Path } else { $null }
 $credential = [Environment]::GetEnvironmentVariable($ApiKeyEnv, 'User')
 if ([string]::IsNullOrWhiteSpace($credential)) {
   throw "Credential environment variable $ApiKeyEnv is unavailable at User scope."
@@ -31,6 +42,7 @@ $names = @(
   'JX3_NO_BROWSER',
   'JX3_USERDATA_DIR',
   'JX3_AGENT_CONFIG',
+  'JX3_KNOWLEDGE_ROOT',
   $ApiKeyEnv
 )
 $previous = @{}
@@ -44,6 +56,7 @@ try {
   [Environment]::SetEnvironmentVariable('JX3_NO_BROWSER', '1', 'Process')
   [Environment]::SetEnvironmentVariable('JX3_USERDATA_DIR', $resolvedUserdata, 'Process')
   [Environment]::SetEnvironmentVariable('JX3_AGENT_CONFIG', $resolvedConfig, 'Process')
+  [Environment]::SetEnvironmentVariable('JX3_KNOWLEDGE_ROOT', $resolvedKnowledge, 'Process')
   [Environment]::SetEnvironmentVariable($ApiKeyEnv, $credential, 'Process')
   $server = Start-Process -FilePath $resolvedExe -WorkingDirectory $backendRoot `
     -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
@@ -75,5 +88,6 @@ if (-not $healthy) {
   pid = $server.Id
   port = $Port
   config = Split-Path -Leaf $resolvedConfig
+  knowledge = if ($resolvedKnowledge) { Split-Path -Leaf $resolvedKnowledge } else { 'disabled' }
   credential_source = "User environment: $ApiKeyEnv"
 } | ConvertTo-Json -Compress

@@ -7,16 +7,16 @@ use std::time::{Duration, Instant};
 use tokio::sync::Notify;
 
 use super::evidence::validate_trace_id;
-use super::prompt::agent_prompt_v5;
+use super::prompt::agent_prompt_v6;
 use super::provider::{
     FinishReason, LlmProvider, ModelMessage, ModelRequest, ProviderToolCall,
     StructuredOutputDefinition, TokenUsage,
 };
-use super::registry::AgentToolRegistry;
+use super::registry::{AgentToolRegistry, MAX_KNOWLEDGE_SEARCHES};
 use super::report::{
     cited_evidence_ids, cited_knowledge_sources, parse_and_salvage_report,
-    parse_and_validate_report, report_content_json_schema, AgentReportContentV1, AgentReportV1,
-    AgentRunAccountingV1, AGENT_REPORT_CONTENT_SCHEMA_V1, AGENT_REPORT_SCHEMA_V1,
+    parse_and_validate_report, report_content_json_schema, AgentFindingV1, AgentReportContentV1,
+    AgentReportV1, AgentRunAccountingV1, AGENT_REPORT_CONTENT_SCHEMA_V1, AGENT_REPORT_SCHEMA_V1,
 };
 use super::{AgentRuntime, ScenarioSnapshotV1};
 
@@ -215,7 +215,7 @@ pub async fn run_agent_observed(
     event_sink: Option<AgentTraceSink>,
 ) -> AgentRunResultV1 {
     let started = Instant::now();
-    let prompt = agent_prompt_v5();
+    let prompt = agent_prompt_v6();
     let mut accounting = AgentRunAccountingV1::default();
     let mut trace = TraceCollector::new(event_sink);
 
@@ -242,8 +242,13 @@ pub async fn run_agent_observed(
         limits.max_simulations,
         runtime.knowledge(),
     );
-    let definitions = if runtime.knowledge().is_some() {
-        AgentToolRegistry::definitions_with_knowledge()
+    let definitions = if let Some(knowledge) = runtime.knowledge() {
+        let seasons = knowledge.seasons().map(str::to_string).collect::<Vec<_>>();
+        let categories = knowledge
+            .categories()
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        AgentToolRegistry::definitions_with_knowledge(&seasons, &categories)
     } else {
         AgentToolRegistry::definitions()
     };
@@ -443,6 +448,31 @@ pub async fn run_agent_observed(
             }
             Some(Ok(Ok(response))) => response,
             Some(Ok(Err(error))) => {
+                add_usage(&mut accounting, &error.usage);
+                if error.code == "provider_response_empty" {
+                    if let Some(content) =
+                        evidence_preserving_provider_fallback(registry.evidence())
+                    {
+                        trace.push(
+                            "provider_empty_evidence_preserved",
+                            None,
+                            cited_evidence_ids(&content),
+                            Some(error.code.to_string()),
+                        );
+                        return terminal_with_report(
+                            provider,
+                            &input,
+                            &prompt,
+                            AgentRunStatus::PartiallyVerified,
+                            accounting,
+                            content,
+                            Some(fixed_error(error.code, error.message)),
+                            trace,
+                            started,
+                            &registry,
+                        );
+                    }
+                }
                 return terminal_with_registry(
                     provider,
                     &input,
@@ -454,7 +484,7 @@ pub async fn run_agent_observed(
                     trace,
                     started,
                     &registry,
-                )
+                );
             }
             Some(Err(_)) => {
                 return terminal_with_registry(
@@ -598,6 +628,9 @@ pub async fn run_agent_observed(
             // mode remains compatible with providers that cannot combine tools
             // and structured output.
             final_report_only = domain_experiment_requested;
+            if registry.used_knowledge_searches() >= MAX_KNOWLEDGE_SEARCHES {
+                final_report_only = true;
+            }
             continue;
         }
 
@@ -888,6 +921,38 @@ fn refusal_content(summary: &str, limitation: &str) -> AgentReportContentV1 {
         limitations: vec![limitation.to_string()],
         refusal_reason: Some(summary.to_string()),
     }
+}
+
+fn evidence_preserving_provider_fallback(
+    evidence: &super::report::EvidenceStore,
+) -> Option<AgentReportContentV1> {
+    let evidence_ids = evidence
+        .iter()
+        .filter_map(|(evidence_id, envelope)| {
+            (envelope
+                .get("tool_name")
+                .and_then(serde_json::Value::as_str)
+                != Some("get_current_scenario"))
+            .then(|| evidence_id.clone())
+        })
+        .collect::<Vec<_>>();
+    if evidence_ids.is_empty() {
+        return None;
+    }
+    Some(AgentReportContentV1 {
+        schema_version: AGENT_REPORT_CONTENT_SCHEMA_V1.to_string(),
+        summary: "模型未返回可校验报告；本轮已取得的只读证据仍予保留。".to_string(),
+        findings: vec![AgentFindingV1 {
+            title: "已取得的可验证证据".to_string(),
+            explanation: "这里只保留工具生成的证据与来源，不据此代替模型补写玩法或数值结论。"
+                .to_string(),
+            evidence_ids,
+            metrics: Vec::new(),
+        }],
+        recommendations: Vec::new(),
+        limitations: vec!["模型输出为空，需重新发起分析才能获得完整解释。".to_string()],
+        refusal_reason: None,
+    })
 }
 
 fn fixed_error(code: impl Into<String>, message: impl Into<String>) -> AgentRunErrorV1 {
@@ -1270,7 +1335,7 @@ mod tests {
         .await;
 
         assert_eq!(result.status, AgentRunStatus::Completed);
-        assert_eq!(result.prompt_version, "agent-system/v5");
+        assert_eq!(result.prompt_version, "agent-system/v6");
         assert_eq!(result.accounting.knowledge_searches, 1);
         assert_eq!(result.accounting.simulations, 0);
         let report = result.report.unwrap();
@@ -1302,7 +1367,7 @@ mod tests {
         .await;
 
         assert_eq!(result.status, AgentRunStatus::Completed);
-        assert_eq!(result.prompt_version, "agent-system/v5");
+        assert_eq!(result.prompt_version, "agent-system/v6");
         assert_eq!(result.accounting.knowledge_searches, 1);
         assert_eq!(result.accounting.simulations, 0);
         let report = result.report.unwrap();
@@ -1498,6 +1563,74 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn two_knowledge_searches_force_a_report_instead_of_a_third_tool_call() {
+        let (root, knowledge) = knowledge_fixture();
+        let runtime = AgentRuntime::fixture().with_knowledge_fixture(knowledge);
+        let provider = ScriptedProvider::new(vec![
+            Ok(tool_call(
+                "call-knowledge-first",
+                "search_knowledge_base",
+                json!({
+                    "query": "不存在的机制甲",
+                    "version_scope": "current_only",
+                    "season": null,
+                    "category": null,
+                    "top_k": 3
+                }),
+            )),
+            Ok(tool_call(
+                "call-knowledge-second",
+                "search_knowledge_base",
+                json!({
+                    "query": "不存在的机制乙",
+                    "version_scope": "current_only",
+                    "season": null,
+                    "category": null,
+                    "top_k": 3
+                }),
+            )),
+            Ok(ModelResponse {
+                assistant_text: Some(
+                    serde_json::to_string(&refusal_content(
+                        "两次版本知识检索均未取得足够证据。",
+                        "本轮不继续猜测检索条件，也不输出未经验证的机制结论。",
+                    ))
+                    .unwrap(),
+                ),
+                tool_calls: Vec::new(),
+                finish_reason: FinishReason::Stop,
+                usage: TokenUsage::default(),
+            }),
+        ]);
+
+        let result = run_agent(
+            &provider,
+            &runtime,
+            input(&runtime, "run-two-knowledge-searches"),
+            AgentRunLimits::default(),
+            AgentCancellation::default(),
+        )
+        .await;
+
+        assert_eq!(result.status, AgentRunStatus::Refused);
+        assert_eq!(result.accounting.knowledge_searches, 2);
+        assert_eq!(result.accounting.model_turns, 3);
+        let requests = provider.requests();
+        assert_eq!(requests.len(), 3);
+        assert!(requests[0]
+            .tools
+            .iter()
+            .any(|tool| tool.name == "search_knowledge_base"));
+        assert!(requests[1]
+            .tools
+            .iter()
+            .any(|tool| tool.name == "search_knowledge_base"));
+        assert!(requests[2].tools.is_empty());
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
     async fn provider_failure_has_fixed_terminal_status() {
         let runtime = AgentRuntime::fixture();
         let provider = ScriptedProvider::new(vec![Err(ProviderError::upstream_status(429))]);
@@ -1511,6 +1644,48 @@ mod tests {
         .await;
         assert_eq!(result.status, AgentRunStatus::ProviderFailed);
         assert_eq!(result.error.unwrap().code, "provider_http_429");
+    }
+
+    #[tokio::test]
+    async fn empty_provider_report_preserves_tool_evidence_and_usage_without_retrying() {
+        let runtime = AgentRuntime::fixture();
+        let provider = ScriptedProvider::new(vec![
+            Ok(tool_call("call-sim", "simulate_scenario", json!({}))),
+            Err(ProviderError::invalid_response_protocol(
+                "provider_response_empty",
+                "provider response contained neither text nor tool calls",
+            )
+            .with_usage(TokenUsage {
+                input_tokens: 120,
+                output_tokens: 7,
+                total_tokens: 127,
+            })),
+        ]);
+        let result = run_agent(
+            &provider,
+            &runtime,
+            input(&runtime, "run-empty-provider-report"),
+            AgentRunLimits::default(),
+            AgentCancellation::default(),
+        )
+        .await;
+
+        assert_eq!(result.status, AgentRunStatus::PartiallyVerified);
+        assert_eq!(result.accounting.model_turns, 2);
+        assert_eq!(result.accounting.total_tokens, 127);
+        assert_eq!(provider.requests().len(), 2);
+        assert_eq!(
+            result.error.as_ref().unwrap().code,
+            "provider_response_empty"
+        );
+        let report = result.report.unwrap();
+        assert_eq!(report.evidence_ids.len(), 1);
+        assert_eq!(report.content.findings.len(), 1);
+        assert!(report.content.findings[0].metrics.is_empty());
+        assert!(result
+            .trace
+            .iter()
+            .any(|event| event.kind == "provider_empty_evidence_preserved"));
     }
 
     #[tokio::test]

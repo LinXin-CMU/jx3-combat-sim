@@ -103,12 +103,15 @@ impl<'a> AgentToolRegistry<'a> {
         ]
     }
 
-    pub fn definitions_with_knowledge() -> Vec<ToolDefinition> {
+    pub fn definitions_with_knowledge(
+        seasons: &[String],
+        categories: &[String],
+    ) -> Vec<ToolDefinition> {
         let mut definitions = Self::definitions();
         definitions.push(ToolDefinition {
             name: "search_knowledge_base".to_string(),
-            description: "Search the bounded local JX3 knowledge snapshot. Version scope is enforced by the server; current-version questions never silently fall back to old seasons.".to_string(),
-            parameters: knowledge_search_schema(),
+            description: "Search the bounded local JX3 knowledge snapshot. Version scope is enforced by the server; use null for category unless an exact allowed category is needed, and copy an exact allowed season for specific_season.".to_string(),
+            parameters: knowledge_search_schema(seasons, categories),
         });
         definitions
     }
@@ -613,7 +616,13 @@ fn compare_schema() -> Value {
     })
 }
 
-fn knowledge_search_schema() -> Value {
+fn knowledge_search_schema(seasons: &[String], categories: &[String]) -> Value {
+    let season_values = std::iter::once(Value::Null)
+        .chain(seasons.iter().cloned().map(Value::String))
+        .collect::<Vec<_>>();
+    let category_values = std::iter::once(Value::Null)
+        .chain(categories.iter().cloned().map(Value::String))
+        .collect::<Vec<_>>();
     json!({
         "type": "object",
         "properties": {
@@ -622,8 +631,8 @@ fn knowledge_search_schema() -> Value {
                 "type": "string",
                 "enum": ["current_only", "specific_season", "cross_version"]
             },
-            "season": {"type": ["string", "null"], "maxLength": 64},
-            "category": {"type": ["string", "null"], "maxLength": 64},
+            "season": {"type": ["string", "null"], "enum": season_values, "maxLength": 64},
+            "category": {"type": ["string", "null"], "enum": category_values, "maxLength": 64},
             "top_k": {"type": "integer", "minimum": 1, "maximum": 5}
         },
         "required": ["query", "version_scope", "season", "category", "top_k"],
@@ -675,12 +684,25 @@ mod tests {
 
     #[test]
     fn knowledge_schema_is_closed_bounded_and_does_not_expose_paths_or_urls() {
-        let definitions = AgentToolRegistry::definitions_with_knowledge();
+        let seasons = vec![
+            "暗影千机（2026）".to_string(),
+            "太极秘录（2025）".to_string(),
+        ];
+        let categories = vec!["基础".to_string(), "白皮书".to_string()];
+        let definitions = AgentToolRegistry::definitions_with_knowledge(&seasons, &categories);
         assert_eq!(definitions.len(), 5);
         let knowledge = definitions.last().unwrap();
         assert_eq!(knowledge.name, "search_knowledge_base");
         assert_eq!(knowledge.parameters["additionalProperties"], false);
         assert_eq!(knowledge.parameters["properties"]["top_k"]["maximum"], 5);
+        assert_eq!(
+            knowledge.parameters["properties"]["season"]["enum"],
+            json!([null, "暗影千机（2026）", "太极秘录（2025）"])
+        );
+        assert_eq!(
+            knowledge.parameters["properties"]["category"]["enum"],
+            json!([null, "基础", "白皮书"])
+        );
         let encoded = serde_json::to_string(knowledge).unwrap();
         assert!(!encoded.contains("path"));
         assert!(!encoded.contains("url"));
