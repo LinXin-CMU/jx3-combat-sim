@@ -200,7 +200,7 @@ pub fn validate_report(
             "report schema_version is not supported",
         ));
     }
-    validate_prose(&report.summary)?;
+    validate_short_text(&report.summary)?;
     if report.findings.len() > MAX_FINDINGS
         || report.recommendations.len() > MAX_RECOMMENDATIONS
         || report.limitations.len() > MAX_RECOMMENDATIONS
@@ -217,15 +217,15 @@ pub fn validate_report(
         ));
     }
     if let Some(reason) = &report.refusal_reason {
-        validate_prose(reason)?;
+        validate_short_text(reason)?;
     }
     for limitation in &report.limitations {
-        validate_prose(limitation)?;
+        validate_short_text(limitation)?;
     }
 
     for finding in &report.findings {
-        validate_prose(&finding.title)?;
-        validate_prose(&finding.explanation)?;
+        validate_short_text(&finding.title)?;
+        validate_short_text(&finding.explanation)?;
         if finding.evidence_ids.is_empty() {
             return Err(error(
                 "finding_without_evidence",
@@ -241,9 +241,26 @@ pub fn validate_report(
         }
     }
 
+    let report_metrics = report
+        .findings
+        .iter()
+        .flat_map(|finding| finding.metrics.iter())
+        .collect::<Vec<_>>();
+    validate_grounded_prose(&report.summary, report_metrics.iter().copied())?;
+    if let Some(reason) = &report.refusal_reason {
+        validate_grounded_prose(reason, report_metrics.iter().copied())?;
+    }
+    for limitation in &report.limitations {
+        validate_grounded_prose(limitation, report_metrics.iter().copied())?;
+    }
+    for finding in &report.findings {
+        validate_grounded_prose(&finding.title, finding.metrics.iter())?;
+        validate_grounded_prose(&finding.explanation, finding.metrics.iter())?;
+    }
+
     for recommendation in &report.recommendations {
-        validate_prose(&recommendation.title)?;
-        validate_prose(&recommendation.rationale)?;
+        validate_short_text(&recommendation.title)?;
+        validate_short_text(&recommendation.rationale)?;
         if recommendation.evidence_ids.is_empty() {
             return Err(error(
                 "recommendation_without_evidence",
@@ -251,6 +268,12 @@ pub fn validate_report(
             ));
         }
         validate_evidence_ids(&recommendation.evidence_ids, evidence)?;
+        let recommendation_metrics = report_metrics
+            .iter()
+            .copied()
+            .filter(|metric| recommendation.evidence_ids.contains(&metric.evidence_id));
+        validate_grounded_prose(&recommendation.title, recommendation_metrics.clone())?;
+        validate_grounded_prose(&recommendation.rationale, recommendation_metrics)?;
     }
     Ok(())
 }
@@ -303,8 +326,8 @@ fn validate_metric(
     cited: &HashSet<&str>,
     evidence: &EvidenceStore,
 ) -> Result<(), ReportValidationError> {
-    validate_prose(&metric.label)?;
-    validate_prose(&metric.unit)?;
+    validate_short_text(&metric.label)?;
+    validate_short_text(&metric.unit)?;
     if !metric.value.is_finite() {
         return Err(error("invalid_metric", "metric value must be finite"));
     }
@@ -343,15 +366,141 @@ fn validate_metric(
     Ok(())
 }
 
-fn validate_prose(value: &str) -> Result<(), ReportValidationError> {
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct NumericLiteral {
+    value: f64,
+    decimal_places: u32,
+    percent: bool,
+    ordinary_count: bool,
+}
+
+fn validate_grounded_prose<'a>(
+    value: &str,
+    metrics: impl IntoIterator<Item = &'a GroundedMetricV1>,
+) -> Result<(), ReportValidationError> {
     validate_short_text(value)?;
-    if value.chars().any(|character| character.is_numeric()) {
+    let metric_values = metrics
+        .into_iter()
+        .map(|metric| metric.value)
+        .collect::<Vec<_>>();
+    if numeric_literals(value)
+        .iter()
+        .any(|literal| !literal.ordinary_count && !matches_metric(*literal, &metric_values))
+    {
         return Err(error(
             "numeric_prose_claim",
-            "numeric literals are only allowed in grounded metrics",
+            "numeric prose must restate a grounded metric value",
         ));
     }
     Ok(())
+}
+
+fn numeric_literals(value: &str) -> Vec<NumericLiteral> {
+    let bytes = value.as_bytes();
+    let mut literals = Vec::new();
+    let mut index = 0;
+    while index < bytes.len() {
+        let signed = matches!(bytes[index], b'+' | b'-')
+            && bytes.get(index + 1).is_some_and(u8::is_ascii_digit);
+        let leading_decimal =
+            bytes[index] == b'.' && bytes.get(index + 1).is_some_and(u8::is_ascii_digit);
+        if !bytes[index].is_ascii_digit() && !signed && !leading_decimal {
+            index += 1;
+            continue;
+        }
+
+        let start = index;
+        if signed {
+            index += 1;
+        }
+        let mut decimal_places = 0_u32;
+        let mut has_decimal = false;
+        let mut has_exponent = false;
+        while index < bytes.len() && (bytes[index].is_ascii_digit() || bytes[index] == b',') {
+            index += 1;
+        }
+        if index < bytes.len()
+            && bytes[index] == b'.'
+            && bytes.get(index + 1).is_some_and(u8::is_ascii_digit)
+        {
+            has_decimal = true;
+            index += 1;
+            let decimal_start = index;
+            while index < bytes.len() && bytes[index].is_ascii_digit() {
+                index += 1;
+            }
+            decimal_places = u32::try_from(index - decimal_start).unwrap_or(u32::MAX);
+        }
+        if matches!(bytes.get(index), Some(&b'e') | Some(&b'E')) {
+            let exponent_marker = index;
+            index += 1;
+            if matches!(bytes.get(index), Some(&b'+') | Some(&b'-')) {
+                index += 1;
+            }
+            let exponent_start = index;
+            while index < bytes.len() && bytes[index].is_ascii_digit() {
+                index += 1;
+            }
+            if index > exponent_start {
+                has_exponent = true;
+            } else {
+                index = exponent_marker;
+            }
+        }
+        if index == start || (signed && index == start + 1) {
+            index += 1;
+            continue;
+        }
+
+        let number_end = index;
+        let percent = if bytes.get(index) == Some(&b'%') {
+            index += 1;
+            true
+        } else if value
+            .get(index..)
+            .is_some_and(|tail| tail.starts_with('％'))
+        {
+            index += '％'.len_utf8();
+            true
+        } else {
+            false
+        };
+        let raw = value[start..number_end].replace(',', "");
+        if let Ok(parsed) = raw.parse::<f64>() {
+            let ordinary_count = !signed
+                && !has_decimal
+                && !has_exponent
+                && !percent
+                && !value[start..number_end].contains(',')
+                && (0.0..=12.0).contains(&parsed);
+            literals.push(NumericLiteral {
+                value: parsed,
+                decimal_places,
+                percent,
+                ordinary_count,
+            });
+        }
+    }
+    literals
+}
+
+fn matches_metric(literal: NumericLiteral, metric_values: &[f64]) -> bool {
+    metric_values.iter().any(|metric| {
+        let candidates = if literal.percent {
+            [*metric, *metric * 100.0]
+        } else {
+            [*metric, *metric]
+        };
+        candidates.into_iter().any(|candidate| {
+            let display_tolerance = if literal.decimal_places == 0 {
+                0.5
+            } else {
+                0.5 * 10_f64.powi(-(literal.decimal_places as i32))
+            };
+            let floating_tolerance = candidate.abs().max(1.0) * 1e-9;
+            (literal.value - candidate).abs() <= display_tolerance.max(floating_tolerance)
+        })
+    })
 }
 
 fn validate_short_text(value: &str) -> Result<(), ReportValidationError> {
@@ -375,7 +524,7 @@ mod tests {
     fn evidence() -> EvidenceStore {
         BTreeMap::from([(
             "a".repeat(64),
-            json!({"evidence_id": "a".repeat(64), "result": {"dps": 123.5}}),
+            json!({"evidence_id": "a".repeat(64), "result": {"dps": 123.5, "ratio": 0.3}}),
         )])
     }
 
@@ -454,16 +603,45 @@ mod tests {
     }
 
     #[test]
-    fn arabic_numeric_prose_is_rejected_but_natural_language_counts_are_allowed() {
+    fn grounded_numeric_prose_and_ordinary_counts_are_allowed() {
         let mut value = report();
-        value.summary = "DPS 为 123.5。".to_string();
+        value.summary = "当前 DPS 为 123.5，循环包含 2 个技能事件。".to_string();
+        value.findings[0].explanation = "确定性模拟得到 DPS 约 124。".to_string();
+        validate_report(&value, &evidence()).unwrap();
+
+        let mut percent = report();
+        percent.findings[0].metrics.push(GroundedMetricV1 {
+            label: "伤害占比".to_string(),
+            value: 0.3,
+            unit: "ratio".to_string(),
+            evidence_id: "a".repeat(64),
+            json_pointer: "/result/ratio".to_string(),
+        });
+        percent.summary = "核心技能伤害占比为 30%。".to_string();
+        percent.findings[0].title = "前 5 秒输出".to_string();
+        validate_report(&percent, &evidence()).unwrap();
+
+        let mut formatted = report();
+        formatted.findings[0].metrics[0].value = 80_596.56;
+        formatted.summary = "当前 DPS 为 80,596.56。".to_string();
+        let mut formatted_evidence = evidence();
+        formatted_evidence.get_mut(&"a".repeat(64)).unwrap()["result"]["dps"] = json!(80_596.56);
+        validate_report(&formatted, &formatted_evidence).unwrap();
+    }
+
+    #[test]
+    fn ungrounded_numeric_prose_is_still_rejected() {
+        let mut value = report();
+        value.summary = "DPS 为 999。".to_string();
         assert_eq!(
             validate_report(&value, &evidence()).unwrap_err().code,
             "numeric_prose_claim"
         );
 
-        let mut natural_count = report();
-        natural_count.summary = "循环包含两个技能事件。".to_string();
-        validate_report(&natural_count, &evidence()).unwrap();
+        value.summary = "DPS 约为 8e4。".to_string();
+        assert_eq!(
+            validate_report(&value, &evidence()).unwrap_err().code,
+            "numeric_prose_claim"
+        );
     }
 }

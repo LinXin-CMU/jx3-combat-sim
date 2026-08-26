@@ -107,10 +107,10 @@ OpenAI adapter 使用自定义 function tools、`store: false` 和强类型参�
 系统提示词放在：
 
 ```text
-backend/prompts/agent_system_v1.md
+backend/prompts/agent_system_v2.md
 ```
 
-它作为版本化源码参与构建或启动校验。每次 run 保存 `prompt_version` 与 `prompt_sha256`，使录屏、评测和面试案例能追溯到准确提示词；不会把提示词藏在网页或环境变量里。
+它作为版本化源码参与构建或启动校验；`agent_system_v1.md` 保留用于历史基线复现。每次 run 保存 `prompt_version` 与 `prompt_sha256`，使录屏、评测和面试案例能追溯到准确提示词；不会把提示词藏在网页或环境变量里。
 
 系统提示词至少约束：
 

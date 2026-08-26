@@ -52,8 +52,19 @@ API key 只保存在用户级环境变量 `JX3_DEEPSEEK_API_KEY`。仓库配置�
 
 本次合计 19,044 输入 tokens、4,766 输出 tokens，按上文价格口径估算约 USD 0.012431，低于用户批准的 5 元人民币上限。会话 API 对 `Authorization`、API key 环境变量名、provider 原始请求/响应与隐藏推理标记复检为 0 命中。
 
+## 可读数值与 Prompt v2
+
+UI 验收暴露出 v1 的过度约束：正文禁止所有阿拉伯数字后，模型会把精确值改写为中文数字，可读性差且不增加真正的安全性。当前 `agent-system/v2` 改为：
+
+- 小整数的普通计数可直接出现；
+- 精确值可用阿拉伯数字复述已验证 metric；
+- 允许正常四舍五入、千分位和百分比显示；
+- 科学计数法与不匹配 metric 的数值仍拒绝。
+
+新规则通过 Agent 84/84 回归和隔离 HTTP Run/Session/SSE smoke，实例报告为 `agent-system/v2`，prompt SHA-256 为 `43a7ab4d848c1b0793313d774e78e3cb2b08ce056aba6d642a17592c6d72e484`。本节未新增真实模型费用。
+
 ## 当前结论
 
 Phase 2 的工程闭环和真实部署链路已成立，但真实模型固定题集尚未达到可称为高可靠产品的门槛。作品集应展示“证据约束、失败降级、成本治理、跨供应商兼容和诚实评测”，而不是宣称模型能稳定回答所有策划问题。
 
-Prompt 当前 SHA-256：`080b1ccfce57e0730c83034ad56a815cf6771d4fdb0fa782116efbd8abd5f2c1`。
+上述三轮 DeepSeek 固定评测使用的 Prompt SHA-256：`080b1ccfce57e0730c83034ad56a815cf6771d4fdb0fa782116efbd8abd5f2c1`。当前 v2 SHA-256 见上文。
