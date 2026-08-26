@@ -91,6 +91,20 @@
     cross_version: '跨版本资料',
   };
 
+  const providerErrorLabels = {
+    provider_balance_insufficient: '模型供应商账户余额不足；充值后重试，或切换“离线测试”继续演示。',
+    provider_http_401: '模型供应商鉴权失败，请检查服务端 API Key。',
+    provider_http_403: '模型供应商拒绝访问，请检查账户权限。',
+    provider_http_429: '模型供应商请求繁忙，请稍后重试。',
+    provider_http_5xx: '模型供应商服务暂时异常，请稍后重试。',
+    provider_timeout: '模型供应商响应超时，请稍后重试。',
+    provider_network_error: '无法连接模型供应商，请检查网络或代理设置。',
+  };
+
+  function providerErrorText(error) {
+    return providerErrorLabels[error?.code] || error?.message || '模型供应商调用失败。';
+  }
+
   function toolLabel(name) {
     return toolLabels[name] || name || '只读工具';
   }
@@ -191,6 +205,8 @@
       setStatus('分析结束 · 未验证内容已被证据校验器拦截');
     } else if (status === 'refused') {
       setStatus('分析结束 · 请求超出只读分析边界');
+    } else if (status === 'provider_failed') {
+      setStatus(`分析结束 · ${providerErrorText(result?.error)}`, true);
     } else {
       const label = statusLabels[status] || status || '未知状态';
       setStatus(`分析结束 · ${label}`, ['provider_failed', 'protocol_failed', 'timed_out'].includes(status));
@@ -468,7 +484,9 @@
     els.copy.disabled = !latestResult;
     const report = result?.report;
     if (!report) {
-      const reason = result?.error?.message || `任务状态：${statusLabels[result?.status] || result?.status || '未知'}`;
+      const reason = result?.status === 'provider_failed'
+        ? providerErrorText(result?.error)
+        : result?.error?.message || `任务状态：${statusLabels[result?.status] || result?.status || '未知'}`;
       appendMessage('agent', reason);
       return;
     }
@@ -618,7 +636,9 @@
 
     const summary = report?.content?.summary
       ? readableProse(report.content.summary, allMetrics)
-      : result.error?.message || '本次任务没有生成可展示的结论。';
+      : result?.status === 'provider_failed'
+        ? providerErrorText(result?.error)
+        : result.error?.message || '本次任务没有生成可展示的结论。';
     card.appendChild(element('div', 'sim-ai-result-summary', summary));
     (report?.content?.findings || []).slice(0, 4).forEach(finding => {
       const block = element('div', 'sim-ai-result-finding');

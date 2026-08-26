@@ -80,6 +80,7 @@ impl ProviderError {
         let code = match status {
             400 => "provider_http_400",
             401 => "provider_http_401",
+            402 => "provider_balance_insufficient",
             403 => "provider_http_403",
             404 => "provider_http_404",
             408 => "provider_http_408",
@@ -224,5 +225,20 @@ mod tests {
         assert_eq!(error.code, "provider_reasoning_context_required");
         assert!(!json.contains("private detail"));
         assert!(!json.contains("Missing reasoning_content"));
+    }
+
+    #[test]
+    fn payment_required_is_classified_without_exposing_upstream_body() {
+        let error = ProviderError::classified_upstream_response(
+            402,
+            br#"{"error":{"message":"Insufficient Balance; private account detail"}}"#,
+        );
+        let json = serde_json::to_string(&error).unwrap();
+
+        assert_eq!(error.code, "provider_balance_insufficient");
+        assert!(!error.retryable);
+        assert_eq!(error.upstream_status, Some(402));
+        assert!(!json.contains("private account detail"));
+        assert!(!json.contains("Insufficient Balance"));
     }
 }
