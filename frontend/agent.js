@@ -323,9 +323,67 @@
     scrollTranscript();
   }
 
+  function localizedNumber(value, maximumFractionDigits) {
+    return value.toLocaleString('zh-CN', { maximumFractionDigits });
+  }
+
   function metricValue(metric) {
     const value = Number(metric?.value);
-    return Number.isFinite(value) ? value.toLocaleString('zh-CN', { maximumFractionDigits: 2 }) : '—';
+    if (!Number.isFinite(value)) return '—';
+    const unit = String(metric?.unit || '').toLowerCase();
+    if (['fraction', 'ratio', 'percent', 'percentage'].includes(unit)) {
+      return `${localizedNumber(value * 100, 2)}%`;
+    }
+    if (['second', 'seconds', 'sec', 's'].includes(unit)) {
+      return `${localizedNumber(value, 2)} 秒`;
+    }
+    if (['millisecond', 'milliseconds', 'ms'].includes(unit)) {
+      return `${localizedNumber(value, 2)} 毫秒`;
+    }
+    if (['count', 'times', 'event_count'].includes(unit)) {
+      return `${localizedNumber(value, 0)} 次`;
+    }
+    return localizedNumber(value, 2);
+  }
+
+  function metricLabel(metric) {
+    const label = String(metric?.label || '').trim();
+    if (/^dps$/i.test(label)) return '平均 DPS';
+    return label || '已验证指标';
+  }
+
+  function readableProse(value, metrics) {
+    let text = String(value || '—');
+    const hidden = '［未验证数值］';
+    (metrics || []).forEach(metric => {
+      const label = String(metric?.label || '');
+      for (const match of label.matchAll(/[+-]?\d[\d,]*(?:\.\d+)?/g)) {
+        const number = match[0];
+        const start = match.index || 0;
+        const before = label.slice(0, start).slice(-1);
+        const after = label.slice(start + number.length, start + number.length + 1);
+        if (!before || !after) continue;
+        text = text.split(`${before}${hidden}${after}`).join(`${before}${number}${after}`);
+      }
+    });
+    return text
+      .replaceAll(`${hidden}ms网络延迟`, '网络延迟参数未核验')
+      .replaceAll(`目标${hidden}级`, '目标等级未核验')
+      .replaceAll(hidden, '未核验');
+  }
+
+  function appendMetricGrid(parent, metrics, className) {
+    if (!metrics?.length) return;
+    const grid = element('div', className);
+    metrics.forEach(metric => {
+      const itemClass = className === 'agent-metrics' ? 'agent-metric' : 'sim-ai-result-metric';
+      const item = element('div', itemClass);
+      item.appendChild(element('b', '', metricValue(metric)));
+      item.appendChild(element('span', '', metricLabel(metric)));
+      item.title = `${metric.evidence_id}${metric.json_pointer}`;
+      grid.appendChild(item);
+    });
+    parent.appendChild(grid);
   }
 
   function renderReport(result) {
@@ -338,6 +396,7 @@
       return;
     }
     const card = element('article', 'agent-report');
+    const allMetrics = (report.content?.findings || []).flatMap(finding => finding.metrics || []);
     const evidenceInsufficient = result.status === 'evidence_insufficient';
     const partiallyVerified = result.status === 'partially_verified';
     card.classList.toggle('is-limited', evidenceInsufficient || partiallyVerified);
@@ -360,23 +419,13 @@
       if (result.error?.code) notice.title = `首个校验码：${result.error.code}`;
       card.appendChild(notice);
     }
-    card.appendChild(element('div', 'agent-report-summary', report.content?.summary || '—'));
+    card.appendChild(element('div', 'agent-report-summary', readableProse(report.content?.summary, allMetrics)));
 
     (report.content?.findings || []).forEach(finding => {
       const block = element('section', 'agent-finding');
       block.appendChild(element('h4', '', finding.title));
-      block.appendChild(element('p', '', finding.explanation));
-      if (finding.metrics?.length) {
-        const metrics = element('div', 'agent-metrics');
-        finding.metrics.forEach(metric => {
-          const metricNode = element('div', 'agent-metric');
-          metricNode.appendChild(element('b', '', metricValue(metric)));
-          metricNode.appendChild(element('span', '', `${metric.label} · ${metric.unit}`));
-          metricNode.title = `${metric.evidence_id}${metric.json_pointer}`;
-          metrics.appendChild(metricNode);
-        });
-        block.appendChild(metrics);
-      }
+      block.appendChild(element('p', '', readableProse(finding.explanation, finding.metrics)));
+      appendMetricGrid(block, finding.metrics, 'agent-metrics');
       card.appendChild(block);
     });
 
@@ -384,14 +433,18 @@
     if (recommendations.length) {
       const block = element('section', 'agent-finding');
       block.appendChild(element('h4', '', '建议的下一步实验'));
-      recommendations.forEach(item => block.appendChild(element('p', '', `${item.title}：${item.rationale}`)));
+      recommendations.forEach(item => block.appendChild(element('p', '', `${readableProse(item.title, allMetrics)}：${readableProse(item.rationale, allMetrics)}`)));
       card.appendChild(block);
     }
     const limitations = report.content?.limitations || [];
     if (limitations.length) {
-      const block = element('section', 'agent-finding');
-      block.appendChild(element('h4', '', '边界与限制'));
-      limitations.forEach(item => block.appendChild(element('p', '', `• ${item}`)));
+      const block = element('details', 'agent-boundaries');
+      block.appendChild(element('summary', '', `分析边界（${limitations.length}）`));
+      limitations.forEach(item => block.appendChild(element('p', '', readableProse(item, allMetrics)
+        .replaceAll('simulate_scenario', '基线模拟')
+        .replaceAll('get_current_scenario', '当前场景读取')
+        .replaceAll('engine_commit_unavailable', '引擎提交信息缺失')
+        .replaceAll('engine_string', '引擎版本'))));
       card.appendChild(block);
     }
     card.appendChild(element('div', 'agent-evidence', `scenario ${result.scenario_hash} · prompt ${result.prompt_version} / ${result.prompt_sha256} · evidence ${(report.evidence_ids || []).join(', ') || 'none'}`));
@@ -461,6 +514,7 @@
     latestResult = result;
     els.dockCopy.disabled = false;
     const report = result.report;
+    const allMetrics = (report?.content?.findings || []).flatMap(finding => finding.metrics || []);
     const card = element('article', 'sim-ai-result');
     const evidenceInsufficient = result.status === 'evidence_insufficient';
     const partiallyVerified = result.status === 'partially_verified';
@@ -478,40 +532,32 @@
       card.appendChild(notice);
     } else if (partiallyVerified) {
       const notice = element('div', 'sim-ai-result-notice');
-      notice.appendChild(element('b', '', '部分通过'));
-      notice.appendChild(element('span', '', '未验证的单项内容已隐藏，其余证据结论仍然有效并可继续追问。'));
+      notice.appendChild(element('b', '', '已保留可信部分'));
+      notice.appendChild(element('span', '', '个别表述未通过数值校验，不影响下方已验证结论。'));
       if (result.error?.code) notice.title = `首个校验码：${result.error.code}`;
       card.appendChild(notice);
     }
 
-    const summary = report?.content?.summary || result.error?.message || '本次任务没有生成可展示的结论。';
+    const summary = report?.content?.summary
+      ? readableProse(report.content.summary, allMetrics)
+      : result.error?.message || '本次任务没有生成可展示的结论。';
     card.appendChild(element('div', 'sim-ai-result-summary', summary));
     (report?.content?.findings || []).slice(0, 4).forEach(finding => {
       const block = element('div', 'sim-ai-result-finding');
       block.appendChild(element('b', '', finding.title));
-      block.appendChild(element('p', '', finding.explanation));
+      block.appendChild(element('p', '', readableProse(finding.explanation, finding.metrics)));
+      appendMetricGrid(block, (finding.metrics || []).slice(0, 4), 'sim-ai-result-metrics');
       card.appendChild(block);
     });
-
-    const metrics = (report?.content?.findings || [])
-      .flatMap(finding => finding.metrics || [])
-      .slice(0, 6);
-    if (metrics.length) {
-      const grid = element('div', 'sim-ai-result-metrics');
-      metrics.forEach(metric => {
-        const item = element('div', 'sim-ai-result-metric');
-        item.appendChild(element('b', '', metricValue(metric)));
-        item.appendChild(element('span', '', `${metric.label} · ${metric.unit}`));
-        item.title = `${metric.evidence_id}${metric.json_pointer}`;
-        grid.appendChild(item);
-      });
-      card.appendChild(grid);
-    }
     const limitations = report?.content?.limitations || [];
     if (limitations.length) {
-      const block = element('div', 'sim-ai-result-finding');
-      block.appendChild(element('b', '', '边界与限制'));
-      block.appendChild(element('p', '', limitations.slice(0, 3).join('；')));
+      const block = element('details', 'sim-ai-result-boundaries');
+      block.appendChild(element('summary', '', `分析边界（${limitations.length}）`));
+      limitations.slice(0, 3).forEach(item => block.appendChild(element('p', '', readableProse(item, allMetrics)
+        .replaceAll('simulate_scenario', '基线模拟')
+        .replaceAll('get_current_scenario', '当前场景读取')
+        .replaceAll('engine_commit_unavailable', '引擎提交信息缺失')
+        .replaceAll('engine_string', '引擎版本'))));
       card.appendChild(block);
     }
     els.dockChat.appendChild(card);

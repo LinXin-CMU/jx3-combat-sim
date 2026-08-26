@@ -358,12 +358,19 @@ body.agent-fullheight #page-agent.active {
 .sim-ai-result-finding b { display: block; margin-bottom: 3px; font-size: 12px; }
 .sim-ai-result-finding p { margin: 0; color: var(--agent-muted); font-size: 11px; line-height: 1.55; }
 .sim-ai-result-metrics { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px; padding: 0 11px 10px; }
+.sim-ai-result-finding .sim-ai-result-metrics { padding: 7px 0 0; }
 .sim-ai-result-metric { min-width: 0; padding: 7px 8px; border: 1px solid var(--agent-line); border-radius: 6px; background: var(--bg); animation: sim-ai-metric-in .26s cubic-bezier(.22,1,.36,1) both; }
 .sim-ai-result-metric:nth-child(2) { animation-delay: .04s; }
 .sim-ai-result-metric:nth-child(3) { animation-delay: .08s; }
 .sim-ai-result-metric:nth-child(4) { animation-delay: .12s; }
 .sim-ai-result-metric b { display: block; overflow: hidden; color: var(--warning); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .sim-ai-result-metric span { display: block; margin-top: 2px; overflow: hidden; color: var(--agent-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.agent-boundaries,
+.sim-ai-result-boundaries { border-top: 1px solid var(--agent-line); color: var(--agent-muted); }
+.agent-boundaries summary,
+.sim-ai-result-boundaries summary { padding: 9px 11px; color: var(--text); font-size: 11px; cursor: pointer; user-select: none; }
+.agent-boundaries p,
+.sim-ai-result-boundaries p { margin: 0; padding: 0 11px 8px; color: var(--agent-muted); font-size: 11px; line-height: 1.55; }
 .sim-ai-error { color: var(--red); }
 
 .sim-ai-compose { padding: 9px 10px 10px; border-top: 1px solid var(--agent-line); background: var(--surface); }

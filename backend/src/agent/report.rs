@@ -222,18 +222,18 @@ pub fn parse_and_salvage_report(
             sanitized_claims += 1;
             continue;
         }
-        let metric_values = finding
-            .metrics
-            .iter()
-            .map(|metric| metric.value)
-            .collect::<Vec<_>>();
         sanitized_claims += sanitize_text_field(&mut finding.title, "已验证结论");
-        sanitized_claims += redact_unsupported_numbers(&mut finding.title, &metric_values);
+        sanitized_claims +=
+            sanitize_unsupported_numeric_prose(&mut finding.title, &finding.metrics, "已验证结论");
         sanitized_claims += sanitize_text_field(
             &mut finding.explanation,
             "该结论仅保留通过本次证据校验的部分。",
         );
-        sanitized_claims += redact_unsupported_numbers(&mut finding.explanation, &metric_values);
+        sanitized_claims += sanitize_unsupported_numeric_prose(
+            &mut finding.explanation,
+            &finding.metrics,
+            "以下指标已通过本次模拟证据校验。",
+        );
         retained_findings.push(finding);
     }
     report.findings = retained_findings;
@@ -242,16 +242,14 @@ pub fn parse_and_salvage_report(
         .findings
         .iter()
         .flat_map(|finding| finding.metrics.iter())
-        .map(|metric| (metric.evidence_id.clone(), metric.value))
+        .cloned()
         .collect::<Vec<_>>();
     sanitized_claims +=
         sanitize_text_field(&mut report.summary, "本轮仅保留通过本次证据校验的内容。");
-    sanitized_claims += redact_unsupported_numbers(
+    sanitized_claims += sanitize_unsupported_numeric_prose(
         &mut report.summary,
-        &report_metrics
-            .iter()
-            .map(|(_, value)| *value)
-            .collect::<Vec<_>>(),
+        &report_metrics,
+        "当前基线的可信指标与主要结论见下方。",
     );
 
     let mut retained_recommendations = Vec::with_capacity(report.recommendations.len());
@@ -263,32 +261,43 @@ pub fn parse_and_salvage_report(
         }
         let metric_values = report_metrics
             .iter()
-            .filter(|(evidence_id, _)| recommendation.evidence_ids.contains(evidence_id))
-            .map(|(_, value)| *value)
+            .filter(|metric| recommendation.evidence_ids.contains(&metric.evidence_id))
+            .cloned()
             .collect::<Vec<_>>();
         sanitized_claims += sanitize_text_field(&mut recommendation.title, "下一步验证建议");
-        sanitized_claims += redact_unsupported_numbers(&mut recommendation.title, &metric_values);
+        sanitized_claims += sanitize_unsupported_numeric_prose(
+            &mut recommendation.title,
+            &metric_values,
+            "下一步验证建议",
+        );
         sanitized_claims += sanitize_text_field(
             &mut recommendation.rationale,
             "建议通过新的确定性实验继续验证。",
         );
-        sanitized_claims +=
-            redact_unsupported_numbers(&mut recommendation.rationale, &metric_values);
+        sanitized_claims += sanitize_unsupported_numeric_prose(
+            &mut recommendation.rationale,
+            &metric_values,
+            "建议通过新的确定性实验继续验证。",
+        );
         retained_recommendations.push(recommendation);
     }
     report.recommendations = retained_recommendations;
 
-    let all_metric_values = report_metrics
-        .iter()
-        .map(|(_, value)| *value)
-        .collect::<Vec<_>>();
     for limitation in &mut report.limitations {
         sanitized_claims += sanitize_text_field(limitation, "存在尚未验证的边界。");
-        sanitized_claims += redact_unsupported_numbers(limitation, &all_metric_values);
+        sanitized_claims += sanitize_unsupported_numeric_prose(
+            limitation,
+            &report_metrics,
+            "存在一项尚未验证的边界。",
+        );
     }
     if let Some(reason) = &mut report.refusal_reason {
         sanitized_claims += sanitize_text_field(reason, "当前请求无法形成可验证结论。");
-        sanitized_claims += redact_unsupported_numbers(reason, &all_metric_values);
+        sanitized_claims += sanitize_unsupported_numeric_prose(
+            reason,
+            &report_metrics,
+            "当前请求无法形成可验证结论。",
+        );
     }
 
     if report.findings.is_empty() && report.refusal_reason.is_none() {
@@ -636,14 +645,16 @@ fn validate_grounded_prose<'a>(
     metrics: impl IntoIterator<Item = &'a GroundedMetricV1>,
 ) -> Result<(), ReportValidationError> {
     validate_short_text(value)?;
+    let metrics = metrics.into_iter().collect::<Vec<_>>();
     let metric_values = metrics
-        .into_iter()
+        .iter()
         .map(|metric| metric.value)
         .collect::<Vec<_>>();
-    if numeric_literals(value)
-        .iter()
-        .any(|literal| !literal.ordinary_count && !matches_metric(*literal, &metric_values))
-    {
+    if numeric_literals(value).iter().any(|literal| {
+        !literal.ordinary_count
+            && !matches_metric(*literal, &metric_values)
+            && !matches_metric_label_literal(value, *literal, &metrics)
+    }) {
         return Err(error(
             "numeric_prose_claim",
             "numeric prose must restate a grounded metric value",
@@ -743,24 +754,52 @@ fn numeric_literals(value: &str) -> Vec<NumericLiteral> {
     literals
 }
 
-fn redact_unsupported_numbers(value: &mut String, metric_values: &[f64]) -> usize {
+fn sanitize_unsupported_numeric_prose(
+    value: &mut String,
+    metrics: &[GroundedMetricV1],
+    fallback: &str,
+) -> usize {
+    let metric_values = metrics
+        .iter()
+        .map(|metric| metric.value)
+        .collect::<Vec<_>>();
+    let metric_refs = metrics.iter().collect::<Vec<_>>();
     let unsupported = numeric_literals(value)
         .into_iter()
-        .filter(|literal| !literal.ordinary_count && !matches_metric(*literal, metric_values))
+        .filter(|literal| {
+            !literal.ordinary_count
+                && !matches_metric(*literal, &metric_values)
+                && !matches_metric_label_literal(value, *literal, &metric_refs)
+        })
         .collect::<Vec<_>>();
     if unsupported.is_empty() {
         return 0;
     }
-    let mut redacted = String::with_capacity(value.len());
-    let mut cursor = 0;
-    for literal in &unsupported {
-        redacted.push_str(&value[cursor..literal.start]);
-        redacted.push_str("［未验证数值］");
-        cursor = literal.end;
-    }
-    redacted.push_str(&value[cursor..]);
-    *value = redacted;
+    *value = fallback.to_string();
     unsupported.len()
+}
+
+fn matches_metric_label_literal(
+    prose: &str,
+    literal: NumericLiteral,
+    metrics: &[&GroundedMetricV1],
+) -> bool {
+    let prose_before = prose[..literal.start].chars().next_back();
+    let prose_after = prose[literal.end..].chars().next();
+    metrics.iter().any(|metric| {
+        numeric_literals(&metric.label)
+            .into_iter()
+            .any(|label_literal| {
+                if literal.percent != label_literal.percent
+                    || (literal.value - label_literal.value).abs() > f64::EPSILON
+                {
+                    return false;
+                }
+                let label_before = metric.label[..label_literal.start].chars().next_back();
+                let label_after = metric.label[label_literal.end..].chars().next();
+                prose_before == label_before && prose_after == label_after
+            })
+    })
 }
 
 fn matches_metric(literal: NumericLiteral, metric_values: &[f64]) -> bool {
@@ -906,6 +945,12 @@ mod tests {
         let mut formatted_evidence = evidence();
         formatted_evidence.get_mut(&"a".repeat(64)).unwrap()["result"]["dps"] = json!(80_596.56);
         validate_report(&formatted, &formatted_evidence).unwrap();
+
+        let mut named_skill = report();
+        named_skill.findings[0].metrics[0].label = "绝刀·50怒总伤害".to_string();
+        named_skill.summary = "绝刀·50怒是当前主要输出技能。".to_string();
+        named_skill.findings[0].title = "绝刀·50怒贡献突出".to_string();
+        validate_report(&named_skill, &evidence()).unwrap();
     }
 
     #[test]
@@ -917,7 +962,20 @@ mod tests {
             "numeric_prose_claim"
         );
 
+        value.summary = "预计额外提升50怒。".to_string();
+        assert_eq!(
+            validate_report(&value, &evidence()).unwrap_err().code,
+            "numeric_prose_claim"
+        );
+
         value.summary = "DPS 约为 8e4。".to_string();
+        assert_eq!(
+            validate_report(&value, &evidence()).unwrap_err().code,
+            "numeric_prose_claim"
+        );
+
+        value.findings[0].metrics[0].label = "绝刀·50怒总伤害".to_string();
+        value.summary = "预计可以提升50%。".to_string();
         assert_eq!(
             validate_report(&value, &evidence()).unwrap_err().code,
             "numeric_prose_claim"
@@ -948,9 +1006,15 @@ mod tests {
         let salvaged = parse_and_salvage_report(&raw, &evidence()).unwrap();
         assert!(salvaged.sanitized_claims >= 2);
         assert_eq!(salvaged.content.findings[0].metrics.len(), 1);
-        assert!(salvaged.content.summary.contains("123.5"));
+        assert_eq!(
+            salvaged.content.summary,
+            "当前基线的可信指标与主要结论见下方。"
+        );
         assert!(!salvaged.content.summary.contains("999"));
-        assert!(salvaged.content.summary.contains("未验证数值"));
+        assert_eq!(
+            salvaged.content.findings[0].explanation,
+            "以下指标已通过本次模拟证据校验。"
+        );
         validate_report(&salvaged.content, &evidence()).unwrap();
     }
 

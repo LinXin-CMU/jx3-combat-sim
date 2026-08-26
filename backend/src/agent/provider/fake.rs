@@ -41,19 +41,6 @@ impl LlmProvider for FakeProvider {
                 ModelMessage::ToolResult { output, .. } => Some(output),
                 _ => None,
             });
-        if request.tools.is_empty() {
-            let response = ModelResponse {
-                assistant_text: Some(refusal_report()),
-                tool_calls: Vec::new(),
-                finish_reason: FinishReason::Stop,
-                usage: TokenUsage::default(),
-            };
-            response
-                .validate_against(request)
-                .map_err(|_| ProviderError::invalid_response())?;
-            return Ok(response);
-        }
-
         if let Some(output) = last_tool_result {
             if output.get("tool_name").and_then(Value::as_str) == Some("get_current_scenario")
                 && request
@@ -86,6 +73,19 @@ impl LlmProvider for FakeProvider {
                     usage: TokenUsage::default(),
                 },
             );
+        }
+
+        if request.tools.is_empty() {
+            let response = ModelResponse {
+                assistant_text: Some(refusal_report()),
+                tool_calls: Vec::new(),
+                finish_reason: FinishReason::Stop,
+                usage: TokenUsage::default(),
+            };
+            response
+                .validate_against(request)
+                .map_err(|_| ProviderError::invalid_response())?;
+            return Ok(response);
         }
 
         let response = ModelResponse {
