@@ -1,0 +1,257 @@
+{
+  "schema_version": "agent-knowledge-eval/v1",
+  "minimum_recall_at_5": 0.9,
+  "cases": [
+    {
+      "id": "current_rotation_risk",
+      "game_version": "anying",
+      "scope": "current_only",
+      "query": "盾飞期间劫刀数量和断流血风险",
+      "expected_titles_any": ["分山劲·悟白皮书"],
+      "expected_version_match": "current_exact",
+      "expected_fact_eligible": true,
+      "allowed_seasons": ["暗影千机（2026）"]
+    },
+    {
+      "id": "current_equipment_synonym",
+      "game_version": "anying",
+      "scope": "current_only",
+      "query": "当前赛季苍云配装破招",
+      "category": "白皮书",
+      "expected_titles_any": ["分山劲·悟白皮书", "分山劲白皮书"],
+      "expected_version_match": "current_exact",
+      "expected_fact_eligible": true,
+      "allowed_seasons": ["暗影千机（2026）"]
+    },
+    {
+      "id": "current_tank_raid",
+      "game_version": "anying",
+      "scope": "current_only",
+      "query": "铁骨衣主流副本打法",
+      "category": "实战",
+      "expected_titles_any": ["铁骨主流10人_25人副本及百战打法详解"],
+      "expected_version_match": "current_exact",
+      "expected_fact_eligible": true,
+      "allowed_seasons": ["暗影千机（2026）"]
+    },
+    {
+      "id": "current_latency",
+      "game_version": "anying",
+      "scope": "current_only",
+      "query": "网络延迟按键FPS设置",
+      "category": "通用",
+      "expected_titles_any": ["低延迟是打高DPS的先决条件"],
+      "expected_version_match": "current_exact",
+      "expected_fact_eligible": true,
+      "allowed_seasons": ["暗影千机（2026）"]
+    },
+    {
+      "id": "current_skill_mechanism",
+      "game_version": "anying",
+      "scope": "current_only",
+      "query": "绝刀伤害机制",
+      "expected_titles_any": ["分山劲·悟白皮书", "苍云技能系数汇总"],
+      "expected_version_match": "current_exact",
+      "expected_fact_eligible": true,
+      "allowed_seasons": ["暗影千机（2026）"]
+    },
+    {
+      "id": "current_macro",
+      "game_version": "anying",
+      "scope": "current_only",
+      "query": "暗影千机分山一键宏",
+      "category": "宏",
+      "expected_titles_any": ["分山绝云宏", "分山紫武一键宏"],
+      "expected_version_match": "current_exact",
+      "expected_fact_eligible": true,
+      "allowed_seasons": ["暗影千机（2026）"]
+    },
+    {
+      "id": "current_tank_macro_author",
+      "game_version": "anying",
+      "scope": "current_only",
+      "query": "铁骨宏 宫泽",
+      "category": "宏",
+      "expected_titles_any": ["铁骨宏 by宫泽"],
+      "expected_version_match": "current_exact",
+      "expected_fact_eligible": true,
+      "allowed_seasons": ["暗影千机（2026）"]
+    },
+    {
+      "id": "current_raid_specific",
+      "game_version": "anying",
+      "scope": "current_only",
+      "query": "阆风悬城分山实战技巧",
+      "category": "实战",
+      "expected_titles_any": ["英雄及挑战阆风悬城_ 分山实战技巧"],
+      "expected_version_match": "current_exact",
+      "expected_fact_eligible": true,
+      "allowed_seasons": ["暗影千机（2026）"]
+    },
+    {
+      "id": "current_reset_derivation",
+      "game_version": "anying",
+      "scope": "current_only",
+      "query": "盾压重置概率怎么算",
+      "category": "通用",
+      "expected_titles_any": ["苍云盾压重置率推导"],
+      "expected_version_match": "current_exact",
+      "expected_fact_eligible": true,
+      "allowed_seasons": ["暗影千机（2026）"]
+    },
+    {
+      "id": "current_calculator_metadata",
+      "game_version": "anying",
+      "scope": "current_only",
+      "query": "暗影千机分山在线配装计算器",
+      "category": "计算器",
+      "expected_titles_any": ["分山在线配装计算器"],
+      "expected_version_match": "current_exact",
+      "expected_fact_eligible": false,
+      "allowed_seasons": ["暗影千机（2026）"]
+    },
+    {
+      "id": "current_numeric_id_metadata",
+      "game_version": "anying",
+      "scope": "current_only",
+      "query": "苍云紫武14156木桩教学",
+      "category": "基础",
+      "expected_titles_any": ["紫武14156木桩教学"],
+      "expected_version_match": "current_exact",
+      "expected_fact_eligible": false,
+      "allowed_seasons": ["暗影千机（2026）"]
+    },
+    {
+      "id": "shanhai_whitepaper",
+      "game_version": "shanhai",
+      "scope": "current_only",
+      "query": "山海源流分山劲白皮书",
+      "category": "白皮书",
+      "expected_titles_any": ["山海源流_ 分山劲白皮书"],
+      "expected_version_match": "current_exact",
+      "expected_fact_eligible": true,
+      "allowed_seasons": ["山海源流（2025）"]
+    },
+    {
+      "id": "shanhai_rotation_metadata",
+      "game_version": "shanhai",
+      "scope": "current_only",
+      "query": "山海源流苍云紫武木桩循环",
+      "category": "基础",
+      "expected_titles_any": ["山海源流_ 紫武木桩循环讲解"],
+      "expected_version_match": "current_exact",
+      "expected_fact_eligible": false,
+      "allowed_seasons": ["山海源流（2025）"]
+    },
+    {
+      "id": "shanhai_macro",
+      "game_version": "shanhai",
+      "scope": "current_only",
+      "query": "山海源流分山绝云一键宏",
+      "category": "宏",
+      "expected_titles_any": ["山海源流_ 分山绝云宏"],
+      "expected_version_match": "current_exact",
+      "expected_fact_eligible": true,
+      "allowed_seasons": ["山海源流（2025）"]
+    },
+    {
+      "id": "historical_taiji_whitepaper",
+      "game_version": "anying",
+      "scope": "specific_season",
+      "season": "太极秘录（2025）",
+      "query": "太极秘录分山劲白皮书",
+      "category": "白皮书",
+      "expected_titles_any": ["太极秘录_ 分山劲白皮书", "太极秘录_ 分山劲·悟白皮书"],
+      "expected_version_match": "historical_explicit",
+      "expected_fact_eligible": true,
+      "allowed_seasons": ["太极秘录（2025）"]
+    },
+    {
+      "id": "historical_silu_macro",
+      "game_version": "anying",
+      "scope": "specific_season",
+      "season": "丝路风语（2024）",
+      "query": "丝路风语分山试炼流血宏",
+      "category": "宏",
+      "expected_titles_any": ["丝路风语_ 分山试炼宏、流血宏"],
+      "expected_version_match": "historical_explicit",
+      "expected_fact_eligible": true,
+      "allowed_seasons": ["丝路风语（2024）"]
+    },
+    {
+      "id": "historical_wuhai_parry",
+      "game_version": "anying",
+      "scope": "specific_season",
+      "season": "雾海寻龙（2024）",
+      "query": "雾海寻龙铁骨仇恨减伤机制",
+      "category": "通用",
+      "expected_titles_any": ["铁骨仇恨减伤机制"],
+      "expected_version_match": "historical_explicit",
+      "expected_fact_eligible": true,
+      "allowed_seasons": ["雾海寻龙（2024）"]
+    },
+    {
+      "id": "historical_beitian_analysis",
+      "game_version": "anying",
+      "scope": "specific_season",
+      "season": "北天药宗（2021）",
+      "query": "北天药宗分山劲恋战统计分析",
+      "category": "进阶",
+      "expected_titles_any": ["分山劲恋战统计分析"],
+      "expected_version_match": "historical_explicit",
+      "expected_fact_eligible": true,
+      "allowed_seasons": ["北天药宗（2021）"]
+    },
+    {
+      "id": "cross_version_changes",
+      "game_version": "anying",
+      "scope": "cross_version",
+      "query": "苍云历次技改历史演变",
+      "expected_titles_any": ["苍云历次技改汇总"],
+      "expected_fact_eligible": true
+    },
+    {
+      "id": "test_server_current_release",
+      "game_version": "anying_test",
+      "scope": "current_only",
+      "query": "暗影千机体服改动",
+      "category": "130级",
+      "expected_titles_any": ["暗影千机_ 苍云体服改动汇总", "暗影千机_ 无界分山劲PVE体服技改前瞻"],
+      "expected_version_match": "test_server_exact",
+      "expected_fact_eligible": true,
+      "allowed_seasons": ["体服（2021-2025）"],
+      "allowed_categories": ["130级"]
+    },
+    {
+      "id": "failed_document_excluded",
+      "game_version": "anying",
+      "scope": "specific_season",
+      "season": "丝路风语（2024）",
+      "query": "丝路风语分山在线配装计算器",
+      "category": "计算器",
+      "forbidden_title_contains": ["丝路风语_ 分山在线配装计算器"]
+    },
+    {
+      "id": "current_scope_version_conflict",
+      "game_version": "anying",
+      "scope": "current_only",
+      "query": "山海源流盾飞循环",
+      "expect_error": "version_conflict"
+    },
+    {
+      "id": "cross_version_requires_intent",
+      "game_version": "anying",
+      "scope": "cross_version",
+      "query": "盾飞循环",
+      "expect_error": "cross_version_intent_required"
+    },
+    {
+      "id": "no_answer_gibberish",
+      "game_version": "anying",
+      "scope": "current_only",
+      "query": "zzqvxyw nonexistentterm",
+      "expected_empty": true,
+      "allowed_seasons": ["暗影千机（2026）"]
+    }
+  ]
+}

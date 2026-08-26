@@ -1038,6 +1038,103 @@ mod tests {
         }
     }
 
+    struct DualEvidenceProvider;
+
+    #[async_trait]
+    impl LlmProvider for DualEvidenceProvider {
+        fn profile_id(&self) -> &str {
+            "dual-evidence-fixture"
+        }
+
+        fn model(&self) -> &str {
+            "fixture-v1"
+        }
+
+        async fn complete(&self, request: &ModelRequest) -> Result<ModelResponse, ProviderError> {
+            let tool_output = |tool_name: &str| {
+                request.messages.iter().rev().find_map(|message| {
+                    let ModelMessage::ToolResult { output, .. } = message else {
+                        return None;
+                    };
+                    (output.get("tool_name").and_then(Value::as_str) == Some(tool_name))
+                        .then_some(output)
+                })
+            };
+            if let Some(comparison) = tool_output("compare_scenarios") {
+                let knowledge = tool_output("search_knowledge_base").unwrap();
+                let knowledge_id = knowledge
+                    .pointer("/evidence/0/evidence_id")
+                    .and_then(Value::as_str)
+                    .unwrap();
+                let comparison_id = comparison
+                    .pointer("/evidence/0/evidence_id")
+                    .and_then(Value::as_str)
+                    .unwrap();
+                let baseline_dps = comparison
+                    .pointer("/evidence/0/result/baseline/dps")
+                    .and_then(Value::as_f64)
+                    .unwrap();
+                return Ok(ModelResponse {
+                    assistant_text: Some(
+                        serde_json::to_string(&json!({
+                            "schema_version": "agent-report-content/v1",
+                            "summary": "当前版本资料提出的循环假设已进入强类型候选实验。",
+                            "findings": [{
+                                "title": "资料假设与确定性实验",
+                                "explanation": "资料用于解释候选来源，当前场景数值只采用确定性对比证据。",
+                                "evidence_ids": [knowledge_id, comparison_id],
+                                "metrics": [{
+                                    "label": "基线平均 DPS",
+                                    "value": baseline_dps,
+                                    "unit": "damage_per_second",
+                                    "evidence_id": comparison_id,
+                                    "json_pointer": "/result/baseline/dps"
+                                }]
+                            }],
+                            "recommendations": [],
+                            "limitations": ["资料结论与本次模拟数值属于不同证据类型。"],
+                            "refusal_reason": null
+                        }))
+                        .unwrap(),
+                    ),
+                    tool_calls: Vec::new(),
+                    finish_reason: FinishReason::Stop,
+                    usage: TokenUsage::default(),
+                });
+            }
+            if tool_output("search_knowledge_base").is_some() {
+                return Ok(tool_call(
+                    "call-compare-from-knowledge",
+                    "compare_scenarios",
+                    json!({
+                        "candidates": [{
+                            "label": "延迟候选",
+                            "patch": {
+                                "haste_level": null,
+                                "sequence": null,
+                                "network_delay": 100,
+                                "initial_rage": null,
+                                "base_attack": null,
+                                "target_defense_bonus": null
+                            }
+                        }]
+                    }),
+                ));
+            }
+            Ok(tool_call(
+                "call-knowledge-for-candidate",
+                "search_knowledge_base",
+                json!({
+                    "query": "盾飞劫刀流血循环",
+                    "version_scope": "current_only",
+                    "season": null,
+                    "category": "基础",
+                    "top_k": 3
+                }),
+            ))
+        }
+    }
+
     fn scenario(runtime: &AgentRuntime) -> ScenarioSnapshotV1 {
         ScenarioSnapshotV1::capture(
             runtime.game_version(),
@@ -1214,6 +1311,50 @@ mod tests {
         assert_eq!(report.sources[0].version_match, "current_exact");
         assert!(report.sources[0].fact_eligible);
         assert!(report.content.findings[0].metrics.is_empty());
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn knowledge_hypothesis_can_enter_a_typed_deterministic_experiment() {
+        let (root, knowledge) = knowledge_fixture();
+        let runtime = AgentRuntime::fixture().with_knowledge_fixture(knowledge);
+        let mut run_input = input(&runtime, "run-dual-evidence");
+        run_input.question = "结合当前版本攻略提出候选，并用确定性实验验证。".to_string();
+        let result = run_agent(
+            &DualEvidenceProvider,
+            &runtime,
+            run_input,
+            AgentRunLimits::default(),
+            AgentCancellation::default(),
+        )
+        .await;
+
+        assert_eq!(result.status, AgentRunStatus::Completed);
+        assert_eq!(result.accounting.knowledge_searches, 1);
+        assert_eq!(result.accounting.simulations, 2);
+        let report = result.report.unwrap();
+        assert_eq!(report.sources.len(), 1);
+        assert_eq!(report.evidence_ids.len(), 2);
+        assert_eq!(report.content.findings[0].metrics.len(), 1);
+        assert_eq!(
+            report.content.findings[0].metrics[0].json_pointer,
+            "/result/baseline/dps"
+        );
+        let tool_order = result
+            .trace
+            .iter()
+            .filter(|event| event.kind == "tool_started")
+            .filter_map(|event| event.tool_name.as_deref())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            tool_order,
+            vec![
+                "get_current_scenario",
+                "search_knowledge_base",
+                "compare_scenarios"
+            ]
+        );
 
         let _ = fs::remove_dir_all(root);
     }

@@ -455,7 +455,11 @@ impl KnowledgeIndex {
             if test_server_release_hint.is_some_and(|release| !chunk.title.contains(release)) {
                 continue;
             }
-            let mut score = self.bm25_score(chunk, &query_terms);
+            let lexical_score = self.bm25_score(chunk, &query_terms);
+            if lexical_score <= 0.0 || !lexical_score.is_finite() {
+                continue;
+            }
+            let mut score = lexical_score;
             if chunk.title.to_lowercase().contains(&raw_query) {
                 score += 5.0;
             }
@@ -474,9 +478,6 @@ impl KnowledgeIndex {
             }
             if chunk.version_warning.is_some() {
                 score *= 0.75;
-            }
-            if score <= 0.0 || !score.is_finite() {
-                continue;
             }
             ranked.push((score, version_match, chunk));
         }
@@ -935,6 +936,7 @@ fn round_score(score: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde::Deserialize;
     use serde_json::json;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -1227,6 +1229,23 @@ mod tests {
             .unwrap();
         assert_eq!(result.quality, KnowledgeQuality::MetadataOnly);
         assert!(!result.fact_eligible);
+    }
+
+    #[test]
+    fn current_release_boost_never_creates_a_zero_overlap_answer() {
+        let fixture = Fixture::create();
+        let index = KnowledgeIndex::load(&fixture.root).unwrap();
+        let response = index
+            .search(
+                &KnowledgeVersionContext::from_game_version(GameVersion::AnYingQianJi),
+                query(
+                    KnowledgeVersionScope::CurrentOnly,
+                    "zzqvxyw nonexistentterm",
+                ),
+            )
+            .unwrap();
+
+        assert!(response.results.is_empty());
     }
 
     #[test]
@@ -1537,5 +1556,238 @@ mod tests {
                 .unwrap()
             );
         }
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct KnowledgeEvalSuite {
+        schema_version: String,
+        minimum_recall_at_5: f64,
+        cases: Vec<KnowledgeEvalCase>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct KnowledgeEvalCase {
+        id: String,
+        game_version: String,
+        scope: String,
+        query: String,
+        #[serde(default)]
+        season: Option<String>,
+        #[serde(default)]
+        category: Option<String>,
+        #[serde(default)]
+        expected_titles_any: Vec<String>,
+        #[serde(default)]
+        expected_version_match: Option<String>,
+        #[serde(default)]
+        expected_fact_eligible: Option<bool>,
+        #[serde(default)]
+        allowed_seasons: Vec<String>,
+        #[serde(default)]
+        allowed_categories: Vec<String>,
+        #[serde(default)]
+        forbidden_title_contains: Vec<String>,
+        #[serde(default)]
+        expected_empty: bool,
+        #[serde(default)]
+        expect_error: Option<String>,
+    }
+
+    #[test]
+    fn configured_vault_fixed_retrieval_eval() {
+        let Some(root) = env::var_os(KNOWLEDGE_ROOT_ENV) else {
+            return;
+        };
+        let index = KnowledgeIndex::load(Path::new(&root)).unwrap();
+        let suite: KnowledgeEvalSuite =
+            serde_json::from_str(include_str!("../../tests/agent_knowledge_eval/cases.json"))
+                .unwrap();
+        assert_eq!(suite.schema_version, "agent-knowledge-eval/v1");
+
+        let mut recall_cases = 0usize;
+        let mut recall_hits = 0usize;
+        let mut safety_cases = 0usize;
+        for case in &suite.cases {
+            let context =
+                KnowledgeVersionContext::from_game_version(match case.game_version.as_str() {
+                    "anying" => GameVersion::AnYingQianJi,
+                    "shanhai" => GameVersion::ShanHaiYuanLiu,
+                    "anying_test" => GameVersion::AnYingQianJiTest,
+                    other => panic!("unknown game_version {other} in {}", case.id),
+                });
+            let version_scope = match case.scope.as_str() {
+                "current_only" => KnowledgeVersionScope::CurrentOnly,
+                "specific_season" => KnowledgeVersionScope::SpecificSeason {
+                    season: case
+                        .season
+                        .clone()
+                        .unwrap_or_else(|| panic!("missing season in {}", case.id)),
+                },
+                "cross_version" => KnowledgeVersionScope::CrossVersion,
+                other => panic!("unknown scope {other} in {}", case.id),
+            };
+            let outcome = index.search(
+                &context,
+                KnowledgeSearchQuery {
+                    query: case.query.clone(),
+                    version_scope,
+                    category: case.category.clone(),
+                    top_k: 5,
+                },
+            );
+
+            if let Some(expected_error) = case.expect_error.as_deref() {
+                safety_cases += 1;
+                let actual = outcome
+                    .as_ref()
+                    .err()
+                    .map(knowledge_eval_error_code)
+                    .unwrap_or("none");
+                assert_eq!(actual, expected_error, "unexpected error in {}", case.id);
+                println!("KNOWLEDGE_EVAL_CASE {} error={actual} pass=true", case.id);
+                continue;
+            }
+
+            let response = outcome.unwrap_or_else(|error| {
+                panic!("unexpected search failure in {}: {error}", case.id)
+            });
+            if case.expected_empty {
+                safety_cases += 1;
+                assert!(
+                    response.results.is_empty(),
+                    "expected no answer in {}, got {}",
+                    case.id,
+                    response.results[0].title
+                );
+            }
+            if !case.allowed_seasons.is_empty() {
+                safety_cases += 1;
+                assert!(response
+                    .results
+                    .iter()
+                    .all(|result| case.allowed_seasons.contains(&result.season)));
+            }
+            if !case.allowed_categories.is_empty() {
+                safety_cases += 1;
+                assert!(response
+                    .results
+                    .iter()
+                    .all(|result| case.allowed_categories.contains(&result.category)));
+            }
+            for forbidden in &case.forbidden_title_contains {
+                safety_cases += 1;
+                assert!(
+                    response
+                        .results
+                        .iter()
+                        .all(|result| !result.title.contains(forbidden)),
+                    "forbidden result in {}: {forbidden}",
+                    case.id
+                );
+            }
+            assert!(response.results.iter().all(|result| {
+                safe_knowledge_eval_url(&result.source_url)
+                    && safe_knowledge_eval_url(&result.yuque_url)
+            }));
+
+            if !case.expected_titles_any.is_empty() {
+                recall_cases += 1;
+                let matched = response.results.iter().find(|result| {
+                    case.expected_titles_any
+                        .iter()
+                        .any(|expected| result.title.contains(expected))
+                });
+                if let Some(result) = matched {
+                    recall_hits += 1;
+                    if let Some(expected) = case.expected_version_match.as_deref() {
+                        assert_eq!(
+                            knowledge_eval_version_match(result.version_match),
+                            expected,
+                            "version mismatch in {}",
+                            case.id
+                        );
+                    }
+                    if let Some(expected) = case.expected_fact_eligible {
+                        assert_eq!(
+                            result.fact_eligible, expected,
+                            "fact eligibility mismatch in {}",
+                            case.id
+                        );
+                    }
+                    println!(
+                        "KNOWLEDGE_EVAL_CASE {} rank={} title={} pass=true",
+                        case.id,
+                        response
+                            .results
+                            .iter()
+                            .position(|candidate| candidate.document_id == result.document_id)
+                            .unwrap()
+                            + 1,
+                        result.title
+                    );
+                } else {
+                    println!(
+                        "KNOWLEDGE_EVAL_CASE {} pass=false returned={}",
+                        case.id,
+                        response
+                            .results
+                            .iter()
+                            .map(|result| result.title.as_str())
+                            .collect::<Vec<_>>()
+                            .join(" | ")
+                    );
+                }
+            } else {
+                println!("KNOWLEDGE_EVAL_CASE {} pass=true", case.id);
+            }
+        }
+
+        let recall_at_5 = recall_hits as f64 / recall_cases as f64;
+        println!(
+            "KNOWLEDGE_EVAL_SUMMARY {}",
+            serde_json::to_string(&json!({
+                "schema_version": suite.schema_version,
+                "corpus_hash": index.corpus_hash(),
+                "documents": index.document_count(),
+                "chunks": index.chunk_count(),
+                "cases": suite.cases.len(),
+                "recall_cases": recall_cases,
+                "recall_hits": recall_hits,
+                "recall_at_5": round_score(recall_at_5),
+                "minimum_recall_at_5": suite.minimum_recall_at_5,
+                "safety_assertions": safety_cases
+            }))
+            .unwrap()
+        );
+        assert!(
+            recall_at_5 >= suite.minimum_recall_at_5,
+            "Recall@5 {:.3} is below {:.3}",
+            recall_at_5,
+            suite.minimum_recall_at_5
+        );
+    }
+
+    fn knowledge_eval_error_code(error: &KnowledgeIndexError) -> &'static str {
+        match error {
+            KnowledgeIndexError::VersionConflict { .. } => "version_conflict",
+            KnowledgeIndexError::CrossVersionIntentRequired => "cross_version_intent_required",
+            KnowledgeIndexError::InvalidQuery(_) => "invalid_query",
+            KnowledgeIndexError::UnknownSeason(_) => "unknown_season",
+            KnowledgeIndexError::UnknownCategory(_) => "unknown_category",
+            _ => "unexpected_error",
+        }
+    }
+
+    fn knowledge_eval_version_match(value: KnowledgeVersionMatch) -> &'static str {
+        match value {
+            KnowledgeVersionMatch::CurrentExact => "current_exact",
+            KnowledgeVersionMatch::TestServerExact => "test_server_exact",
+            KnowledgeVersionMatch::HistoricalExplicit => "historical_explicit",
+            KnowledgeVersionMatch::CrossVersion => "cross_version",
+        }
+    }
+
+    fn safe_knowledge_eval_url(value: &str) -> bool {
+        value.starts_with("https://") || value.starts_with("http://")
     }
 }
