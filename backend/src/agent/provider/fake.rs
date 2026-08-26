@@ -42,12 +42,48 @@ impl LlmProvider for FakeProvider {
                 _ => None,
             });
         if let Some(output) = last_tool_result {
-            if output.get("tool_name").and_then(Value::as_str) == Some("get_current_scenario")
-                && request
+            if output.get("tool_name").and_then(Value::as_str) == Some("get_current_scenario") {
+                if request
+                    .tools
+                    .iter()
+                    .any(|tool| tool.name == "search_knowledge_base")
+                    && should_search_knowledge(request)
+                {
+                    return validated(
+                        request,
+                        ModelResponse {
+                            assistant_text: None,
+                            tool_calls: vec![ProviderToolCall {
+                                call_id: "fake-call-knowledge".to_string(),
+                                name: "search_knowledge_base".to_string(),
+                                arguments: json!({
+                                    "query": bounded_user_question(request),
+                                    "version_scope": "current_only",
+                                    "season": null,
+                                    "category": null,
+                                    "top_k": 3
+                                }),
+                            }],
+                            finish_reason: FinishReason::ToolCalls,
+                            usage: TokenUsage::default(),
+                        },
+                    );
+                }
+                if !request
                     .tools
                     .iter()
                     .any(|tool| tool.name == "simulate_scenario")
-            {
+                {
+                    return validated(
+                        request,
+                        ModelResponse {
+                            assistant_text: Some(refusal_report()),
+                            tool_calls: Vec::new(),
+                            finish_reason: FinishReason::Stop,
+                            usage: TokenUsage::default(),
+                        },
+                    );
+                }
                 return validated(
                     request,
                     ModelResponse {
@@ -58,6 +94,20 @@ impl LlmProvider for FakeProvider {
                             arguments: json!({}),
                         }],
                         finish_reason: FinishReason::ToolCalls,
+                        usage: TokenUsage::default(),
+                    },
+                );
+            }
+
+            if output.get("tool_name").and_then(Value::as_str) == Some("search_knowledge_base") {
+                return validated(
+                    request,
+                    ModelResponse {
+                        assistant_text: Some(
+                            knowledge_report(output).unwrap_or_else(refusal_report),
+                        ),
+                        tool_calls: Vec::new(),
+                        finish_reason: FinishReason::Stop,
                         usage: TokenUsage::default(),
                     },
                 );
@@ -109,6 +159,70 @@ impl LlmProvider for FakeProvider {
             .map_err(|_| ProviderError::invalid_response())?;
         Ok(response)
     }
+}
+
+fn should_search_knowledge(request: &ModelRequest) -> bool {
+    let question = bounded_user_question(request);
+    ["攻略", "版本资料", "白皮书", "配装", "一键宏", "玩法资料"]
+        .iter()
+        .any(|keyword| question.contains(keyword))
+}
+
+fn bounded_user_question(request: &ModelRequest) -> String {
+    request
+        .messages
+        .iter()
+        .find_map(|message| match message {
+            ModelMessage::User { content } if !content.starts_with("<session_context") => {
+                Some(content.chars().take(160).collect())
+            }
+            _ => None,
+        })
+        .unwrap_or_else(|| "当前版本玩法资料".to_string())
+}
+
+fn knowledge_report(output: &Value) -> Option<String> {
+    let evidence = output.get("evidence")?.as_array()?.iter().find(|item| {
+        item.get("tool_name").and_then(Value::as_str) == Some("search_knowledge_base")
+    })?;
+    let evidence_id = evidence.get("evidence_id")?.as_str()?;
+    let results = evidence.pointer("/result/results")?.as_array()?;
+    if results.is_empty() {
+        return None;
+    }
+    let has_grounded_body = results.iter().any(|result| {
+        result
+            .get("fact_eligible")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    });
+    let (summary, explanation, limitations) = if has_grounded_body {
+        (
+            "已找到与当前场景版本匹配的玩法资料。",
+            "资料正文可核验；具体赛季、可信状态与原始出处见下方来源卡。",
+            Vec::<String>::new(),
+        )
+    } else {
+        (
+            "已找到当前版本的相关来源入口，但正文尚不足以支持玩法结论。",
+            "当前只能确认来源存在，不能复述尚未取得的正文内容。",
+            vec!["需要补齐正文后才能形成可核验的玩法说明。".to_string()],
+        )
+    };
+    serde_json::to_string(&json!({
+        "schema_version": "agent-report-content/v1",
+        "summary": summary,
+        "findings": [{
+            "title": "当前版本资料检索结果",
+            "explanation": explanation,
+            "evidence_ids": [evidence_id],
+            "metrics": []
+        }],
+        "recommendations": [],
+        "limitations": limitations,
+        "refusal_reason": null
+    }))
+    .ok()
 }
 
 fn validated(
@@ -211,5 +325,83 @@ mod tests {
             .unwrap();
         assert_eq!(second.finish_reason, FinishReason::Stop);
         assert!(second.tool_calls.is_empty());
+    }
+
+    #[tokio::test]
+    async fn fake_provider_can_demo_current_version_knowledge_without_network() {
+        let provider = FakeProvider::new("offline".to_string(), "fixture-v1".to_string());
+        let tools = vec![
+            ToolDefinition {
+                name: "search_knowledge_base".to_string(),
+                description: "Search current guides.".to_string(),
+                parameters: json!({"type": "object"}),
+            },
+            ToolDefinition {
+                name: "simulate_scenario".to_string(),
+                description: "Simulate.".to_string(),
+                parameters: json!({"type": "object"}),
+            },
+        ];
+        let initial_messages = vec![
+            ModelMessage::User {
+                content: "结合当前版本攻略说明循环思路。".to_string(),
+            },
+            ModelMessage::Assistant {
+                content: None,
+                tool_calls: vec![ProviderToolCall {
+                    call_id: "prefetch".to_string(),
+                    name: "get_current_scenario".to_string(),
+                    arguments: json!({}),
+                }],
+            },
+            ModelMessage::ToolResult {
+                call_id: "prefetch".to_string(),
+                output: json!({"tool_name": "get_current_scenario"}),
+            },
+        ];
+        let first_request = ModelRequest {
+            instructions: "Use tools.".to_string(),
+            messages: initial_messages.clone(),
+            tools: tools.clone(),
+            response_format: None,
+            max_output_tokens: 512,
+        };
+        let first = provider.complete(&first_request).await.unwrap();
+        assert_eq!(first.tool_calls[0].name, "search_knowledge_base");
+        assert_eq!(
+            first.tool_calls[0].arguments["version_scope"],
+            "current_only"
+        );
+
+        let evidence_id = "a".repeat(64);
+        let mut final_messages = initial_messages;
+        final_messages.push(ModelMessage::Assistant {
+            content: None,
+            tool_calls: first.tool_calls,
+        });
+        final_messages.push(ModelMessage::ToolResult {
+            call_id: "fake-call-knowledge".to_string(),
+            output: json!({
+                "tool_name": "search_knowledge_base",
+                "evidence": [{
+                    "tool_name": "search_knowledge_base",
+                    "evidence_id": evidence_id,
+                    "result": {"results": [{"fact_eligible": true}]}
+                }]
+            }),
+        });
+        let final_request = ModelRequest {
+            instructions: "Use tools.".to_string(),
+            messages: final_messages,
+            tools,
+            response_format: None,
+            max_output_tokens: 512,
+        };
+        let final_response = provider.complete(&final_request).await.unwrap();
+        assert!(final_response.tool_calls.is_empty());
+        let report: Value =
+            serde_json::from_str(final_response.assistant_text.as_deref().unwrap()).unwrap();
+        assert_eq!(report["findings"][0]["evidence_ids"][0], "a".repeat(64));
+        assert!(report["summary"].as_str().unwrap().contains("当前场景版本"));
     }
 }

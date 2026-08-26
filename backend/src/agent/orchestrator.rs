@@ -1189,6 +1189,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn offline_provider_demonstrates_versioned_knowledge_end_to_end() {
+        let (root, knowledge) = knowledge_fixture();
+        let runtime = AgentRuntime::fixture().with_knowledge_fixture(knowledge);
+        let provider = FakeProvider::new("offline".to_string(), "fixture-v1".to_string());
+        let mut run_input = input(&runtime, "run-offline-knowledge");
+        run_input.question = "结合当前版本攻略说明循环思路。".to_string();
+        let result = run_agent(
+            &provider,
+            &runtime,
+            run_input,
+            AgentRunLimits::default(),
+            AgentCancellation::default(),
+        )
+        .await;
+
+        assert_eq!(result.status, AgentRunStatus::Completed);
+        assert_eq!(result.prompt_version, "agent-system/v5");
+        assert_eq!(result.accounting.knowledge_searches, 1);
+        assert_eq!(result.accounting.simulations, 0);
+        let report = result.report.unwrap();
+        assert_eq!(report.sources.len(), 1);
+        assert_eq!(report.sources[0].season, "暗影千机（2026）");
+        assert_eq!(report.sources[0].version_match, "current_exact");
+        assert!(report.sources[0].fact_eligible);
+        assert!(report.content.findings[0].metrics.is_empty());
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
     async fn pre_cancelled_run_never_calls_provider_or_tools() {
         let runtime = AgentRuntime::fixture();
         let provider = ScriptedProvider::new(Vec::new());
