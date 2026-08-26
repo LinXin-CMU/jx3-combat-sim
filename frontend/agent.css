@@ -262,9 +262,9 @@ body.agent-fullheight #page-agent.active {
   visibility: hidden;
   opacity: 0;
   pointer-events: none;
-  transform: translate3d(calc(100% + 32px),0,0) scale(.985);
+  transform: translate3d(calc(100% + 32px),0,0) scale(.96);
   transform-origin: right center;
-  transition: transform .32s cubic-bezier(.22,1,.36,1), opacity .2s ease, visibility 0s linear .32s;
+  transition: transform .42s cubic-bezier(.22,1,.36,1), opacity .26s ease, visibility 0s linear .42s;
   will-change: transform, opacity;
 }
 .sim-ai-dock.open {
@@ -291,7 +291,7 @@ body.agent-fullheight #page-agent.active {
   right: 0;
   bottom: 0;
   left: 0;
-  height: 1px;
+  height: 2px;
   content: "";
   opacity: 0;
   background: linear-gradient(90deg,transparent,var(--gold),transparent);
@@ -422,12 +422,17 @@ body.agent-fullheight #page-agent.active {
 @media (max-width: 900px) {
   .sim-ai-fab { right: 12px; bottom: 12px; min-width: 42px; width: 42px; padding: 0 8px; }
   .sim-ai-fab-label { display: none; }
-  .sim-ai-dock { top: auto; right: 8px; bottom: 8px; left: 8px; width: auto; height: min(80dvh, 680px); transform: translate3d(0,calc(100% + 18px),0) scale(.985); transform-origin: center bottom; }
+  .sim-ai-dock { top: auto; right: 8px; bottom: 8px; left: 8px; width: auto; height: min(80dvh, 680px); transform: translate3d(0,calc(100% + 18px),0) scale(.96); transform-origin: center bottom; }
   .sim-ai-dock.open { transform: translate3d(0,0,0) scale(1); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sim-ai-fab, .sim-ai-dock { transition: none; }
+  .sim-ai-fab { transition: opacity .14s ease; }
+  .sim-ai-dock {
+    transform: none;
+    transition: opacity .16s ease, visibility 0s linear .16s;
+  }
+  .sim-ai-dock.open { transform: none; transition-delay: 0s; }
   .sim-ai-dock.open > .sim-ai-dock-head,
   .sim-ai-dock.open > .sim-ai-context,
   .sim-ai-dock.open > .sim-ai-quick,
@@ -440,8 +445,23 @@ body.agent-fullheight #page-agent.active {
   .sim-ai-progress-step,
   .sim-ai-result-metric,
   .sim-ai-dock.is-loading .sim-ai-mark,
-  .sim-ai-dock.is-loading .sim-ai-context.ready .sim-ai-context-dot,
-  .ai-thinking-dots i { animation: none; }
-  .sim-ai-dock-head::after { display: none; }
-  .ai-thinking-dots i { opacity: .7; }
+  .sim-ai-dock.is-loading .sim-ai-context.ready .sim-ai-context-dot { animation: none; }
+  .sim-ai-dock.open > .sim-ai-dock-head,
+  .sim-ai-dock.open > .sim-ai-context,
+  .sim-ai-dock.open > .sim-ai-quick,
+  .sim-ai-dock.open > .sim-ai-chat,
+  .sim-ai-dock.open > .sim-ai-compose,
+  .sim-ai-chat > .sim-ai-bubble,
+  .sim-ai-chat > .sim-ai-progress,
+  .sim-ai-chat > .sim-ai-result,
+  .sim-ai-chat > .ai-thinking { animation: sim-ai-reduced-fade .16s ease both; }
+  .sim-ai-progress-step,
+  .sim-ai-result-metric { animation: sim-ai-reduced-fade .12s ease both; }
+  .sim-ai-dock.is-loading .sim-ai-dock-head::after { animation-duration: 2.4s; }
+  .ai-thinking-dots i { animation-duration: 1.8s; }
+}
+
+@keyframes sim-ai-reduced-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
