@@ -1,16 +1,19 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::time::Instant;
 
 use super::provider::ToolDefinition;
 use super::report::EvidenceStore;
 use super::{
     analyze_timeline, compare_scenarios, get_current_scenario, simulate_scenario, AgentRuntime,
-    CandidatePatchV1, EvidenceEnvelopeV1, PatchValueV1, ScenarioPatchV1, ScenarioSnapshotV1,
-    ToolBudget, ToolError,
+    CandidatePatchV1, EvidenceEnvelopeV1, KnowledgeIndex, KnowledgeIndexError,
+    KnowledgeSearchQuery, KnowledgeVersionContext, KnowledgeVersionScope, PatchValueV1,
+    ScenarioPatchV1, ScenarioSnapshotV1, ToolBudget, ToolError,
 };
 
 pub const AGENT_TOOL_RESULT_SCHEMA_V1: &str = "agent-tool-result/v1";
 pub const MAX_AGENT_CANDIDATES: usize = 3;
+pub const MAX_KNOWLEDGE_SEARCHES: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -42,7 +45,9 @@ pub struct ToolDispatchOutcome {
 pub struct AgentToolRegistry<'a> {
     scenario: &'a ScenarioSnapshotV1,
     runtime: &'a AgentRuntime,
+    knowledge: Option<&'a KnowledgeIndex>,
     budget: ToolBudget,
+    knowledge_searches: u32,
     scenario_read: bool,
     evidence: EvidenceStore,
 }
@@ -53,10 +58,21 @@ impl<'a> AgentToolRegistry<'a> {
         runtime: &'a AgentRuntime,
         max_simulations: u32,
     ) -> Self {
+        Self::new_with_knowledge(scenario, runtime, max_simulations, None)
+    }
+
+    pub fn new_with_knowledge(
+        scenario: &'a ScenarioSnapshotV1,
+        runtime: &'a AgentRuntime,
+        max_simulations: u32,
+        knowledge: Option<&'a KnowledgeIndex>,
+    ) -> Self {
         Self {
             scenario,
             runtime,
+            knowledge,
             budget: ToolBudget::new(max_simulations),
+            knowledge_searches: 0,
             scenario_read: false,
             evidence: EvidenceStore::new(),
         }
@@ -87,6 +103,16 @@ impl<'a> AgentToolRegistry<'a> {
         ]
     }
 
+    pub fn definitions_with_knowledge() -> Vec<ToolDefinition> {
+        let mut definitions = Self::definitions();
+        definitions.push(ToolDefinition {
+            name: "search_knowledge_base".to_string(),
+            description: "Search the bounded local JX3 knowledge snapshot. Version scope is enforced by the server; current-version questions never silently fall back to old seasons.".to_string(),
+            parameters: knowledge_search_schema(),
+        });
+        definitions
+    }
+
     pub fn evidence(&self) -> &EvidenceStore {
         &self.evidence
     }
@@ -97,6 +123,10 @@ impl<'a> AgentToolRegistry<'a> {
 
     pub fn scenario_was_read(&self) -> bool {
         self.scenario_read
+    }
+
+    pub fn used_knowledge_searches(&self) -> u32 {
+        self.knowledge_searches
     }
 
     pub fn dispatch(
@@ -212,6 +242,58 @@ impl<'a> AgentToolRegistry<'a> {
                         }
                     }
                     Err(error) => tool_failure(tool_name, error),
+                }
+            }
+            "search_knowledge_base" => {
+                let args = match serde_json::from_value::<KnowledgeArguments>(arguments) {
+                    Ok(args) => args,
+                    Err(_) => return invalid_arguments(tool_name),
+                };
+                let query = match args.into_query() {
+                    Ok(query) => query,
+                    Err(error) => return knowledge_failure(tool_name, error),
+                };
+                let Some(knowledge) = self.knowledge else {
+                    return failure(
+                        tool_name,
+                        "knowledge_unavailable",
+                        "local knowledge index is not configured",
+                        false,
+                    );
+                };
+                if self.knowledge_searches >= MAX_KNOWLEDGE_SEARCHES {
+                    return failure(
+                        tool_name,
+                        "knowledge_search_budget_exhausted",
+                        "knowledge search budget is exhausted",
+                        true,
+                    );
+                }
+                self.knowledge_searches += 1;
+                let started = Instant::now();
+                let evidence_args =
+                    serde_json::to_value(&query).expect("knowledge query must remain serializable");
+                let context =
+                    KnowledgeVersionContext::from_game_version(self.runtime.game_version());
+                match knowledge.search(&context, query) {
+                    Ok(result) => match EvidenceEnvelopeV1::new(
+                        trace_id,
+                        tool_name,
+                        &self.scenario.scenario_hash,
+                        evidence_args,
+                        result,
+                        self.runtime.provenance(),
+                        started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+                    ) {
+                        Ok(evidence) => self.success(tool_name, vec![serialize_evidence(evidence)]),
+                        Err(_) => failure(
+                            tool_name,
+                            "knowledge_evidence_failed",
+                            "knowledge search evidence could not be created",
+                            false,
+                        ),
+                    },
+                    Err(error) => knowledge_failure(tool_name, error),
                 }
             }
             _ => failure(
@@ -337,6 +419,44 @@ struct CompareArguments {
     candidates: Vec<AgentCandidateV1>,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct KnowledgeArguments {
+    query: String,
+    version_scope: String,
+    season: Option<String>,
+    category: Option<String>,
+    top_k: usize,
+}
+
+impl KnowledgeArguments {
+    fn into_query(self) -> Result<KnowledgeSearchQuery, KnowledgeIndexError> {
+        let version_scope = match self.version_scope.as_str() {
+            "current_only" if self.season.is_none() => KnowledgeVersionScope::CurrentOnly,
+            "specific_season" => KnowledgeVersionScope::SpecificSeason {
+                season: self
+                    .season
+                    .filter(|season| !season.trim().is_empty())
+                    .ok_or(KnowledgeIndexError::InvalidQuery(
+                        "specific season is required",
+                    ))?,
+            },
+            "cross_version" if self.season.is_none() => KnowledgeVersionScope::CrossVersion,
+            _ => {
+                return Err(KnowledgeIndexError::InvalidQuery(
+                    "version scope and season do not match",
+                ))
+            }
+        };
+        Ok(KnowledgeSearchQuery {
+            query: self.query,
+            version_scope,
+            category: self.category,
+            top_k: self.top_k,
+        })
+    }
+}
+
 fn serialize_evidence<T: Serialize>(evidence: EvidenceEnvelopeV1<T>) -> Value {
     serde_json::to_value(evidence).expect("evidence envelope must remain serializable")
 }
@@ -394,6 +514,40 @@ fn tool_failure(tool_name: &str, error: ToolError) -> ToolDispatchOutcome {
         ),
     };
     failure(tool_name, code, message, budget_exhausted)
+}
+
+fn knowledge_failure(tool_name: &str, error: KnowledgeIndexError) -> ToolDispatchOutcome {
+    let (code, message) = match error {
+        KnowledgeIndexError::VersionConflict { .. } => (
+            "knowledge_version_conflict",
+            "the question names a version outside the requested scope",
+        ),
+        KnowledgeIndexError::CrossVersionIntentRequired => (
+            "cross_version_intent_required",
+            "cross-version search requires an explicit history or comparison question",
+        ),
+        KnowledgeIndexError::UnknownSeason(_) => (
+            "unknown_knowledge_season",
+            "the requested season is not present in the local knowledge snapshot",
+        ),
+        KnowledgeIndexError::UnknownCategory(_) => (
+            "unknown_knowledge_category",
+            "the requested category is not present in the local knowledge snapshot",
+        ),
+        KnowledgeIndexError::InvalidQuery(_) => (
+            "invalid_knowledge_query",
+            "the knowledge query is invalid or outside configured bounds",
+        ),
+        KnowledgeIndexError::NotConfigured
+        | KnowledgeIndexError::Io(_)
+        | KnowledgeIndexError::InvalidManifest(_)
+        | KnowledgeIndexError::UnsafePath(_)
+        | KnowledgeIndexError::CorpusLimit(_) => (
+            "knowledge_unavailable",
+            "the local knowledge snapshot is unavailable",
+        ),
+    };
+    failure(tool_name, code, message, false)
 }
 
 fn failure(
@@ -459,9 +613,31 @@ fn compare_schema() -> Value {
     })
 }
 
+fn knowledge_search_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "minLength": 1, "maxLength": 200},
+            "version_scope": {
+                "type": "string",
+                "enum": ["current_only", "specific_season", "cross_version"]
+            },
+            "season": {"type": ["string", "null"], "maxLength": 64},
+            "category": {"type": ["string", "null"], "maxLength": 64},
+            "top_k": {"type": "integer", "minimum": 1, "maximum": 5}
+        },
+        "required": ["query", "version_scope", "season", "category", "top_k"],
+        "additionalProperties": false
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::env;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn only_four_read_only_tools_are_exposed() {
@@ -498,6 +674,92 @@ mod tests {
     }
 
     #[test]
+    fn knowledge_schema_is_closed_bounded_and_does_not_expose_paths_or_urls() {
+        let definitions = AgentToolRegistry::definitions_with_knowledge();
+        assert_eq!(definitions.len(), 5);
+        let knowledge = definitions.last().unwrap();
+        assert_eq!(knowledge.name, "search_knowledge_base");
+        assert_eq!(knowledge.parameters["additionalProperties"], false);
+        assert_eq!(knowledge.parameters["properties"]["top_k"]["maximum"], 5);
+        let encoded = serde_json::to_string(knowledge).unwrap();
+        assert!(!encoded.contains("path"));
+        assert!(!encoded.contains("url"));
+        assert!(!encoded.contains("write"));
+    }
+
+    #[test]
+    fn knowledge_argument_scope_is_validated_locally() {
+        let invalid = KnowledgeArguments {
+            query: "盾飞".to_string(),
+            version_scope: "current_only".to_string(),
+            season: Some("山海源流（2025）".to_string()),
+            category: None,
+            top_k: 5,
+        };
+        assert!(matches!(
+            invalid.into_query().unwrap_err(),
+            KnowledgeIndexError::InvalidQuery(_)
+        ));
+
+        let valid = KnowledgeArguments {
+            query: "山海源流盾飞".to_string(),
+            version_scope: "specific_season".to_string(),
+            season: Some("山海源流（2025）".to_string()),
+            category: Some("基础".to_string()),
+            top_k: 3,
+        }
+        .into_query()
+        .unwrap();
+        assert!(matches!(
+            valid.version_scope,
+            KnowledgeVersionScope::SpecificSeason { .. }
+        ));
+    }
+
+    #[test]
+    fn knowledge_dispatch_is_grounded_and_budgeted() {
+        let (root, knowledge) = knowledge_fixture();
+        let runtime = AgentRuntime::fixture();
+        let scenario = runtime.fixture_scenario();
+        let mut registry =
+            AgentToolRegistry::new_with_knowledge(&scenario, &runtime, 1, Some(&knowledge));
+        let prefetched = registry.dispatch("knowledge-run", "get_current_scenario", json!({}));
+        assert_eq!(prefetched.output["ok"], true);
+
+        let arguments = json!({
+            "query": "盾飞劫刀流血",
+            "version_scope": "current_only",
+            "season": null,
+            "category": null,
+            "top_k": 3
+        });
+        let first = registry.dispatch("knowledge-run", "search_knowledge_base", arguments.clone());
+        assert_eq!(first.output["ok"], true);
+        assert_eq!(first.evidence_ids.len(), 1);
+        assert_eq!(
+            first.output["evidence"][0]["result"]["results"][0]["season"],
+            "暗影千机（2026）"
+        );
+        assert_eq!(
+            first.output["evidence"][0]["result"]["results"][0]["version_match"],
+            "current_exact"
+        );
+        let second = registry.dispatch("knowledge-run", "search_knowledge_base", arguments.clone());
+        assert_eq!(second.output["ok"], true);
+        let third = registry.dispatch("knowledge-run", "search_knowledge_base", arguments);
+        assert_eq!(
+            third.output["error"]["code"],
+            "knowledge_search_budget_exhausted"
+        );
+        assert!(third.budget_exhausted);
+        assert_eq!(registry.used_knowledge_searches(), 2);
+
+        let expected_root = env::temp_dir();
+        assert!(root.starts_with(&expected_root));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn local_patch_validation_does_not_trust_upstream_schema_enforcement() {
         let invalid = AgentScenarioPatchV1 {
             network_delay: Some(5_001),
@@ -510,5 +772,41 @@ mod tests {
             ..AgentScenarioPatchV1::default()
         };
         assert_eq!(validate_agent_patch(&oversized), Err("invalid_sequence"));
+    }
+
+    fn knowledge_fixture() -> (PathBuf, KnowledgeIndex) {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = env::temp_dir().join(format!("jx3-registry-knowledge-{nonce}"));
+        let relative = "暗影千机（2026）/基础/循环.md";
+        let document = root.join(relative);
+        fs::create_dir_all(document.parent().unwrap()).unwrap();
+        fs::write(
+            &document,
+            "---\ntitle: 当前循环\n---\n\n# 当前循环\n\n盾飞阶段使用劫刀并关注流血。\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("_migration-manifest.json"),
+            serde_json::to_vec_pretty(&json!({
+                "entries": [{
+                    "title": "当前循环",
+                    "season": "暗影千机（2026）",
+                    "category": "基础",
+                    "kind": "yuque_document",
+                    "source": "https://www.yuque.com/sgyxy/cangyun/current",
+                    "output": relative,
+                    "source_site": "www.yuque.com",
+                    "yuque_url": "https://www.yuque.com/sgyxy/cangyun/current",
+                    "updated_at": "2026-08-26T00:00:00Z"
+                }]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let index = KnowledgeIndex::load(&root).unwrap();
+        (root, index)
     }
 }
