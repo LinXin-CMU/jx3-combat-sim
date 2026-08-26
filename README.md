@@ -4,7 +4,7 @@
 
 这是我面向 2027 届游戏策划岗位准备的个人作品集项目。项目重点不是复刻一个游戏界面，而是展示如何把复杂战斗规则转化为可以配置、验证、对比和部署的策划工具。
 
-当前已经实现战斗模拟、宏优化、配装搜索和强化学习环境；战斗分析 Agent 已完成四个只读工具、有界编排、证据校验、Run/SSE、用户隔离持久会话和实验面板，并支持可替换的离线/OpenAI Responses/OpenAI-compatible Chat provider。真实模型调用与公网演示仍保持关闭，等待单独确认模型、费用和发布安全边界。
+当前已经实现战斗模拟、宏优化、配装搜索和强化学习环境；战斗分析 Agent 已完成四个只读工具、有界编排、证据校验、Run/SSE、用户隔离持久会话和实验面板，并支持可替换的离线/OpenAI Responses/OpenAI-compatible Chat provider。DeepSeek V4 Pro 已完成真实固定评测和多轮会话验收；公网演示仍关闭，等待单独确认发布安全边界。
 
 ## 90 秒了解项目
 
@@ -183,7 +183,7 @@ Agent 围绕明确目标自主调用高层工具：
 - `compare_scenarios`
 - `analyze_timeline`
 
-它负责拆解问题、提出假设和组织证据，不直接生成“看起来合理”的伤害数字。当前离线闭环包括 provider adapter、有界工具循环、数值证据校验、Run API/SSE、append-only 持久会话、历史恢复和面试用实验面板。Phase 1 工具评测保持 20/20；Phase 2 离线模型级评测为 12/12，证据引用率和工具边界通过率均为 100%。这证明的是系统编排与证据边界，不等同于真实模型自然语言质量。
+它负责拆解问题、提出假设和组织证据，不直接生成“看起来合理”的伤害数字。当前闭环包括 provider adapter、有界工具循环、数值证据校验、Run API/SSE、append-only 持久会话、有界可见上下文恢复和面试用实验面板。Phase 1 工具评测保持 20/20；Phase 2 离线模型级评测为 12/12。DeepSeek V4 Pro 固定十题从 1/10 提升到 6/10，复跑为 5/10，三轮越权工具调用均为 0；真实结果不包装成稳定准确率。
 
 一键复验完整离线闭环：
 
@@ -191,7 +191,7 @@ Agent 围绕明确目标自主调用高层工具：
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\agent-phase2-verify.ps1
 ```
 
-Provider 默认只启用不联网的 `offline` profile；可选服务商配置见 [`config/agent.providers.example.toml`](config/agent.providers.example.toml)。API key 只从服务端环境变量读取，不进入网页或用户设置。完整离线验收见 [`docs/baselines/2026-08-26-agent-phase2-offline.md`](docs/baselines/2026-08-26-agent-phase2-offline.md)，作品集叙事与演示流程见 [`docs/AGENT_PORTFOLIO_CASE_STUDY.md`](docs/AGENT_PORTFOLIO_CASE_STUDY.md) 和 [`docs/AGENT_90S_DEMO_SCRIPT.md`](docs/AGENT_90S_DEMO_SCRIPT.md)。下一阻断节点是首次真实模型调用：必须先确认 profile、模型与费用上限。
+Provider 默认只启用不联网的 `offline` profile；可选服务商配置见 [`config/agent.providers.example.toml`](config/agent.providers.example.toml)。API key 只从服务端环境变量读取，不进入网页或用户设置。完整离线验收见 [`docs/baselines/2026-08-26-agent-phase2-offline.md`](docs/baselines/2026-08-26-agent-phase2-offline.md)，真实模型结果见 [`docs/baselines/2026-08-26-agent-deepseek-v4-pro.md`](docs/baselines/2026-08-26-agent-deepseek-v4-pro.md)，作品集叙事与演示流程见 [`docs/AGENT_PORTFOLIO_CASE_STUDY.md`](docs/AGENT_PORTFOLIO_CASE_STUDY.md) 和 [`docs/AGENT_90S_DEMO_SCRIPT.md`](docs/AGENT_90S_DEMO_SCRIPT.md)。公网发布仍需单独确认。
 
 ### 差异化案例：RL → 宏蒸馏
 
@@ -219,6 +219,7 @@ Provider 默认只启用不联网的 `offline` profile；可选服务商配置�
 - [`docs/AGENT_SESSION_HTTP_API.md`](docs/AGENT_SESSION_HTTP_API.md)：持久会话、append-only 事件、恢复与脱敏边界；
 - [`docs/AGENT_PORTFOLIO_CASE_STUDY.md`](docs/AGENT_PORTFOLIO_CASE_STUDY.md)：战斗分析 Agent 的问题—设计—结果—反思案例；
 - [`docs/AGENT_90S_DEMO_SCRIPT.md`](docs/AGENT_90S_DEMO_SCRIPT.md)：90 秒面试演示脚本；
+- [`docs/baselines/2026-08-26-agent-deepseek-v4-pro.md`](docs/baselines/2026-08-26-agent-deepseek-v4-pro.md)：真实模型兼容、固定评测、成本和多轮会话基线；
 - [`backend/tests/agent_eval/README.md`](backend/tests/agent_eval/README.md)：20 题无模型评测结构、运行方式与安全边界；
 - [`backend/tests/agent_model_eval/README.md`](backend/tests/agent_model_eval/README.md)：12 题离线模型级评测、长会话和越权测试；
 - [`docs/PHASE_0_PLAN.md`](docs/PHASE_0_PLAN.md)：公开仓库卫生计划；

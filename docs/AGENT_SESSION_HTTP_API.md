@@ -16,7 +16,7 @@ agent_sessions/
 
 `meta.json` 使用 `agent-session-meta/v1`，创建后不覆盖。状态变化使用 `agent-session-event/v1` 编号事件；事件先写入同目录临时文件、同步落盘，再原子重命名为最终编号。第一版没有自动删除、归档或覆盖接口。
 
-持久化内容包括用户可见问题、run/provider/model 身份、scenario/prompt hash、规范化工具步骤、evidence id、用量和最终 `AgentReportV1`。永不持久化 API key、Authorization、cookie、隐藏推理、原始 provider payload、完整时间轴或绝对路径。高置信凭据文本会在进入 run 前拒绝，写盘边界还会二次脱敏所有字符串。
+持久化内容包括用户可见问题、run/provider/model 身份、scenario/prompt hash、规范化工具步骤、evidence id、用量和最终 `AgentReportV1`。续接 run 只从最近两轮最终可见报告重建有界上下文；它不恢复 provider transcript，且历史数值不能代替当前 run 的 evidence。永不持久化 API key、Authorization、cookie、隐藏推理、原始 provider payload、完整时间轴或绝对路径。高置信凭据文本会在进入 run 前拒绝，写盘边界还会二次脱敏所有字符串。
 
 ## 创建或继续会话
 

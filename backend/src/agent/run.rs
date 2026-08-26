@@ -360,7 +360,7 @@ impl AgentRunManager {
         self: &Arc<Self>,
         provider: Box<dyn LlmProvider>,
         runtime: AgentRuntime,
-        input: AgentRunInput,
+        mut input: AgentRunInput,
         limits: AgentRunLimits,
         requested_session_id: Option<&str>,
     ) -> Result<Arc<AgentRunRecord>, StartRunError> {
@@ -374,7 +374,7 @@ impl AgentRunManager {
                     message: "another Agent run is already active for this worker",
                 });
             }
-            let session_id = self
+            let binding = self
                 .sessions
                 .create_or_resume_run(
                     requested_session_id,
@@ -388,9 +388,10 @@ impl AgentRunManager {
                     code: error.code,
                     message: error.message,
                 })?;
+            input.session_context = binding.prior_context;
             let record = AgentRunRecord::new(
                 input.run_id.clone(),
-                session_id,
+                binding.session_id,
                 input.scenario.scenario_hash.clone(),
                 self.sessions.clone(),
             );
@@ -509,6 +510,7 @@ pub async fn create_run_handler(
         run_id: run_id.clone(),
         question: request.question,
         scenario: scenario.clone(),
+        session_context: None,
     };
     match state
         .agent_runs
@@ -716,6 +718,7 @@ mod tests {
             run_id: run_id.clone(),
             question: "分析当前循环。".to_string(),
             scenario,
+            session_context: None,
         };
         let record = manager
             .start(
@@ -772,6 +775,7 @@ mod tests {
             run_id: "run-active-first".to_string(),
             question: "等待取消。".to_string(),
             scenario: runtime.fixture_scenario(),
+            session_context: None,
         };
         let record = manager
             .start(
@@ -789,6 +793,7 @@ mod tests {
             run_id: "run-active-second".to_string(),
             question: "不应启动。".to_string(),
             scenario: second_runtime.fixture_scenario(),
+            session_context: None,
         };
         let error = match manager
             .start(

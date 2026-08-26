@@ -24,3 +24,13 @@ model = "replace-with-provider-model"
 base_url = "https://replace-with-provider.example/v1"
 api_key_env = "JX3_COMPATIBLE_API_KEY"
 enabled = false
+
+[[profiles]]
+id = "deepseek-v4-pro"
+label = "DeepSeek V4 Pro"
+adapter = "openai_compatible_chat"
+model = "deepseek-v4-pro"
+base_url = "https://api.deepseek.com"
+api_key_env = "JX3_DEEPSEEK_API_KEY"
+chat_compatibility = "deepseek"
+enabled = false

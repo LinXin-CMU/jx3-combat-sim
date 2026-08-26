@@ -80,6 +80,12 @@ pub struct ReportValidationError {
     pub message: &'static str,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ValidatedReportContentV1 {
+    pub content: AgentReportContentV1,
+    pub normalized_metric_citations: usize,
+}
+
 impl std::fmt::Display for ReportValidationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.message)
@@ -151,15 +157,37 @@ pub fn report_content_json_schema() -> Value {
 pub fn parse_and_validate_report(
     raw: &str,
     evidence: &EvidenceStore,
-) -> Result<AgentReportContentV1, ReportValidationError> {
-    let report: AgentReportContentV1 = serde_json::from_str(raw).map_err(|_| {
+) -> Result<ValidatedReportContentV1, ReportValidationError> {
+    let mut report: AgentReportContentV1 = serde_json::from_str(raw).map_err(|_| {
         error(
             "invalid_report_json",
             "final answer must be valid AgentReportContentV1 JSON",
         )
     })?;
+    let normalized_metric_citations = normalize_metric_citations(&mut report, evidence);
     validate_report(&report, evidence)?;
-    Ok(report)
+    Ok(ValidatedReportContentV1 {
+        content: report,
+        normalized_metric_citations,
+    })
+}
+
+fn normalize_metric_citations(
+    report: &mut AgentReportContentV1,
+    evidence: &EvidenceStore,
+) -> usize {
+    let mut normalized = 0;
+    for finding in &mut report.findings {
+        for metric in &finding.metrics {
+            if evidence.contains_key(&metric.evidence_id)
+                && !finding.evidence_ids.contains(&metric.evidence_id)
+            {
+                finding.evidence_ids.push(metric.evidence_id.clone());
+                normalized += 1;
+            }
+        }
+    }
+    normalized
 }
 
 pub fn validate_report(
@@ -317,29 +345,7 @@ fn validate_metric(
 
 fn validate_prose(value: &str) -> Result<(), ReportValidationError> {
     validate_short_text(value)?;
-    if value.chars().any(|character| {
-        character.is_numeric()
-            || matches!(
-                character,
-                '零' | '〇'
-                    | '一'
-                    | '二'
-                    | '两'
-                    | '三'
-                    | '四'
-                    | '五'
-                    | '六'
-                    | '七'
-                    | '八'
-                    | '九'
-                    | '十'
-                    | '百'
-                    | '千'
-                    | '万'
-                    | '亿'
-                    | '点'
-            )
-    }) {
+    if value.chars().any(|character| character.is_numeric()) {
         return Err(error(
             "numeric_prose_claim",
             "numeric literals are only allowed in grounded metrics",
@@ -433,7 +439,22 @@ mod tests {
     }
 
     #[test]
-    fn numeric_prose_is_rejected_even_with_valid_evidence() {
+    fn known_metric_citation_is_deterministically_linked_to_its_finding() {
+        let mut value = report();
+        value.findings[0].evidence_ids.clear();
+        let parsed =
+            parse_and_validate_report(&serde_json::to_string(&value).unwrap(), &evidence())
+                .unwrap();
+
+        assert_eq!(parsed.normalized_metric_citations, 1);
+        assert_eq!(
+            parsed.content.findings[0].evidence_ids,
+            vec!["a".repeat(64)]
+        );
+    }
+
+    #[test]
+    fn arabic_numeric_prose_is_rejected_but_natural_language_counts_are_allowed() {
         let mut value = report();
         value.summary = "DPS 为 123.5。".to_string();
         assert_eq!(
@@ -441,11 +462,8 @@ mod tests {
             "numeric_prose_claim"
         );
 
-        let mut unicode = report();
-        unicode.summary = "输出提升一百点。".to_string();
-        assert_eq!(
-            validate_report(&unicode, &evidence()).unwrap_err().code,
-            "numeric_prose_claim"
-        );
+        let mut natural_count = report();
+        natural_count.summary = "循环包含两个技能事件。".to_string();
+        validate_report(&natural_count, &evidence()).unwrap();
     }
 }

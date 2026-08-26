@@ -1,0 +1,79 @@
+param(
+  [int]$Port = 3017,
+  [string]$ConfigPath = '',
+  [string]$UserdataPath = '',
+  [string]$ApiKeyEnv = 'JX3_DEEPSEEK_API_KEY'
+)
+
+$ErrorActionPreference = 'Stop'
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$backendRoot = Join-Path $repoRoot 'backend'
+$exe = Join-Path $backendRoot 'target\release\jx3-combat-sim.exe'
+if (-not $ConfigPath) { $ConfigPath = Join-Path $repoRoot 'agent.providers.toml' }
+if (-not $UserdataPath) { $UserdataPath = Join-Path $backendRoot 'userdata' }
+
+if (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue) {
+  throw "Port $Port is already in use."
+}
+$resolvedExe = (Resolve-Path -LiteralPath $exe).Path
+$resolvedConfig = (Resolve-Path -LiteralPath $ConfigPath).Path
+$resolvedUserdata = (Resolve-Path -LiteralPath $UserdataPath).Path
+$credential = [Environment]::GetEnvironmentVariable($ApiKeyEnv, 'User')
+if ([string]::IsNullOrWhiteSpace($credential)) {
+  throw "Credential environment variable $ApiKeyEnv is unavailable at User scope."
+}
+
+$stdout = Join-Path (Split-Path -Parent $resolvedExe) 'agent-secure.stdout.log'
+$stderr = Join-Path (Split-Path -Parent $resolvedExe) 'agent-secure.stderr.log'
+$names = @(
+  'JX3_BIND',
+  'JX3_PORT',
+  'JX3_NO_BROWSER',
+  'JX3_USERDATA_DIR',
+  'JX3_AGENT_CONFIG',
+  $ApiKeyEnv
+)
+$previous = @{}
+foreach ($name in $names) {
+  $previous[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+}
+
+try {
+  [Environment]::SetEnvironmentVariable('JX3_BIND', '127.0.0.1', 'Process')
+  [Environment]::SetEnvironmentVariable('JX3_PORT', [string]$Port, 'Process')
+  [Environment]::SetEnvironmentVariable('JX3_NO_BROWSER', '1', 'Process')
+  [Environment]::SetEnvironmentVariable('JX3_USERDATA_DIR', $resolvedUserdata, 'Process')
+  [Environment]::SetEnvironmentVariable('JX3_AGENT_CONFIG', $resolvedConfig, 'Process')
+  [Environment]::SetEnvironmentVariable($ApiKeyEnv, $credential, 'Process')
+  $server = Start-Process -FilePath $resolvedExe -WorkingDirectory $backendRoot `
+    -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+} finally {
+  foreach ($name in $names) {
+    [Environment]::SetEnvironmentVariable($name, $previous[$name], 'Process')
+  }
+  Remove-Variable credential -ErrorAction SilentlyContinue
+}
+
+$healthy = $false
+for ($attempt = 0; $attempt -lt 150; $attempt++) {
+  if ($server.HasExited) {
+    throw "Agent backend exited during startup with code $($server.ExitCode)."
+  }
+  try {
+    if (Invoke-RestMethod -Uri "http://127.0.0.1:$Port/health" -TimeoutSec 1) {
+      $healthy = $true
+      break
+    }
+  } catch {}
+  Start-Sleep -Milliseconds 100
+}
+if (-not $healthy) {
+  throw 'Agent backend did not become healthy.'
+}
+
+[pscustomobject]@{
+  pid = $server.Id
+  port = $Port
+  config = Split-Path -Leaf $resolvedConfig
+  credential_source = "User environment: $ApiKeyEnv"
+} | ConvertTo-Json -Compress

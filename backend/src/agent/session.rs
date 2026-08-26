@@ -29,6 +29,8 @@ pub const AGENT_SESSION_ERROR_SCHEMA_V1: &str = "agent-session-error/v1";
 const MAX_SESSION_ID_BYTES: usize = 64;
 const MAX_TITLE_CHARS: usize = 80;
 const MAX_SESSIONS_RETURNED: usize = 200;
+const MAX_CONTEXT_TURNS: usize = 2;
+const MAX_CONTEXT_FIELD_CHARS: usize = 256;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -179,6 +181,12 @@ pub struct AgentSessionDetailV1 {
     pub events: Vec<AgentSessionEventV1>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentSessionRunBinding {
+    pub session_id: String,
+    pub prior_context: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AgentSessionListResponseV1 {
@@ -239,13 +247,13 @@ impl AgentSessionStore {
         scenario_hash: &str,
         provider_profile: &str,
         model: &str,
-    ) -> Result<String, SessionStoreError> {
+    ) -> Result<AgentSessionRunBinding, SessionStoreError> {
         self.ensure_available()?;
         let _guard = self
             .write_gate
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let (session_id, parent_run_id) = match requested_session_id {
+        let (session_id, parent_run_id, prior_context) = match requested_session_id {
             Some(session_id) => {
                 validate_session_id(session_id)?;
                 let detail = self.load_session_unlocked(session_id)?;
@@ -255,11 +263,16 @@ impl AgentSessionStore {
                         "session contains corrupted events; start a new session instead",
                     ));
                 }
-                (session_id.to_string(), detail.summary.last_run_id)
+                let prior_context = build_prior_context(&detail.events);
+                (
+                    session_id.to_string(),
+                    detail.summary.last_run_id,
+                    prior_context,
+                )
             }
             None => {
                 let session_id = self.create_session_unlocked(question)?;
-                (session_id, None)
+                (session_id, None, None)
             }
         };
         self.append_event_unlocked(
@@ -276,7 +289,10 @@ impl AgentSessionStore {
                 model,
             ),
         )?;
-        Ok(session_id)
+        Ok(AgentSessionRunBinding {
+            session_id,
+            prior_context,
+        })
     }
 
     pub fn append_event(
@@ -599,6 +615,61 @@ fn summarize(
     }
 }
 
+/// Rebuild only the last visible reports, never the raw provider transcript or
+/// hidden reasoning. Current-run tools remain the sole source of numeric truth.
+fn build_prior_context(events: &[AgentSessionEventV1]) -> Option<String> {
+    let turns = events
+        .iter()
+        .rev()
+        .filter_map(|event| event.result.as_ref())
+        .filter_map(|result| {
+            let report = result.report.as_ref()?;
+            Some(serde_json::json!({
+                "question": clipped(&report.question),
+                "status": status_name(&result.status),
+                "summary": clipped(&report.content.summary),
+                "findings": report.content.findings.iter().take(4).map(|finding| serde_json::json!({
+                    "title": clipped(&finding.title),
+                    "explanation": clipped(&finding.explanation),
+                    "metrics": finding.metrics.iter().take(6).map(|metric| serde_json::json!({
+                        "label": clipped(&metric.label),
+                        "value": metric.value,
+                        "unit": clipped(&metric.unit),
+                    })).collect::<Vec<_>>(),
+                })).collect::<Vec<_>>(),
+                "recommendations": report.content.recommendations.iter().take(3).map(|recommendation| serde_json::json!({
+                    "title": clipped(&recommendation.title),
+                    "rationale": clipped(&recommendation.rationale),
+                })).collect::<Vec<_>>(),
+                "limitations": report.content.limitations.iter().take(3).map(|value| clipped(value)).collect::<Vec<_>>(),
+                "refusal_reason": report.content.refusal_reason.as_deref().map(clipped),
+            }))
+        })
+        .take(MAX_CONTEXT_TURNS)
+        .collect::<Vec<_>>();
+    if turns.is_empty() {
+        return None;
+    }
+    let mut chronological = turns;
+    chronological.reverse();
+    serde_json::to_string(&serde_json::json!({
+        "schema_version": "agent-session-context/v1",
+        "turns": chronological,
+    }))
+    .ok()
+}
+
+fn clipped(value: &str) -> String {
+    let mut output = value
+        .chars()
+        .take(MAX_CONTEXT_FIELD_CHARS)
+        .collect::<String>();
+    if value.chars().count() > MAX_CONTEXT_FIELD_CHARS {
+        output.push('…');
+    }
+    output
+}
+
 fn status_name(status: &AgentRunStatus) -> &'static str {
     match status {
         AgentRunStatus::Completed => "completed",
@@ -835,6 +906,49 @@ mod tests {
         event
     }
 
+    fn visible_result_event(run_id: &str, question: &str, summary: &str) -> AgentSessionEventV1 {
+        let result: AgentRunResultV1 = serde_json::from_value(serde_json::json!({
+            "schema_version": "agent-run/v1",
+            "run_id": run_id,
+            "scenario_hash": "scenario-context",
+            "prompt_version": "v1",
+            "prompt_sha256": "prompt-hash",
+            "provider_profile": "offline",
+            "model": "fixture-v1",
+            "status": "completed",
+            "accounting": {
+                "model_turns": 1, "tool_calls": 1, "simulations": 1,
+                "input_tokens": 0, "output_tokens": 0, "total_tokens": 0,
+                "duration_ms": 1
+            },
+            "report": {
+                "schema_version": "agent-report/v1",
+                "question": question,
+                "scenario_hash": "scenario-context",
+                "prompt_version": "v1",
+                "prompt_sha256": "prompt-hash",
+                "provider_profile": "offline",
+                "model": "fixture-v1",
+                "content": {
+                    "schema_version": "agent-report-content/v1",
+                    "summary": summary,
+                    "findings": [], "recommendations": [], "limitations": [],
+                    "refusal_reason": null
+                },
+                "evidence_ids": [],
+                "accounting": {
+                    "model_turns": 1, "tool_calls": 1, "simulations": 1,
+                    "input_tokens": 0, "output_tokens": 0, "total_tokens": 0,
+                    "duration_ms": 1
+                },
+                "termination": "completed"
+            },
+            "trace": []
+        }))
+        .unwrap();
+        AgentSessionEventV1::run_result(&result)
+    }
+
     #[test]
     fn session_events_are_append_only_and_listable() {
         let root = temp_root("append");
@@ -848,7 +962,8 @@ mod tests {
                 "offline",
                 "fixture-v1",
             )
-            .unwrap();
+            .unwrap()
+            .session_id;
         store
             .append_event(&session_id, finish_event("run-one"))
             .unwrap();
@@ -880,7 +995,8 @@ mod tests {
                     "offline",
                     "fixture-v1",
                 )
-                .unwrap();
+                .unwrap()
+                .session_id;
             fs::write(
                 store
                     .root
@@ -901,6 +1017,46 @@ mod tests {
     }
 
     #[test]
+    fn resumed_run_receives_bounded_visible_context_without_provider_transcript() {
+        let root = temp_root("context");
+        let store = AgentSessionStore::open(root.clone()).unwrap();
+        let first = store
+            .create_or_resume_run(
+                None,
+                "run-context-one",
+                "先分析基线",
+                "scenario-context",
+                "offline",
+                "fixture-v1",
+            )
+            .unwrap();
+        assert!(first.prior_context.is_none());
+        store
+            .append_event(
+                &first.session_id,
+                visible_result_event("run-context-one", "先分析基线", "基线结论可见"),
+            )
+            .unwrap();
+
+        let second = store
+            .create_or_resume_run(
+                Some(&first.session_id),
+                "run-context-two",
+                "刚才的结论是什么？",
+                "scenario-context",
+                "offline",
+                "fixture-v1",
+            )
+            .unwrap();
+        let context = second.prior_context.unwrap();
+        assert!(context.contains("先分析基线"));
+        assert!(context.contains("基线结论可见"));
+        assert!(!context.contains("run_trace"));
+        assert!(context.len() <= 16 * 1024);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn corrupt_event_is_reported_without_overwrite_and_secrets_are_redacted() {
         let root = temp_root("corrupt");
         let store = AgentSessionStore::open(root.clone()).unwrap();
@@ -913,7 +1069,8 @@ mod tests {
                 "offline",
                 "fixture-v1",
             )
-            .unwrap();
+            .unwrap()
+            .session_id;
         let events_dir = store.root.join(&session_id).join("events");
         fs::write(events_dir.join("000003.json"), b"not-json").unwrap();
         let fake_secret = format!("{}{}", "sk-", "abcdefghijklmnopqrstu");

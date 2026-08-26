@@ -15,6 +15,14 @@ use std::time::Duration;
 const MAX_PROVIDER_RESPONSE_BYTES: usize = 1024 * 1024;
 const PROVIDER_TIMEOUT_SECS: u64 = 30;
 
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatCompatibility {
+    #[default]
+    Openai,
+    Deepseek,
+}
+
 struct OpenAiTransport {
     profile_id: String,
     model: String,
@@ -119,9 +127,6 @@ impl OpenAiTransport {
             .map_err(|error| ProviderError::network(&error))?;
 
         let status = response.status();
-        if !status.is_success() {
-            return Err(ProviderError::upstream_status(status.as_u16()));
-        }
         if response
             .content_length()
             .is_some_and(|length| length > MAX_PROVIDER_RESPONSE_BYTES as u64)
@@ -134,6 +139,12 @@ impl OpenAiTransport {
             .map_err(|error| ProviderError::network(&error))?;
         if bytes.len() > MAX_PROVIDER_RESPONSE_BYTES {
             return Err(ProviderError::response_too_large());
+        }
+        if !status.is_success() {
+            return Err(ProviderError::classified_upstream_response(
+                status.as_u16(),
+                &bytes,
+            ));
         }
         Ok(bytes.to_vec())
     }
@@ -190,24 +201,43 @@ impl LlmProvider for OpenAiResponsesProvider {
         let response = parse_responses_response(&bytes)?;
         response
             .validate_against(request)
-            .map_err(|_| ProviderError::invalid_response())?;
+            .map_err(|error| ProviderError::invalid_response_protocol(error.code, error.message))?;
         Ok(response)
     }
 }
 
 pub struct OpenAiChatProvider {
     transport: OpenAiTransport,
+    compatibility: ChatCompatibility,
 }
 
 impl OpenAiChatProvider {
+    #[cfg(test)]
     pub fn new(
         profile_id: String,
         model: String,
         base_url: String,
         api_key: String,
     ) -> Result<Self, ProviderError> {
+        Self::new_with_compatibility(
+            profile_id,
+            model,
+            base_url,
+            api_key,
+            ChatCompatibility::Openai,
+        )
+    }
+
+    pub fn new_with_compatibility(
+        profile_id: String,
+        model: String,
+        base_url: String,
+        api_key: String,
+        compatibility: ChatCompatibility,
+    ) -> Result<Self, ProviderError> {
         Ok(Self {
             transport: OpenAiTransport::new(profile_id, model, base_url, api_key)?,
+            compatibility,
         })
     }
 }
@@ -226,12 +256,13 @@ impl LlmProvider for OpenAiChatProvider {
         request
             .validate()
             .map_err(|_| ProviderError::invalid_request())?;
-        let body = chat_request(&self.transport.model, request)?;
+        let body =
+            chat_request_with_compatibility(&self.transport.model, request, self.compatibility)?;
         let bytes = self.transport.post_json("chat/completions", &body).await?;
         let response = parse_chat_response(&bytes)?;
         response
             .validate_against(request)
-            .map_err(|_| ProviderError::invalid_response())?;
+            .map_err(|error| ProviderError::invalid_response_protocol(error.code, error.message))?;
         Ok(response)
     }
 }
@@ -306,7 +337,16 @@ fn responses_request(model: &str, request: &ModelRequest) -> Result<Value, Provi
     Ok(body)
 }
 
+#[cfg(test)]
 fn chat_request(model: &str, request: &ModelRequest) -> Result<Value, ProviderError> {
+    chat_request_with_compatibility(model, request, ChatCompatibility::Openai)
+}
+
+fn chat_request_with_compatibility(
+    model: &str,
+    request: &ModelRequest,
+    compatibility: ChatCompatibility,
+) -> Result<Value, ProviderError> {
     let mut messages = vec![json!({
         "role": "system",
         "content": request.instructions,
@@ -350,14 +390,17 @@ fn chat_request(model: &str, request: &ModelRequest) -> Result<Value, ProviderEr
         .tools
         .iter()
         .map(|tool| {
+            let mut function = json!({
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": tool.parameters,
+            });
+            if compatibility == ChatCompatibility::Openai {
+                function["strict"] = json!(true);
+            }
             json!({
                 "type": "function",
-                "function": {
-                    "name": tool.name,
-                    "description": tool.description,
-                    "parameters": tool.parameters,
-                    "strict": true,
-                },
+                "function": function,
             })
         })
         .collect();
@@ -366,18 +409,34 @@ fn chat_request(model: &str, request: &ModelRequest) -> Result<Value, ProviderEr
         "messages": messages,
         "tools": tools,
         "tool_choice": "auto",
-        "parallel_tool_calls": false,
         "max_tokens": request.max_output_tokens,
     });
+    match compatibility {
+        ChatCompatibility::Openai => body["parallel_tool_calls"] = json!(false),
+        ChatCompatibility::Deepseek => {
+            body["thinking"] = json!({"type": "disabled"});
+        }
+    }
     if let Some(format) = &request.response_format {
-        body["response_format"] = json!({
-            "type": "json_schema",
-            "json_schema": {
-                "name": format.name,
-                "schema": format.schema,
-                "strict": true
+        body["response_format"] = match compatibility {
+            ChatCompatibility::Openai => json!({
+                "type": "json_schema",
+                "json_schema": {
+                    "name": format.name,
+                    "schema": format.schema,
+                    "strict": true
+                }
+            }),
+            ChatCompatibility::Deepseek if request.tools.is_empty() => {
+                json!({"type": "json_object"})
             }
-        });
+            ChatCompatibility::Deepseek => Value::Null,
+        };
+        if body["response_format"].is_null() {
+            body.as_object_mut()
+                .expect("Chat request body is an object")
+                .remove("response_format");
+        }
     }
     Ok(body)
 }
@@ -552,14 +611,22 @@ struct ChatUsage {
 }
 
 fn parse_chat_response(bytes: &[u8]) -> Result<ModelResponse, ProviderError> {
-    let payload: ChatPayload =
-        serde_json::from_slice(bytes).map_err(|_| ProviderError::invalid_response())?;
-    let choice = payload
-        .choices
-        .into_iter()
-        .next()
-        .ok_or_else(ProviderError::invalid_response)?;
-    let mut text = choice.message.content.filter(|value| !value.is_empty());
+    let payload: ChatPayload = serde_json::from_slice(bytes).map_err(|_| {
+        ProviderError::invalid_response_protocol(
+            "provider_response_json_invalid",
+            "provider response was not valid Chat Completions JSON",
+        )
+    })?;
+    let choice = payload.choices.into_iter().next().ok_or_else(|| {
+        ProviderError::invalid_response_protocol(
+            "provider_response_empty",
+            "provider response did not contain a choice",
+        )
+    })?;
+    let mut text = choice
+        .message
+        .content
+        .filter(|value| !value.trim().is_empty());
     let refused = choice.message.refusal.is_some();
     if text.is_none() {
         text = choice.message.refusal.filter(|value| !value.is_empty());
@@ -571,7 +638,10 @@ fn parse_chat_response(bytes: &[u8]) -> Result<ModelResponse, ProviderError> {
         .map(|call| parse_tool_call(call.id, call.function.name, &call.function.arguments))
         .collect::<Result<_, _>>()?;
     if text.is_none() && tool_calls.is_empty() {
-        return Err(ProviderError::invalid_response());
+        return Err(ProviderError::invalid_response_protocol(
+            "provider_response_empty",
+            "provider response contained neither text nor tool calls",
+        ));
     }
     let finish_reason = if !tool_calls.is_empty() {
         FinishReason::ToolCalls
@@ -603,12 +673,22 @@ fn parse_tool_call(
     arguments: &str,
 ) -> Result<ProviderToolCall, ProviderError> {
     if !valid_identifier(&call_id) || !valid_identifier(&name) {
-        return Err(ProviderError::invalid_response());
+        return Err(ProviderError::invalid_response_protocol(
+            "provider_tool_call_invalid",
+            "provider returned an invalid tool call id or name",
+        ));
     }
-    let arguments: Value =
-        serde_json::from_str(arguments).map_err(|_| ProviderError::invalid_response())?;
+    let arguments: Value = serde_json::from_str(arguments).map_err(|_| {
+        ProviderError::invalid_response_protocol(
+            "provider_tool_arguments_invalid",
+            "provider returned invalid JSON tool arguments",
+        )
+    })?;
     if !arguments.is_object() {
-        return Err(ProviderError::invalid_response());
+        return Err(ProviderError::invalid_response_protocol(
+            "provider_tool_arguments_invalid",
+            "provider tool arguments were not a JSON object",
+        ));
     }
     Ok(ProviderToolCall {
         call_id,
@@ -672,6 +752,36 @@ mod tests {
             chat["response_format"]["json_schema"]["name"],
             "agent_report_v1"
         );
+    }
+
+    #[test]
+    fn deepseek_chat_mode_disables_thinking_and_uses_supported_json_shape() {
+        let mut request = request();
+        request.response_format = Some(StructuredOutputDefinition {
+            name: "agent_report_v1".to_string(),
+            schema: json!({"type": "object"}),
+        });
+
+        let body = chat_request_with_compatibility(
+            "deepseek-v4-pro",
+            &request,
+            ChatCompatibility::Deepseek,
+        )
+        .unwrap();
+
+        assert_eq!(body["thinking"]["type"], "disabled");
+        assert!(body.get("response_format").is_none());
+        assert!(body.get("parallel_tool_calls").is_none());
+        assert!(body["tools"][0]["function"].get("strict").is_none());
+
+        request.tools.clear();
+        let repair_body = chat_request_with_compatibility(
+            "deepseek-v4-pro",
+            &request,
+            ChatCompatibility::Deepseek,
+        )
+        .unwrap();
+        assert_eq!(repair_body["response_format"]["type"], "json_object");
     }
 
     async fn mock_server(status: u16, body: &'static str) -> (String, oneshot::Receiver<String>) {
@@ -871,7 +981,7 @@ mod tests {
         .unwrap();
 
         let result =
-            tokio::time::timeout(Duration::from_millis(10), provider.complete(&request())).await;
+            tokio::time::timeout(Duration::from_millis(50), provider.complete(&request())).await;
         assert!(result.is_err());
         assert!(captured.await.unwrap().starts_with("POST /v1/responses"));
     }
@@ -896,7 +1006,7 @@ mod tests {
 
         assert_eq!(
             provider.complete(&request()).await.unwrap_err().code,
-            "provider_response_invalid"
+            "duplicate_provider_call_id"
         );
     }
 
@@ -908,7 +1018,7 @@ mod tests {
         }"#;
         assert_eq!(
             parse_responses_response(body).unwrap_err().code,
-            "provider_response_invalid"
+            "provider_tool_arguments_invalid"
         );
     }
 }

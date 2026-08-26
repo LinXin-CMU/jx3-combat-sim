@@ -1,5 +1,5 @@
 use super::{
-    openai::{OpenAiChatProvider, OpenAiResponsesProvider},
+    openai::{ChatCompatibility, OpenAiChatProvider, OpenAiResponsesProvider},
     FakeProvider, LlmProvider, ProviderError,
 };
 use serde::{Deserialize, Serialize};
@@ -29,6 +29,8 @@ pub struct ProviderProfile {
     pub api_key_env: Option<String>,
     #[serde(default = "enabled_by_default")]
     pub enabled: bool,
+    #[serde(default)]
+    pub chat_compatibility: Option<ChatCompatibility>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -68,6 +70,7 @@ impl ProviderCatalog {
                 base_url: None,
                 api_key_env: None,
                 enabled: true,
+                chat_compatibility: None,
             }],
         }
     }
@@ -175,11 +178,12 @@ impl ProviderCatalog {
             }
             ProviderAdapterKind::OpenaiCompatibleChat => {
                 let (base_url, api_key) = network_credentials(profile)?;
-                Ok(Box::new(OpenAiChatProvider::new(
+                Ok(Box::new(OpenAiChatProvider::new_with_compatibility(
                     profile.id.clone(),
                     profile.model.clone(),
                     base_url,
                     api_key,
+                    profile.chat_compatibility.unwrap_or_default(),
                 )?))
             }
         }
@@ -246,14 +250,32 @@ fn validate_profiles(profiles: &[ProviderProfile]) -> Result<(), ProviderError> 
         }
         match profile.adapter {
             ProviderAdapterKind::Fake => {
-                if profile.base_url.is_some() || profile.api_key_env.is_some() {
+                if profile.base_url.is_some()
+                    || profile.api_key_env.is_some()
+                    || profile.chat_compatibility.is_some()
+                {
                     return Err(ProviderError::configuration(
                         "fake_provider_has_credentials",
                         "fake provider must not define a URL or credential",
                     ));
                 }
             }
-            _ => {
+            ProviderAdapterKind::OpenaiResponses => {
+                validate_base_url(profile.base_url.as_deref())?;
+                if !profile.api_key_env.as_deref().is_some_and(valid_env_name) {
+                    return Err(ProviderError::configuration(
+                        "provider_key_env_invalid",
+                        "provider key environment name is invalid",
+                    ));
+                }
+                if profile.chat_compatibility.is_some() {
+                    return Err(ProviderError::configuration(
+                        "provider_chat_compatibility_invalid",
+                        "chat compatibility is only valid for compatible Chat providers",
+                    ));
+                }
+            }
+            ProviderAdapterKind::OpenaiCompatibleChat => {
                 validate_base_url(profile.base_url.as_deref())?;
                 if !profile.api_key_env.as_deref().is_some_and(valid_env_name) {
                     return Err(ProviderError::configuration(
@@ -386,7 +408,7 @@ api_key_env = "EXAMPLE_OPENAI_KEY"
         let catalog = ProviderCatalog::from_toml(source).unwrap();
         let list = catalog.safe_list_with(|_| None);
 
-        assert_eq!(list.profiles.len(), 3);
+        assert_eq!(list.profiles.len(), 4);
         assert!(list.profiles[0].available);
         assert!(list.profiles[1..].iter().all(|profile| !profile.available));
     }

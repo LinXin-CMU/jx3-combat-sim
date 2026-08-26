@@ -26,8 +26,8 @@ pub use config::{
 };
 pub use fake::FakeProvider;
 pub use protocol::{
-    FinishReason, ModelMessage, ModelRequest, ModelResponse, ProviderToolCall, TokenUsage,
-    StructuredOutputDefinition, ToolDefinition, PROVIDER_PROTOCOL_V1,
+    FinishReason, ModelMessage, ModelRequest, ModelResponse, ProviderToolCall,
+    StructuredOutputDefinition, TokenUsage, ToolDefinition, PROVIDER_PROTOCOL_V1,
 };
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -77,12 +77,74 @@ impl ProviderError {
     }
 
     pub fn upstream_status(status: u16) -> Self {
+        let code = match status {
+            400 => "provider_http_400",
+            401 => "provider_http_401",
+            403 => "provider_http_403",
+            404 => "provider_http_404",
+            408 => "provider_http_408",
+            409 => "provider_http_409",
+            422 => "provider_http_422",
+            429 => "provider_http_429",
+            500..=599 => "provider_http_5xx",
+            _ => "provider_http_error",
+        };
         Self {
-            code: "provider_http_error",
+            code,
             message: "provider returned an unsuccessful status",
             retryable: status == 408 || status == 429 || status >= 500,
             upstream_status: Some(status),
         }
+    }
+
+    pub fn classified_upstream_response(status: u16, body: &[u8]) -> Self {
+        let normalized = String::from_utf8_lossy(body).to_ascii_lowercase();
+        if status == 400 {
+            let classified = [
+                (
+                    "reasoning_content",
+                    "provider_reasoning_context_required",
+                    "provider requires transient reasoning context for tool continuation",
+                ),
+                (
+                    "tool_call_id",
+                    "provider_tool_transcript_invalid",
+                    "provider rejected the normalized tool transcript",
+                ),
+                (
+                    "tool call",
+                    "provider_tool_transcript_invalid",
+                    "provider rejected the normalized tool transcript",
+                ),
+                (
+                    "response_format",
+                    "provider_response_format_unsupported",
+                    "provider rejected the structured response format",
+                ),
+                (
+                    "context length",
+                    "provider_context_limit",
+                    "provider context limit was exceeded",
+                ),
+                (
+                    "maximum context",
+                    "provider_context_limit",
+                    "provider context limit was exceeded",
+                ),
+            ];
+            if let Some((_, code, message)) = classified
+                .into_iter()
+                .find(|(needle, _, _)| normalized.contains(needle))
+            {
+                return Self {
+                    code,
+                    message,
+                    retryable: false,
+                    upstream_status: Some(status),
+                };
+            }
+        }
+        Self::upstream_status(status)
     }
 
     pub fn response_too_large() -> Self {
@@ -98,6 +160,15 @@ impl ProviderError {
         Self {
             code: "provider_response_invalid",
             message: "provider returned an invalid response",
+            retryable: false,
+            upstream_status: None,
+        }
+    }
+
+    pub fn invalid_response_protocol(code: &'static str, message: &'static str) -> Self {
+        Self {
+            code,
+            message,
             retryable: false,
             upstream_status: None,
         }
@@ -136,9 +207,22 @@ mod tests {
     fn provider_errors_are_fixed_and_serializable() {
         let error = ProviderError::upstream_status(429);
         let json = serde_json::to_string(&error).unwrap();
-        assert_eq!(error.code, "provider_http_error");
+        assert_eq!(error.code, "provider_http_429");
         assert!(error.retryable);
         assert!(json.contains("429"));
         assert!(!json.contains("Authorization"));
+    }
+
+    #[test]
+    fn upstream_body_is_only_used_for_fixed_classification() {
+        let error = ProviderError::classified_upstream_response(
+            400,
+            br#"{"error":{"message":"Missing reasoning_content; private detail"}}"#,
+        );
+        let json = serde_json::to_string(&error).unwrap();
+
+        assert_eq!(error.code, "provider_reasoning_context_required");
+        assert!(!json.contains("private detail"));
+        assert!(!json.contains("Missing reasoning_content"));
     }
 }
