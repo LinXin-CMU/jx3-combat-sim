@@ -205,6 +205,7 @@
       let preferred = '';
       try { preferred = localStorage.getItem('agent_provider_profile') || ''; } catch (_) {}
       const available = profiles.find(profile => profile.id === preferred && profile.available)
+        || profiles.find(profile => profile.available && profile.id !== 'offline')
         || profiles.find(profile => profile.available);
       [els.provider, els.dockProvider].filter(Boolean).forEach(select => {
         clear(select);
