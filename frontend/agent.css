@@ -259,13 +259,23 @@ body.agent-fullheight #page-agent.active {
   border-radius: var(--radius);
   box-shadow: 0 16px 48px rgba(0,0,0,.32);
   overflow: hidden;
+  visibility: hidden;
   opacity: 0;
   pointer-events: none;
-  transform: translateX(calc(100% + 28px));
-  transition: transform .22s ease, opacity .18s ease;
+  transform: translate3d(calc(100% + 32px),0,0) scale(.985);
+  transform-origin: right center;
+  transition: transform .32s cubic-bezier(.22,1,.36,1), opacity .2s ease, visibility 0s linear .32s;
+  will-change: transform, opacity;
 }
-.sim-ai-dock.open { opacity: 1; pointer-events: auto; transform: translateX(0); }
+.sim-ai-dock.open {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate3d(0,0,0) scale(1);
+  transition-delay: 0s;
+}
 .sim-ai-dock-head {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -274,9 +284,26 @@ body.agent-fullheight #page-agent.active {
   padding: 8px 10px 8px 12px;
   border-bottom: 1px solid var(--agent-line);
   background: var(--surface);
+  overflow: hidden;
+}
+.sim-ai-dock-head::after {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 1px;
+  content: "";
+  opacity: 0;
+  background: linear-gradient(90deg,transparent,var(--gold),transparent);
+  transform: translateX(-100%);
+}
+.sim-ai-dock.is-loading .sim-ai-dock-head::after {
+  opacity: .9;
+  animation: sim-ai-loading-sweep 1.45s ease-in-out infinite;
 }
 .sim-ai-dock-brand { display: flex; flex: 1 1 auto; align-items: center; gap: 10px; min-width: 0; }
 .sim-ai-mark { display: grid; place-items: center; width: 28px; height: 28px; flex: 0 0 auto; border: 1px solid var(--gold-dim); border-radius: 4px; color: var(--gold); background: var(--gold-tint); }
+.sim-ai-dock.is-loading .sim-ai-mark { animation: sim-ai-mark-breathe 1.8s ease-in-out infinite; }
 .sim-ai-dock-brand div { display: flex; min-width: 0; flex-direction: column; }
 .sim-ai-dock-brand strong { font-size: 14px; font-weight: 600; }
 .sim-ai-dock-brand span:last-child { margin-top: 1px; overflow: hidden; color: var(--agent-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
@@ -296,6 +323,7 @@ body.agent-fullheight #page-agent.active {
 }
 .sim-ai-context-dot { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%; background: var(--warning); }
 .sim-ai-context.ready .sim-ai-context-dot { background: var(--green); box-shadow: 0 0 8px rgba(var(--green-rgb),.42); }
+.sim-ai-dock.is-loading .sim-ai-context.ready .sim-ai-context-dot { animation: sim-ai-context-pulse 1.35s ease-in-out infinite; }
 .sim-ai-context span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .sim-ai-quick { display: flex; gap: 6px; padding: 8px 10px; overflow-x: auto; border-bottom: 1px solid var(--agent-line); scrollbar-width: none; }
@@ -307,6 +335,10 @@ body.agent-fullheight #page-agent.active {
 .sim-ai-welcome span { color: var(--agent-ink); font-size: 13px; }
 .sim-ai-welcome small { max-width: 280px; margin-top: 5px; font-size: 11px; }
 .sim-ai-bubble { max-width: 88%; margin-bottom: 12px; }
+.sim-ai-chat > .sim-ai-bubble,
+.sim-ai-chat > .sim-ai-progress,
+.sim-ai-chat > .sim-ai-result,
+.sim-ai-chat > .ai-thinking { animation: sim-ai-content-in .28s cubic-bezier(.22,1,.36,1) both; }
 .sim-ai-bubble.user { margin-left: auto; }
 .sim-ai-bubble.agent { margin-right: auto; }
 .sim-ai-bubble-label { margin: 0 4px 4px; color: var(--agent-muted); font-size: 11px; }
@@ -316,7 +348,7 @@ body.agent-fullheight #page-agent.active {
 .sim-ai-progress { margin: 0 0 12px; padding: 9px 10px; border: 1px dashed var(--agent-line); border-radius: 6px; color: var(--agent-muted); font-size: 11px; }
 .sim-ai-progress-head { display: flex; justify-content: space-between; gap: 8px; }
 .sim-ai-progress-steps { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
-.sim-ai-progress-step { padding: 3px 6px; border-radius: 3px; color: var(--gold); background: var(--gold-tint); }
+.sim-ai-progress-step { padding: 3px 6px; border-radius: 3px; color: var(--gold); background: var(--gold-tint); animation: sim-ai-chip-in .22s cubic-bezier(.22,1,.36,1) both; }
 .sim-ai-result { margin-bottom: 13px; border: 1px solid var(--gold-dim); border-radius: 6px; overflow: hidden; background: var(--agent-panel-2); }
 .sim-ai-result.is-limited { border-color: var(--warning); }
 .sim-ai-result-head { display: flex; justify-content: space-between; gap: 8px; padding: 9px 11px; border-bottom: 1px solid var(--agent-line); color: var(--gold); font-size: 12px; }
@@ -326,7 +358,10 @@ body.agent-fullheight #page-agent.active {
 .sim-ai-result-finding b { display: block; margin-bottom: 3px; font-size: 12px; }
 .sim-ai-result-finding p { margin: 0; color: var(--agent-muted); font-size: 11px; line-height: 1.55; }
 .sim-ai-result-metrics { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px; padding: 0 11px 10px; }
-.sim-ai-result-metric { min-width: 0; padding: 7px 8px; border: 1px solid var(--agent-line); border-radius: 6px; background: var(--bg); }
+.sim-ai-result-metric { min-width: 0; padding: 7px 8px; border: 1px solid var(--agent-line); border-radius: 6px; background: var(--bg); animation: sim-ai-metric-in .26s cubic-bezier(.22,1,.36,1) both; }
+.sim-ai-result-metric:nth-child(2) { animation-delay: .04s; }
+.sim-ai-result-metric:nth-child(3) { animation-delay: .08s; }
+.sim-ai-result-metric:nth-child(4) { animation-delay: .12s; }
 .sim-ai-result-metric b { display: block; overflow: hidden; color: var(--warning); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .sim-ai-result-metric span { display: block; margin-top: 2px; overflow: hidden; color: var(--agent-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .sim-ai-error { color: var(--red); }
@@ -343,14 +378,70 @@ body.agent-fullheight #page-agent.active {
 .sim-ai-compose-actions .sim-btn { padding: 4px 10px; font-size: 11px; }
 .sim-ai-compose-actions .sim-btn:disabled { opacity: .45; cursor: default; }
 
+.sim-ai-dock.open > .sim-ai-dock-head,
+.sim-ai-dock.open > .sim-ai-context,
+.sim-ai-dock.open > .sim-ai-quick,
+.sim-ai-dock.open > .sim-ai-chat,
+.sim-ai-dock.open > .sim-ai-compose {
+  animation: sim-ai-section-in .3s cubic-bezier(.22,1,.36,1) both;
+}
+.sim-ai-dock.open > .sim-ai-context { animation-delay: .025s; }
+.sim-ai-dock.open > .sim-ai-quick { animation-delay: .05s; }
+.sim-ai-dock.open > .sim-ai-chat { animation-delay: .075s; }
+.sim-ai-dock.open > .sim-ai-compose { animation-delay: .1s; }
+
+@keyframes sim-ai-section-in {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes sim-ai-content-in {
+  from { opacity: 0; transform: translateY(7px) scale(.992); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes sim-ai-chip-in {
+  from { opacity: 0; transform: translateY(3px) scale(.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes sim-ai-metric-in {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes sim-ai-loading-sweep {
+  0% { transform: translateX(-100%); }
+  55%, 100% { transform: translateX(100%); }
+}
+@keyframes sim-ai-mark-breathe {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(var(--gold-rgb),0); transform: scale(1); }
+  50% { box-shadow: 0 0 0 4px rgba(var(--gold-rgb),.12); transform: scale(1.04); }
+}
+@keyframes sim-ai-context-pulse {
+  0%, 100% { opacity: .68; box-shadow: 0 0 4px rgba(var(--green-rgb),.25); }
+  50% { opacity: 1; box-shadow: 0 0 10px rgba(var(--green-rgb),.58); }
+}
+
 @media (max-width: 900px) {
   .sim-ai-fab { right: 12px; bottom: 12px; min-width: 42px; width: 42px; padding: 0 8px; }
   .sim-ai-fab-label { display: none; }
-  .sim-ai-dock { top: auto; right: 8px; bottom: 8px; left: 8px; width: auto; height: min(80dvh, 680px); transform: translateY(calc(100% + 18px)); }
-  .sim-ai-dock.open { transform: translateY(0); }
+  .sim-ai-dock { top: auto; right: 8px; bottom: 8px; left: 8px; width: auto; height: min(80dvh, 680px); transform: translate3d(0,calc(100% + 18px),0) scale(.985); transform-origin: center bottom; }
+  .sim-ai-dock.open { transform: translate3d(0,0,0) scale(1); }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .sim-ai-fab, .sim-ai-dock { transition: none; }
-  .ai-thinking-dots i { animation: none; opacity: .7; }
+  .sim-ai-dock.open > .sim-ai-dock-head,
+  .sim-ai-dock.open > .sim-ai-context,
+  .sim-ai-dock.open > .sim-ai-quick,
+  .sim-ai-dock.open > .sim-ai-chat,
+  .sim-ai-dock.open > .sim-ai-compose,
+  .sim-ai-chat > .sim-ai-bubble,
+  .sim-ai-chat > .sim-ai-progress,
+  .sim-ai-chat > .sim-ai-result,
+  .sim-ai-chat > .ai-thinking,
+  .sim-ai-progress-step,
+  .sim-ai-result-metric,
+  .sim-ai-dock.is-loading .sim-ai-mark,
+  .sim-ai-dock.is-loading .sim-ai-context.ready .sim-ai-context-dot,
+  .ai-thinking-dots i { animation: none; }
+  .sim-ai-dock-head::after { display: none; }
+  .ai-thinking-dots i { opacity: .7; }
 }

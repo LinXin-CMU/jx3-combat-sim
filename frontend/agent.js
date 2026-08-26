@@ -100,6 +100,8 @@
     els.cancel.hidden = !busy;
     els.provider.disabled = busy;
     if (els.dockSend) {
+      els.dock.classList.toggle('is-loading', busy && activeSurface === 'dock');
+      els.dock.setAttribute('aria-busy', String(busy && activeSurface === 'dock'));
       els.dockSend.disabled = busy;
       els.dockSend.hidden = busy;
       els.dockStop.hidden = !busy;
