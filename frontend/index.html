@@ -6,7 +6,7 @@
   <title>剑网3 苍云PVE循环模拟器</title>
   <link rel="icon" href="favicon.ico" type="image/x-icon">
   <link rel="stylesheet" href="style.css">
-  <link rel="stylesheet" href="agent.css?v=20260826-knowledge1">
+  <link rel="stylesheet" href="agent.css?v=20260827-history1">
 </head>
 <body>
   <div class="container">
@@ -1995,7 +1995,7 @@
         </div>
       </section>
 
-      <!-- 循环页内的轻量 AI 助手；完整历史与证据仍可进入独立 Agent 页面查看 -->
+      <!-- 循环页内的轻量 AI 助手；可恢复历史，完整证据编排也可进入独立 Agent 页面。 -->
       <aside class="sim-ai-dock" id="sim_ai_dock" aria-hidden="true" aria-label="循环分析 AI 助手">
         <header class="sim-ai-dock-head">
           <div class="sim-ai-dock-brand">
@@ -2006,11 +2006,20 @@
             </div>
           </div>
           <div class="sim-ai-head-actions">
+            <button type="button" class="sim-btn sim-btn-icon" id="sim_ai_history" title="历史会话" aria-label="历史会话" aria-expanded="false">◴</button>
             <button type="button" class="sim-btn sim-btn-icon" id="sim_ai_new" title="新建对话" aria-label="新建对话">＋</button>
             <button type="button" class="sim-btn sim-btn-icon" id="sim_ai_expand" title="进入完整 AI 分析界面" aria-label="进入完整 AI 分析界面">↗</button>
             <button type="button" class="sim-btn sim-btn-icon" id="sim_ai_close" title="收起助手" aria-label="收起助手">×</button>
           </div>
         </header>
+
+        <section class="sim-ai-history" id="sim_ai_history_panel" aria-hidden="true" aria-label="历史会话列表">
+          <div class="sim-ai-history-head">
+            <strong>历史会话</strong>
+            <span id="sim_ai_history_count">0 条</span>
+          </div>
+          <div class="sim-ai-history-list" id="sim_ai_history_list"></div>
+        </section>
 
         <div class="sim-ai-context" id="sim_ai_context">
           <span class="sim-ai-context-dot"></span>
@@ -2810,7 +2819,7 @@
       s.onload = next; s.onerror = next;
       document.body.appendChild(s);
     }
-    var SCRIPTS = ['state.js', 'app.js', 'agent.js?v=20260826-provider-errors1'];
+    var SCRIPTS = ['state.js', 'app.js', 'agent.js?v=20260827-history1'];
     var go = function () { loadSeq(SCRIPTS); };
     try {
       fetch('/api/settings', { cache: 'no-store' })

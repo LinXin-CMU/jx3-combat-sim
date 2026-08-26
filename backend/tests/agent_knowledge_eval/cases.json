@@ -56,6 +56,28 @@
       "allowed_seasons": ["暗影千机（2026）"]
     },
     {
+      "id": "current_flagship_rotation_quality",
+      "game_version": "anying",
+      "scope": "current_only",
+      "query": "暗影千机旗舰分山血怒覆盖高质量绝刀循环",
+      "category": "白皮书",
+      "expected_titles_any": ["分山劲白皮书"],
+      "expected_version_match": "current_exact",
+      "expected_fact_eligible": true,
+      "allowed_seasons": ["暗影千机（2026）"]
+    },
+    {
+      "id": "current_wujie_knowledge_only",
+      "game_version": "anying",
+      "scope": "current_only",
+      "query": "暗影千机无界分山劲悟循环",
+      "category": "白皮书",
+      "expected_titles_any": ["分山劲·悟白皮书"],
+      "expected_version_match": "current_exact",
+      "expected_fact_eligible": true,
+      "allowed_seasons": ["暗影千机（2026）"]
+    },
+    {
       "id": "current_macro",
       "game_version": "anying",
       "scope": "current_only",

@@ -22,6 +22,10 @@
     dock: document.getElementById('sim_ai_dock'),
     dockFab: document.getElementById('sim_ai_fab'),
     dockClose: document.getElementById('sim_ai_close'),
+    dockHistory: document.getElementById('sim_ai_history'),
+    dockHistoryPanel: document.getElementById('sim_ai_history_panel'),
+    dockHistoryList: document.getElementById('sim_ai_history_list'),
+    dockHistoryCount: document.getElementById('sim_ai_history_count'),
     dockExpand: document.getElementById('sim_ai_expand'),
     dockNew: document.getElementById('sim_ai_new'),
     dockChat: document.getElementById('sim_ai_chat'),
@@ -48,6 +52,7 @@
   let dockLatestResult = null;
   let activeThinking = null;
   let dockThinking = null;
+  let sessionSummaries = [];
 
   const traceLabels = {
     planning: '拆解问题',
@@ -57,7 +62,9 @@
     report_repair_requested: '修复报告',
     report_citations_normalized: '补全证据引用',
     report_claims_sanitized: '保留可信结论',
+    provider_empty_retry: '重试生成报告',
     knowledge_searches_coalesced: '合并冗余检索',
+    knowledge_only_client_scope: '限定为知识问答',
     completed: '分析完成',
     partially_verified: '部分通过',
     refused: '安全拒绝',
@@ -146,6 +153,7 @@
       els.dockQuestion.disabled = busy;
       els.dockExpand.disabled = busy;
       els.dockNew.disabled = busy;
+      if (els.dockHistory) els.dockHistory.disabled = busy;
     }
     if (!busy) clearThinking();
   }
@@ -298,10 +306,16 @@
       const response = await fetch('/api/agent/sessions', { cache: 'no-store' });
       if (!response.ok) throw new Error('会话列表不可用');
       const body = await response.json();
-      renderSessionList(Array.isArray(body.sessions) ? body.sessions : []);
+      sessionSummaries = Array.isArray(body.sessions) ? body.sessions : [];
+      renderSessionList(sessionSummaries);
+      renderDockSessionList(sessionSummaries);
     } catch (error) {
       clear(els.sessions);
       els.sessions.appendChild(element('div', 'agent-empty agent-error', error.message || '会话读取失败'));
+      if (els.dockHistoryList) {
+        clear(els.dockHistoryList);
+        els.dockHistoryList.appendChild(element('div', 'sim-ai-history-empty sim-ai-error', error.message || '会话读取失败'));
+      }
     }
   }
 
@@ -325,6 +339,34 @@
       button.addEventListener('click', () => openSession(session.session_id));
       els.sessions.appendChild(button);
     });
+  }
+
+  function renderDockSessionList(sessions) {
+    if (!els.dockHistoryList) return;
+    clear(els.dockHistoryList);
+    if (els.dockHistoryCount) els.dockHistoryCount.textContent = `${sessions.length} 条`;
+    if (!sessions.length) {
+      els.dockHistoryList.appendChild(element('div', 'sim-ai-history-empty', '还没有分析会话。发送第一条问题后会自动保存。'));
+      return;
+    }
+    sessions.forEach(session => {
+      const button = element('button', 'sim-ai-session-item');
+      button.type = 'button';
+      button.dataset.sessionId = session.session_id;
+      if (session.session_id === currentSessionId) button.classList.add('active');
+      const copy = element('span', 'sim-ai-session-copy');
+      copy.appendChild(element('span', 'sim-ai-session-title', session.title || '未命名会话'));
+      copy.appendChild(element('span', 'sim-ai-session-meta', `${statusLabels[session.status] || session.status} · ${formatTime(session.updated_at_ms)}`));
+      button.appendChild(copy);
+      button.appendChild(element('span', 'sim-ai-session-open', '›'));
+      if (session.corrupted_event_count) button.title = `检测到 ${session.corrupted_event_count} 个损坏事件；原文件未被覆盖`;
+      button.addEventListener('click', () => openDockSession(session.session_id));
+      els.dockHistoryList.appendChild(button);
+    });
+    const activeSummary = sessions.find(session => session.session_id === currentSessionId);
+    if (activeSummary && els.dockSession) {
+      els.dockSession.textContent = `续接 · ${activeSummary.title || activeSummary.session_id}`;
+    }
   }
 
   function appendMessage(role, text) {
@@ -594,12 +636,15 @@
     wrap.append(head, steps);
     els.dockChat.appendChild(wrap);
     scrollDock();
-    return { wrap, steps };
+    return { wrap, steps, seen: new Set() };
   }
 
   function appendDockTraceStep(trace, event) {
     if (!trace) return;
     const kind = event.trace_kind || event.kind;
+    const key = `${event.sequence ?? ''}:${kind}:${event.tool_name || ''}`;
+    if (trace.seen?.has(key)) return;
+    trace.seen?.add(key);
     const label = traceLabels[kind] || kind;
     const suffix = event.tool_name ? ` · ${toolLabel(event.tool_name)}` : '';
     trace.steps.appendChild(element('span', 'sim-ai-progress-step', `${label}${suffix}`));
@@ -730,6 +775,61 @@
     }
   }
 
+  function toggleDockHistory(open) {
+    if (!els.dockHistoryPanel) return;
+    const next = open == null ? !els.dockHistoryPanel.classList.contains('open') : !!open;
+    els.dockHistoryPanel.classList.toggle('open', next);
+    els.dockHistoryPanel.setAttribute('aria-hidden', String(!next));
+    els.dockHistory?.setAttribute('aria-expanded', String(next));
+    if (next) loadSessions();
+  }
+
+  async function openDockSession(sessionId) {
+    if (activeRun) return;
+    activeSurface = 'dock';
+    try {
+      setStatus('正在加载历史会话…');
+      const response = await fetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}`, { cache: 'no-store' });
+      const body = await safeJson(response);
+      if (!response.ok) throw new Error(body?.error?.message || '会话读取失败');
+      currentSessionId = sessionId;
+      clearDockChat();
+      let trace = null;
+      let traceRunId = null;
+      body.events.forEach(event => {
+        if (event.kind === 'user_message') {
+          appendDockBubble('user', event.question);
+        } else if (event.kind === 'run_started') {
+          trace = createDockTrace(event.run_id);
+          traceRunId = event.run_id;
+          appendDockTraceStep(trace, { sequence: event.sequence, kind: 'planning' });
+        } else if (event.kind === 'run_trace') {
+          if (!trace || traceRunId !== event.run_id) {
+            trace = createDockTrace(event.run_id);
+            traceRunId = event.run_id;
+          }
+          appendDockTraceStep(trace, event);
+        } else if (event.kind === 'cancel_requested' || event.kind === 'run_interrupted') {
+          if (!trace || traceRunId !== event.run_id) trace = createDockTrace(event.run_id);
+          appendDockTraceStep(trace, { ...event, trace_kind: event.kind });
+        } else if (event.kind === 'run_result') {
+          renderDockReport(event.result || { status: 'finished', scenario_hash: event.scenario_hash });
+        }
+      });
+      if (body.summary.corrupted_event_count) {
+        appendDockBubble('agent', `检测到 ${body.summary.corrupted_event_count} 个损坏事件。原文件已保留，请新建会话继续分析。`, true);
+      }
+      if (!body.events.length) clearDockChat();
+      const title = body.summary.title || sessionSummaries.find(session => session.session_id === sessionId)?.title;
+      els.dockSession.textContent = `续接 · ${title || `${sessionId.slice(0, 18)}…`}`;
+      toggleDockHistory(false);
+      setStatus(`已恢复会话 · ${statusLabels[body.summary.status] || body.summary.status}`);
+      await loadSessions();
+    } catch (error) {
+      setStatus(error.message || '会话读取失败', true);
+    }
+  }
+
   async function captureScenario() {
     if (!window._lastSimBody && typeof window.runSimulate === 'function') {
       await window.runSimulate();
@@ -754,8 +854,10 @@
     try { localStorage.setItem('sim_ai_dock_open', open ? '1' : '0'); } catch (_) {}
     if (open) {
       updateScenarioState();
+      loadSessions();
       if (focusInput) setTimeout(() => els.dockQuestion.focus(), 80);
     } else {
+      toggleDockHistory(false);
       els.dockFab.focus({ preventScroll: true });
     }
   }
@@ -1027,6 +1129,7 @@
 
   function newSession() {
     if (activeRun) return;
+    toggleDockHistory(false);
     currentSessionId = null;
     latestResult = null;
     dockLatestResult = null;
@@ -1055,6 +1158,10 @@
   els.goSim.addEventListener('click', () => window.Jx3Nav?.switchPage('page-sim'));
   els.dockFab?.addEventListener('click', () => setDockOpen(true, true));
   els.dockClose?.addEventListener('click', () => setDockOpen(false));
+  els.dockHistory?.addEventListener('click', () => {
+    activeSurface = 'dock';
+    toggleDockHistory();
+  });
   els.dockSend?.addEventListener('click', startDockRun);
   els.dockStop?.addEventListener('click', cancelRun);
   els.dockNew?.addEventListener('click', () => {
