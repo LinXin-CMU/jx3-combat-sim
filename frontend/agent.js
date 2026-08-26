@@ -46,6 +46,8 @@
   let activeSurface = 'full';
   let dockTrace = null;
   let dockLatestResult = null;
+  let activeThinking = null;
+  let dockThinking = null;
 
   const traceLabels = {
     planning: '拆解问题',
@@ -57,7 +59,7 @@
     completed: '分析完成',
     refused: '安全拒绝',
     cancelled: '任务取消',
-    evidence_insufficient: '证据不足',
+    evidence_insufficient: '证据校验未通过',
     budget_exhausted: '预算耗尽',
     provider_failed: 'Provider 故障',
     protocol_failed: '协议故障',
@@ -67,7 +69,7 @@
 
   const statusLabels = {
     created: '已创建', running: '运行中', completed: '已完成', refused: '已拒绝',
-    cancelled: '已取消', interrupted: '已中断', evidence_insufficient: '证据不足',
+    cancelled: '已取消', interrupted: '已中断', evidence_insufficient: '未形成可靠结论',
     budget_exhausted: '预算耗尽', provider_failed: 'Provider 故障',
     protocol_failed: '协议故障', timed_out: '超时', finished: '已结束',
   };
@@ -105,6 +107,67 @@
       els.dockQuestion.disabled = busy;
       els.dockExpand.disabled = busy;
       els.dockNew.disabled = busy;
+    }
+    if (!busy) clearThinking();
+  }
+
+  function createThinking(container) {
+    const wrap = element('div', 'ai-thinking');
+    wrap.setAttribute('role', 'status');
+    wrap.setAttribute('aria-live', 'polite');
+    const mark = element('span', 'ai-thinking-mark', '✦');
+    mark.setAttribute('aria-hidden', 'true');
+    const copy = element('div', 'ai-thinking-copy');
+    copy.appendChild(element('b', '', 'AI 正在思考'));
+    const message = element('span', '', '正在理解问题与当前循环…');
+    copy.appendChild(message);
+    const dots = element('span', 'ai-thinking-dots');
+    dots.setAttribute('aria-hidden', 'true');
+    for (let index = 0; index < 3; index += 1) dots.appendChild(element('i'));
+    wrap.append(mark, copy, dots);
+    wrap._message = message;
+    container.appendChild(wrap);
+    return wrap;
+  }
+
+  function thinkingText(event) {
+    const kind = event?.trace_kind || event?.kind;
+    if (kind === 'planning') return '正在拆解问题并选择验证路径…';
+    if (kind === 'tool_started') return `正在调用 ${event.tool_name || '模拟器'}…`;
+    if (kind === 'tool_finished') return '已取得工具证据，正在继续分析…';
+    if (kind === 'validating') return '正在校验数值、单位与证据引用…';
+    if (kind === 'report_repair_requested') return '报告引用未通过，正在尝试修复…';
+    if (kind === 'report_citations_normalized') return '已补全可验证引用，正在完成校验…';
+    if (kind === 'cancel_requested') return '正在安全停止当前任务…';
+    return '正在分析当前循环…';
+  }
+
+  function updateThinking(node, event) {
+    if (node?._message) node._message.textContent = thinkingText(event);
+  }
+
+  function clearThinking() {
+    activeThinking?.remove();
+    dockThinking?.remove();
+    activeThinking = null;
+    dockThinking = null;
+  }
+
+  function setTerminalStatus(result, persistenceError, recovered) {
+    if (persistenceError) {
+      setStatus('分析结束，但会话保存失败', true);
+      return;
+    }
+    const status = result?.status;
+    if (status === 'completed') {
+      setStatus(recovered ? '分析完成 · 已恢复验证结论' : '分析完成 · 结论已绑定证据并保存');
+    } else if (status === 'evidence_insufficient') {
+      setStatus('分析结束 · 未验证内容已被证据校验器拦截');
+    } else if (status === 'refused') {
+      setStatus('分析结束 · 请求超出只读分析边界');
+    } else {
+      const label = statusLabels[status] || status || '未知状态';
+      setStatus(`分析结束 · ${label}`, ['provider_failed', 'protocol_failed', 'timed_out'].includes(status));
     }
   }
 
@@ -267,10 +330,19 @@
       return;
     }
     const card = element('article', 'agent-report');
+    const evidenceInsufficient = result.status === 'evidence_insufficient';
+    card.classList.toggle('is-limited', evidenceInsufficient);
     const head = element('div', 'agent-report-head');
-    head.appendChild(element('b', '', '已验证分析报告'));
+    head.appendChild(element('b', '', evidenceInsufficient ? '本轮未形成可靠结论' : '已验证分析报告'));
     head.appendChild(element('span', '', `${report.provider_profile} / ${report.model} · ${result.accounting?.duration_ms || 0}ms`));
     card.appendChild(head);
+    if (evidenceInsufficient) {
+      const notice = element('div', 'agent-result-notice');
+      notice.appendChild(element('b', '', '这不是系统故障'));
+      notice.appendChild(element('span', '', '模型输出中的数值或引用未通过模拟器证据校验，未验证内容已被拦截。'));
+      if (result.error?.code) notice.title = `校验码：${result.error.code}`;
+      card.appendChild(notice);
+    }
     card.appendChild(element('div', 'agent-report-summary', report.content?.summary || '—'));
 
     (report.content?.findings || []).forEach(finding => {
@@ -373,10 +445,20 @@
     els.dockCopy.disabled = false;
     const report = result.report;
     const card = element('article', 'sim-ai-result');
+    const evidenceInsufficient = result.status === 'evidence_insufficient';
+    card.classList.toggle('is-limited', evidenceInsufficient);
     const head = element('div', 'sim-ai-result-head');
     head.appendChild(element('b', '', statusLabels[result.status] || result.status || '分析结果'));
     head.appendChild(element('span', '', `${result.provider_profile || '—'} · ${result.accounting?.duration_ms || 0}ms`));
     card.appendChild(head);
+
+    if (evidenceInsufficient) {
+      const notice = element('div', 'sim-ai-result-notice');
+      notice.appendChild(element('b', '', '这不是系统故障'));
+      notice.appendChild(element('span', '', '模型输出中的数值或引用未通过证据校验，因此没有发布为结论。'));
+      if (result.error?.code) notice.title = `校验码：${result.error.code}`;
+      card.appendChild(notice);
+    }
 
     const summary = report?.content?.summary || result.error?.message || '本次任务没有生成可展示的结论。';
     card.appendChild(element('div', 'sim-ai-result-summary', summary));
@@ -521,6 +603,7 @@
       const simulation = await captureScenario();
       appendDockBubble('user', question);
       dockTrace = createDockTrace('准备创建 run');
+      dockThinking = createThinking(els.dockChat);
       const payload = {
         question,
         provider_profile: els.dockProvider.value,
@@ -562,15 +645,17 @@
         if (kind === 'run_result') {
           source.close();
           activeSource = null;
+          clearThinking();
           renderDockReport(event.result);
           const persistenceError = !!event.persistence_error;
-          setStatus(persistenceError ? '完成，但会话保存失败' : '分析完成 · 已保存并绑定证据', persistenceError);
+          setTerminalStatus(event.result, persistenceError, false);
           activeRun = null;
           dockTrace = null;
           setBusy(false);
           loadSessions();
         } else {
           appendDockTraceStep(dockTrace, event);
+          updateThinking(dockThinking, event);
           const label = traceLabels[kind] || kind;
           setStatus(`${label}${event.tool_name ? ` · ${event.tool_name}` : ''}`);
         }
@@ -590,8 +675,9 @@
       const response = await fetch(activeRun.status_url, { cache: 'no-store' });
       const body = await safeJson(response);
       if (response.ok && !body.running && body.result) {
+        clearThinking();
         renderDockReport(body.result);
-        setStatus(body.persistence_error ? '任务结束，但会话保存失败' : '任务结束 · 已恢复结果', body.persistence_error);
+        setTerminalStatus(body.result, !!body.persistence_error, true);
         activeRun = null;
         dockTrace = null;
         setBusy(false);
@@ -600,6 +686,7 @@
       }
       if (response.ok && body.running) {
         setStatus('连接中断，任务仍在运行；正在恢复…');
+        updateThinking(dockThinking, { kind: 'planning' });
         setTimeout(() => activeRun && connectDockStream(activeRun.stream_url), 600);
         return;
       }
@@ -624,6 +711,7 @@
       const simulation = await captureScenario();
       appendMessage('user', question);
       activeTrace = createTrace('准备创建 run');
+      activeThinking = createThinking(els.transcript);
       const payload = {
         question,
         provider_profile: els.provider.value,
@@ -663,15 +751,17 @@
         if (kind === 'run_result') {
           source.close();
           activeSource = null;
+          clearThinking();
           renderReport(event.result);
           const persistenceError = !!event.persistence_error;
-          setStatus(persistenceError ? '分析完成，但会话落盘失败' : '分析完成 · 结论已绑定证据并保存', persistenceError);
+          setTerminalStatus(event.result, persistenceError, false);
           activeRun = null;
           activeTrace = null;
           setBusy(false);
           loadSessions();
         } else {
           appendTraceStep(activeTrace, event);
+          updateThinking(activeThinking, event);
           const label = traceLabels[kind] || kind;
           setStatus(`${label}${event.tool_name ? ` · ${event.tool_name}` : ''}`);
         }
@@ -691,8 +781,9 @@
       const response = await fetch(activeRun.status_url, { cache: 'no-store' });
       const body = await safeJson(response);
       if (response.ok && !body.running && body.result) {
+        clearThinking();
         renderReport(body.result);
-        setStatus(body.persistence_error ? '任务结束，但会话落盘失败' : '任务结束 · 已从状态接口恢复结果', body.persistence_error);
+        setTerminalStatus(body.result, !!body.persistence_error, true);
         activeRun = null;
         activeTrace = null;
         setBusy(false);
@@ -701,6 +792,7 @@
       }
       if (response.ok && body.running) {
         setStatus('流已断开，任务仍在运行；正在重新连接…');
+        updateThinking(activeThinking, { kind: 'planning' });
         setTimeout(() => activeRun && connectStream(activeRun.stream_url), 600);
         return;
       }
