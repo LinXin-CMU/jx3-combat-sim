@@ -18,6 +18,23 @@
     copy: document.getElementById('agent_copy_summary'),
     newSession: document.getElementById('agent_new_session'),
     goSim: document.getElementById('agent_go_sim'),
+    simPage: document.getElementById('page-sim'),
+    dock: document.getElementById('sim_ai_dock'),
+    dockFab: document.getElementById('sim_ai_fab'),
+    dockClose: document.getElementById('sim_ai_close'),
+    dockExpand: document.getElementById('sim_ai_expand'),
+    dockNew: document.getElementById('sim_ai_new'),
+    dockChat: document.getElementById('sim_ai_chat'),
+    dockQuestion: document.getElementById('sim_ai_question'),
+    dockProvider: document.getElementById('sim_ai_provider'),
+    dockProviderModel: document.getElementById('sim_ai_provider_model'),
+    dockSend: document.getElementById('sim_ai_send'),
+    dockStop: document.getElementById('sim_ai_stop'),
+    dockStatus: document.getElementById('sim_ai_status'),
+    dockContext: document.getElementById('sim_ai_context'),
+    dockContextText: document.getElementById('sim_ai_context_text'),
+    dockSession: document.getElementById('sim_ai_session_label'),
+    dockCopy: document.getElementById('sim_ai_copy'),
   };
 
   let initialized = false;
@@ -26,6 +43,9 @@
   let activeSource = null;
   let activeTrace = null;
   let latestResult = null;
+  let activeSurface = 'full';
+  let dockTrace = null;
+  let dockLatestResult = null;
 
   const traceLabels = {
     planning: '拆解问题',
@@ -33,6 +53,7 @@
     tool_finished: '取得证据',
     validating: '校验证据',
     report_repair_requested: '修复报告',
+    report_citations_normalized: '补全证据引用',
     completed: '分析完成',
     refused: '安全拒绝',
     cancelled: '任务取消',
@@ -65,6 +86,10 @@
   function setStatus(text, isError) {
     els.status.textContent = text;
     els.status.classList.toggle('agent-error', !!isError);
+    if (els.dockStatus && activeSurface === 'dock') {
+      els.dockStatus.textContent = text;
+      els.dockStatus.classList.toggle('sim-ai-error', !!isError);
+    }
   }
 
   function setBusy(busy) {
@@ -72,6 +97,15 @@
     els.run.hidden = busy;
     els.cancel.hidden = !busy;
     els.provider.disabled = busy;
+    if (els.dockSend) {
+      els.dockSend.disabled = busy;
+      els.dockSend.hidden = busy;
+      els.dockStop.hidden = !busy;
+      els.dockProvider.disabled = busy;
+      els.dockQuestion.disabled = busy;
+      els.dockExpand.disabled = busy;
+      els.dockNew.disabled = busy;
+    }
   }
 
   function updateScenarioState() {
@@ -79,12 +113,20 @@
     if (!scenario) {
       els.scenario.classList.remove('ready');
       els.scenario.lastChild.textContent = ' 尚未捕获循环场景';
+      if (els.dockContext) {
+        els.dockContext.classList.remove('ready');
+        els.dockContextText.textContent = '等待当前循环完成一次模拟';
+      }
       return;
     }
     const mode = scenario.macro_text ? '宏循环' : `${(scenario.sequence || []).length} 个技能`;
     const delay = Number(scenario.network_delay || 0);
     els.scenario.classList.add('ready');
     els.scenario.lastChild.textContent = ` 已捕获当前场景 · ${mode} · ${delay}ms 延迟`;
+    if (els.dockContext) {
+      els.dockContext.classList.add('ready');
+      els.dockContextText.textContent = `当前场景已就绪 · ${mode} · ${delay}ms 延迟`;
+    }
   }
 
   async function safeJson(response) {
@@ -96,18 +138,23 @@
       const response = await fetch('/api/agent/providers', { cache: 'no-store' });
       if (!response.ok) throw new Error('Provider 列表不可用');
       const body = await response.json();
-      clear(els.provider);
       const profiles = Array.isArray(body.profiles) ? body.profiles : [];
-      profiles.forEach(profile => {
-        const option = document.createElement('option');
-        option.value = profile.id;
-        option.textContent = `${profile.label} · ${profile.model}${profile.available ? '' : '（不可用）'}`;
-        option.disabled = !profile.available;
-        option.dataset.model = profile.model;
-        els.provider.appendChild(option);
+      let preferred = '';
+      try { preferred = localStorage.getItem('agent_provider_profile') || ''; } catch (_) {}
+      const available = profiles.find(profile => profile.id === preferred && profile.available)
+        || profiles.find(profile => profile.available);
+      [els.provider, els.dockProvider].filter(Boolean).forEach(select => {
+        clear(select);
+        profiles.forEach(profile => {
+          const option = document.createElement('option');
+          option.value = profile.id;
+          option.textContent = `${profile.label}${profile.available ? '' : '（不可用）'}`;
+          option.disabled = !profile.available;
+          option.dataset.model = profile.model;
+          select.appendChild(option);
+        });
+        if (available) select.value = available.id;
       });
-      const available = profiles.find(profile => profile.available);
-      if (available) els.provider.value = available.id;
       syncProviderModel();
     } catch (error) {
       setStatus(error.message || 'Provider 列表加载失败', true);
@@ -117,6 +164,19 @@
   function syncProviderModel() {
     const option = els.provider.selectedOptions[0];
     els.providerModel.textContent = option?.dataset.model || '—';
+    if (els.dockProvider) {
+      const dockOption = els.dockProvider.selectedOptions[0];
+      els.dockProviderModel.textContent = dockOption?.dataset.model || '—';
+    }
+  }
+
+  function selectProvider(source) {
+    const value = source.value;
+    [els.provider, els.dockProvider].filter(select => select && select !== source).forEach(select => {
+      if ([...select.options].some(option => option.value === value && !option.disabled)) select.value = value;
+    });
+    try { localStorage.setItem('agent_provider_profile', value); } catch (_) {}
+    syncProviderModel();
   }
 
   function formatTime(ms) {
@@ -254,6 +314,104 @@
     requestAnimationFrame(() => { els.transcript.scrollTop = els.transcript.scrollHeight; });
   }
 
+  function clearDockChat() {
+    clear(els.dockChat);
+    const welcome = element('div', 'sim-ai-welcome');
+    welcome.appendChild(element('span', '', 'AI 只读当前循环并调用确定性模拟器。'));
+    welcome.appendChild(element('small', '', '不会修改技能、宏、配装或其他游戏数据。'));
+    els.dockChat.appendChild(welcome);
+    dockTrace = null;
+    dockLatestResult = null;
+    els.dockCopy.disabled = true;
+  }
+
+  function prepareDockChat() {
+    const welcome = els.dockChat.querySelector('.sim-ai-welcome');
+    if (welcome) welcome.remove();
+  }
+
+  function scrollDock() {
+    requestAnimationFrame(() => { els.dockChat.scrollTop = els.dockChat.scrollHeight; });
+  }
+
+  function appendDockBubble(role, text, isError) {
+    prepareDockChat();
+    const wrap = element('article', `sim-ai-bubble ${role}${isError ? ' sim-ai-error' : ''}`);
+    wrap.appendChild(element('div', 'sim-ai-bubble-label', role === 'user' ? '你' : 'AI 分析'));
+    wrap.appendChild(element('div', 'sim-ai-bubble-body', text));
+    els.dockChat.appendChild(wrap);
+    scrollDock();
+  }
+
+  function createDockTrace(runId) {
+    prepareDockChat();
+    const wrap = element('div', 'sim-ai-progress');
+    const head = element('div', 'sim-ai-progress-head');
+    head.appendChild(element('span', '', '可验证分析流程'));
+    head.appendChild(element('span', '', runId || '准备中'));
+    const steps = element('div', 'sim-ai-progress-steps');
+    wrap.append(head, steps);
+    els.dockChat.appendChild(wrap);
+    scrollDock();
+    return { wrap, steps };
+  }
+
+  function appendDockTraceStep(trace, event) {
+    if (!trace) return;
+    const kind = event.trace_kind || event.kind;
+    const label = traceLabels[kind] || kind;
+    const suffix = event.tool_name ? ` · ${event.tool_name}` : '';
+    trace.steps.appendChild(element('span', 'sim-ai-progress-step', `${label}${suffix}`));
+    scrollDock();
+  }
+
+  function renderDockReport(result) {
+    if (!result) return;
+    prepareDockChat();
+    dockLatestResult = result;
+    latestResult = result;
+    els.dockCopy.disabled = false;
+    const report = result.report;
+    const card = element('article', 'sim-ai-result');
+    const head = element('div', 'sim-ai-result-head');
+    head.appendChild(element('b', '', statusLabels[result.status] || result.status || '分析结果'));
+    head.appendChild(element('span', '', `${result.provider_profile || '—'} · ${result.accounting?.duration_ms || 0}ms`));
+    card.appendChild(head);
+
+    const summary = report?.content?.summary || result.error?.message || '本次任务没有生成可展示的结论。';
+    card.appendChild(element('div', 'sim-ai-result-summary', summary));
+    (report?.content?.findings || []).slice(0, 4).forEach(finding => {
+      const block = element('div', 'sim-ai-result-finding');
+      block.appendChild(element('b', '', finding.title));
+      block.appendChild(element('p', '', finding.explanation));
+      card.appendChild(block);
+    });
+
+    const metrics = (report?.content?.findings || [])
+      .flatMap(finding => finding.metrics || [])
+      .slice(0, 6);
+    if (metrics.length) {
+      const grid = element('div', 'sim-ai-result-metrics');
+      metrics.forEach(metric => {
+        const item = element('div', 'sim-ai-result-metric');
+        item.appendChild(element('b', '', metricValue(metric)));
+        item.appendChild(element('span', '', `${metric.label} · ${metric.unit}`));
+        item.title = `${metric.evidence_id}${metric.json_pointer}`;
+        grid.appendChild(item);
+      });
+      card.appendChild(grid);
+    }
+    const limitations = report?.content?.limitations || [];
+    if (limitations.length) {
+      const block = element('div', 'sim-ai-result-finding');
+      block.appendChild(element('b', '', '边界与限制'));
+      block.appendChild(element('p', '', limitations.slice(0, 3).join('；')));
+      card.appendChild(block);
+    }
+    els.dockChat.appendChild(card);
+    scrollDock();
+  }
+
   function renderWelcome() {
     clear(els.transcript);
     const welcome = element('div', 'agent-welcome');
@@ -266,7 +424,7 @@
       ['诊断时间轴', '找出当前循环中值得进一步验证的时间轴问题。'],
       ['检查证据边界', '说明这个场景还缺少哪些证据，避免给出未经验证的结论。'],
     ].forEach(([label, question]) => {
-      const button = element('button', '', label);
+      const button = element('button', 'sim-btn', label);
       button.type = 'button';
       button.addEventListener('click', () => { els.question.value = question; els.question.focus(); });
       starters.appendChild(button);
@@ -282,6 +440,7 @@
       const body = await safeJson(response);
       if (!response.ok) throw new Error(body?.error?.message || '会话读取失败');
       currentSessionId = sessionId;
+      if (els.dockSession) els.dockSession.textContent = `续接 · ${sessionId.slice(0, 18)}…`;
       clear(els.transcript);
       let trace = null;
       let traceRunId = null;
@@ -332,8 +491,131 @@
     return scenario;
   }
 
+  function setDockOpen(open, focusInput) {
+    if (!els.dock) return;
+    els.dock.classList.toggle('open', open);
+    els.dock.setAttribute('aria-hidden', String(!open));
+    els.dockFab.setAttribute('aria-expanded', String(open));
+    try { localStorage.setItem('sim_ai_dock_open', open ? '1' : '0'); } catch (_) {}
+    if (open) {
+      updateScenarioState();
+      if (focusInput) setTimeout(() => els.dockQuestion.focus(), 80);
+    } else {
+      els.dockFab.focus({ preventScroll: true });
+    }
+  }
+
+  async function startDockRun() {
+    if (activeRun) return;
+    const question = els.dockQuestion.value.trim();
+    if (!question) {
+      activeSurface = 'dock';
+      setStatus('请先输入一个策划问题', true);
+      els.dockQuestion.focus();
+      return;
+    }
+    activeSurface = 'dock';
+    setBusy(true);
+    setStatus('正在冻结当前循环…');
+    try {
+      const simulation = await captureScenario();
+      appendDockBubble('user', question);
+      dockTrace = createDockTrace('准备创建 run');
+      const payload = {
+        question,
+        provider_profile: els.dockProvider.value,
+        simulation,
+      };
+      if (currentSessionId) payload.session_id = currentSessionId;
+      const response = await fetch('/api/agent/runs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const body = await safeJson(response);
+      if (!response.ok) throw new Error(body?.error?.message || `创建任务失败 (${response.status})`);
+      activeRun = body;
+      currentSessionId = body.session_id;
+      els.dockSession.textContent = `会话 · ${body.session_id.slice(0, 18)}…`;
+      dockTrace.wrap.querySelector('.sim-ai-progress-head span:last-child').textContent = body.run_id;
+      els.dockQuestion.value = '';
+      setStatus(`运行中 · 场景 ${body.scenario_hash.slice(0, 12)}…`);
+      connectDockStream(body.stream_url);
+      await loadSessions();
+    } catch (error) {
+      setBusy(false);
+      activeRun = null;
+      appendDockBubble('agent', error.message || 'Agent 运行失败', true);
+      setStatus(error.message || 'Agent 运行失败', true);
+    }
+  }
+
+  function connectDockStream(url) {
+    if (activeSource) activeSource.close();
+    const source = new EventSource(url);
+    activeSource = source;
+    const eventKinds = Object.keys(traceLabels).concat(['run_result']);
+    eventKinds.forEach(kind => {
+      source.addEventListener(kind, raw => {
+        let event;
+        try { event = JSON.parse(raw.data); } catch (_) { return; }
+        if (kind === 'run_result') {
+          source.close();
+          activeSource = null;
+          renderDockReport(event.result);
+          const persistenceError = !!event.persistence_error;
+          setStatus(persistenceError ? '完成，但会话保存失败' : '分析完成 · 已保存并绑定证据', persistenceError);
+          activeRun = null;
+          dockTrace = null;
+          setBusy(false);
+          loadSessions();
+        } else {
+          appendDockTraceStep(dockTrace, event);
+          const label = traceLabels[kind] || kind;
+          setStatus(`${label}${event.tool_name ? ` · ${event.tool_name}` : ''}`);
+        }
+      });
+    });
+    source.onerror = () => {
+      if (!activeRun) return;
+      source.close();
+      activeSource = null;
+      recoverDockRunStatus();
+    };
+  }
+
+  async function recoverDockRunStatus() {
+    if (!activeRun) return;
+    try {
+      const response = await fetch(activeRun.status_url, { cache: 'no-store' });
+      const body = await safeJson(response);
+      if (response.ok && !body.running && body.result) {
+        renderDockReport(body.result);
+        setStatus(body.persistence_error ? '任务结束，但会话保存失败' : '任务结束 · 已恢复结果', body.persistence_error);
+        activeRun = null;
+        dockTrace = null;
+        setBusy(false);
+        await loadSessions();
+        return;
+      }
+      if (response.ok && body.running) {
+        setStatus('连接中断，任务仍在运行；正在恢复…');
+        setTimeout(() => activeRun && connectDockStream(activeRun.stream_url), 600);
+        return;
+      }
+      throw new Error(body?.error?.message || '无法恢复任务状态');
+    } catch (error) {
+      appendDockBubble('agent', error.message || '任务状态恢复失败', true);
+      setStatus(error.message || '任务状态恢复失败', true);
+      activeRun = null;
+      dockTrace = null;
+      setBusy(false);
+    }
+  }
+
   async function startRun() {
     if (activeRun) return;
+    activeSurface = 'full';
     const question = els.question.value.trim();
     if (!question) { setStatus('请先输入一个策划问题', true); els.question.focus(); return; }
     setBusy(true);
@@ -434,6 +716,7 @@
   async function cancelRun() {
     if (!activeRun) return;
     els.cancel.disabled = true;
+    if (els.dockStop) els.dockStop.disabled = true;
     try {
       const response = await fetch(activeRun.cancel_url, { method: 'POST' });
       const body = await safeJson(response);
@@ -443,6 +726,7 @@
       setStatus(error.message || '取消失败', true);
     } finally {
       els.cancel.disabled = false;
+      if (els.dockStop) els.dockStop.disabled = false;
     }
   }
 
@@ -472,8 +756,12 @@
     if (activeRun) return;
     currentSessionId = null;
     latestResult = null;
+    dockLatestResult = null;
     els.copy.disabled = true;
+    if (els.dockCopy) els.dockCopy.disabled = true;
+    if (els.dockSession) els.dockSession.textContent = '新对话';
     renderWelcome();
+    if (els.dockChat) clearDockChat();
     setStatus('新会话 · 下一次运行时创建持久记录');
     loadSessions();
   }
@@ -485,14 +773,56 @@
     await Promise.all([loadProviders(), loadSessions()]);
   }
 
-  els.provider.addEventListener('change', syncProviderModel);
+  els.provider.addEventListener('change', () => selectProvider(els.provider));
+  els.dockProvider?.addEventListener('change', () => selectProvider(els.dockProvider));
   els.run.addEventListener('click', startRun);
   els.cancel.addEventListener('click', cancelRun);
   els.copy.addEventListener('click', copySummary);
   els.newSession.addEventListener('click', newSession);
   els.goSim.addEventListener('click', () => window.Jx3Nav?.switchPage('page-sim'));
+  els.dockFab?.addEventListener('click', () => setDockOpen(true, true));
+  els.dockClose?.addEventListener('click', () => setDockOpen(false));
+  els.dockSend?.addEventListener('click', startDockRun);
+  els.dockStop?.addEventListener('click', cancelRun);
+  els.dockNew?.addEventListener('click', () => {
+    activeSurface = 'dock';
+    newSession();
+    els.dockQuestion.focus();
+  });
+  els.dockExpand?.addEventListener('click', () => {
+    const sessionToOpen = currentSessionId;
+    setDockOpen(false);
+    window.Jx3Nav?.switchPage('page-agent');
+    initialize().then(() => {
+      if (sessionToOpen && !activeRun) openSession(sessionToOpen);
+    });
+  });
+  els.dockCopy?.addEventListener('click', () => {
+    if (!dockLatestResult) return;
+    activeSurface = 'dock';
+    latestResult = dockLatestResult;
+    copySummary();
+  });
+  els.dockQuestion?.addEventListener('keydown', event => {
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+      event.preventDefault();
+      startDockRun();
+    }
+  });
+  document.querySelectorAll('[data-sim-ai-question]').forEach(button => {
+    button.addEventListener('click', () => {
+      setDockOpen(true);
+      els.dockQuestion.value = button.dataset.simAiQuestion;
+      els.dockQuestion.focus();
+    });
+  });
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && els.dock?.classList.contains('open') && !activeRun) {
+      setDockOpen(false);
+    }
+  });
   els.question.addEventListener('keydown', event => {
-    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
       event.preventDefault();
       startRun();
     }
@@ -501,15 +831,30 @@
     button.addEventListener('click', () => { els.question.value = button.dataset.agentQuestion; els.question.focus(); });
   });
   window.addEventListener('jx3-sim-complete', updateScenarioState);
+  function syncAgentPageLayout() {
+    document.body.classList.toggle('agent-fullheight', page.classList.contains('active'));
+  }
   new MutationObserver(() => {
+    syncAgentPageLayout();
     if (page.classList.contains('active')) {
       initialize();
       updateScenarioState();
       loadSessions();
     }
   }).observe(page, { attributes: true, attributeFilter: ['class'] });
-  if (page.classList.contains('active')) initialize();
+  syncAgentPageLayout();
+  initialize();
+  try {
+    if (localStorage.getItem('sim_ai_dock_open') === '1' && els.simPage?.classList.contains('active')) {
+      setDockOpen(true);
+    }
+  } catch (_) {}
   if (window.location.hash === '#page-agent') {
     setTimeout(() => window.Jx3Nav?.switchPage('page-agent'), 0);
+  } else if (window.location.hash === '#page-sim' || window.location.hash === '#page-sim-ai') {
+    setTimeout(() => {
+      window.Jx3Nav?.switchPage('page-sim');
+      if (window.location.hash === '#page-sim-ai') setDockOpen(true);
+    }, 0);
   }
 })();

@@ -167,12 +167,12 @@
             <p class="hub-card-desc">枚举候选装备组合，按当前循环跑模拟，找出最优配装</p>
             <button class="hub-card-btn">开始 →</button>
           </div>
-          <div class="hub-card hub-card-agent" data-hub-action="workflow-agent">
+          <div class="hub-card" data-hub-action="workflow-agent">
             <div class="hub-card-icon">✦</div>
             <h2 class="hub-card-title">AI 战斗分析</h2>
             <p class="hub-card-desc">模型负责提出假设，确定性模拟器负责数字，所有结论都带可复现证据</p>
             <div class="hub-card-badge agent-safe-badge">本地 · 只读工具</div>
-            <button class="hub-card-btn">开始分析 →</button>
+            <button class="hub-card-btn">开始 →</button>
           </div>
         </div>
         <div class="hub-tools">
@@ -194,7 +194,7 @@
               <div class="agent-eyebrow">PERSISTED EXPERIMENTS</div>
               <h2>分析会话</h2>
             </div>
-            <button class="agent-icon-button" id="agent_new_session" title="新建会话" aria-label="新建会话">＋</button>
+            <button class="sim-btn sim-btn-icon" id="agent_new_session" title="新建会话" aria-label="新建会话">＋</button>
           </div>
           <div class="agent-session-list" id="agent_session_list">
             <div class="agent-empty">正在读取本地会话…</div>
@@ -242,9 +242,9 @@
               <h3>从一个可验证的问题开始</h3>
               <p>先在“循环模拟”准备场景，再问 Agent 当前基线、候选改动或时间轴异常。离线 profile 可完整演示工具与证据闭环，不产生模型费用。</p>
               <div class="agent-starter-grid">
-                <button data-agent-question="分析当前循环的输出基线，并说明证据边界。">分析当前基线</button>
-                <button data-agent-question="找出当前循环中值得进一步验证的时间轴问题。">诊断时间轴</button>
-                <button data-agent-question="说明这个场景还缺少哪些证据，避免给出未经验证的结论。">检查证据边界</button>
+                <button class="sim-btn" data-agent-question="分析当前循环的输出基线，并说明证据边界。">分析当前基线</button>
+                <button class="sim-btn" data-agent-question="找出当前循环中值得进一步验证的时间轴问题。">诊断时间轴</button>
+                <button class="sim-btn" data-agent-question="说明这个场景还缺少哪些证据，避免给出未经验证的结论。">检查证据边界</button>
               </div>
             </div>
           </section>
@@ -252,16 +252,18 @@
           <footer class="agent-composer">
             <div class="agent-provider-row">
               <label for="agent_provider">模型 Profile</label>
-              <select id="agent_provider" aria-label="模型 Profile"><option value="offline">离线测试</option></select>
+              <select class="sim-input" id="agent_provider" aria-label="模型 Profile"><option value="offline">离线测试</option></select>
               <span id="agent_provider_model">deterministic-fixture-v1</span>
               <span class="agent-provider-note">凭据仅存在于服务端环境变量</span>
             </div>
             <div class="agent-input-row">
-              <textarea id="agent_question" rows="3" maxlength="16000" placeholder="例如：当前循环的主要输出基线是什么？请只引用模拟器证据。"></textarea>
-              <button class="agent-run-button" id="agent_run">运行分析</button>
-              <button class="agent-cancel-button" id="agent_cancel" hidden>取消</button>
+              <textarea id="agent_question" rows="2" maxlength="16000" placeholder="例如：当前循环的主要输出基线是什么？请只引用模拟器证据。"></textarea>
             </div>
-            <div class="agent-composer-status" id="agent_composer_status">就绪 · 公网关闭 · 尚未调用真实模型</div>
+            <div class="agent-composer-actions">
+              <div class="agent-composer-status" id="agent_composer_status">Enter 发送 · Shift+Enter 换行</div>
+              <button class="sim-btn sim-btn-primary" id="agent_run">运行分析</button>
+              <button class="sim-btn sim-btn-danger" id="agent_cancel" hidden>取消</button>
+            </div>
           </footer>
         </main>
       </div>
@@ -1991,6 +1993,67 @@
           </div>
         </div>
       </section>
+
+      <!-- 循环页内的轻量 AI 助手；完整历史与证据仍可进入独立 Agent 页面查看 -->
+      <aside class="sim-ai-dock" id="sim_ai_dock" aria-hidden="true" aria-label="循环分析 AI 助手">
+        <header class="sim-ai-dock-head">
+          <div class="sim-ai-dock-brand">
+            <span class="sim-ai-mark" aria-hidden="true">✦</span>
+            <div>
+              <strong>循环分析助手</strong>
+              <span id="sim_ai_session_label">新对话</span>
+            </div>
+          </div>
+          <div class="sim-ai-head-actions">
+            <button type="button" class="sim-btn sim-btn-icon" id="sim_ai_new" title="新建对话" aria-label="新建对话">＋</button>
+            <button type="button" class="sim-btn sim-btn-icon" id="sim_ai_expand" title="进入完整 AI 分析界面" aria-label="进入完整 AI 分析界面">↗</button>
+            <button type="button" class="sim-btn sim-btn-icon" id="sim_ai_close" title="收起助手" aria-label="收起助手">×</button>
+          </div>
+        </header>
+
+        <div class="sim-ai-context" id="sim_ai_context">
+          <span class="sim-ai-context-dot"></span>
+          <span id="sim_ai_context_text">等待当前循环完成一次模拟</span>
+        </div>
+
+        <div class="sim-ai-quick" aria-label="常用分析">
+          <button type="button" class="sim-btn" data-sim-ai-question="分析当前循环的输出基线，并说明证据边界。">基线分析</button>
+          <button type="button" class="sim-btn" data-sim-ai-question="诊断当前循环的时间轴，找出值得进一步验证的空转、怒气或增益覆盖问题。">时间轴诊断</button>
+          <button type="button" class="sim-btn" data-sim-ai-question="说明当前循环还缺少哪些证据，并给出下一步最小验证实验。">下一步实验</button>
+        </div>
+
+        <section class="sim-ai-chat" id="sim_ai_chat" aria-live="polite">
+          <div class="sim-ai-welcome">
+            <span>AI 只读当前循环并调用确定性模拟器。</span>
+            <small>不会修改技能、宏、配装或其他游戏数据。</small>
+          </div>
+        </section>
+
+        <footer class="sim-ai-compose">
+          <div class="sim-ai-provider-row">
+            <select class="sim-input" id="sim_ai_provider" aria-label="AI 模型 Profile">
+              <option value="offline">离线测试</option>
+            </select>
+            <span id="sim_ai_provider_model">deterministic-fixture-v1</span>
+          </div>
+          <div class="sim-ai-input-wrap">
+            <textarea id="sim_ai_question" rows="2" maxlength="16000" placeholder="问当前循环的基线、时间轴或候选改动…"></textarea>
+          </div>
+          <div class="sim-ai-compose-meta">
+            <span id="sim_ai_status">Enter 发送 · Shift+Enter 换行</span>
+            <div class="sim-ai-compose-actions">
+              <button type="button" class="sim-btn" id="sim_ai_copy" disabled>复制结论</button>
+              <button type="button" class="sim-btn sim-btn-primary" id="sim_ai_send" aria-label="发送问题">发送</button>
+              <button type="button" class="sim-btn sim-btn-danger" id="sim_ai_stop" aria-label="停止生成" hidden>停止</button>
+            </div>
+          </div>
+        </footer>
+      </aside>
+
+      <button type="button" class="sim-ai-fab" id="sim_ai_fab" aria-controls="sim_ai_dock" aria-expanded="false">
+        <span class="sim-ai-fab-icon" aria-hidden="true">✦</span>
+        <span class="sim-ai-fab-label"><b>AI 分析</b><small>基于当前循环</small></span>
+      </button>
 
     </div>
 
