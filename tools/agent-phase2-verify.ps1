@@ -116,7 +116,7 @@ try {
   if ($afterFingerprint -ne $beforeFingerprint) { throw 'Real userdata changed during isolated verification.' }
 
   Write-Host '[OK] Agent Phase 2 offline verification passed.'
-  Write-Host '     rust=118/118 phase1=20/20 phase2=12/12 evidence=100% real_userdata_unchanged=true'
+  Write-Host '     rust=122/122 phase1=20/20 phase2=12/12 evidence=100% real_userdata_unchanged=true'
 } finally {
   if ($server -and -not $server.HasExited) {
     $listener = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |

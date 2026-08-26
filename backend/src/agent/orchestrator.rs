@@ -7,15 +7,16 @@ use std::time::{Duration, Instant};
 use tokio::sync::Notify;
 
 use super::evidence::validate_trace_id;
-use super::prompt::agent_prompt_v2;
+use super::prompt::agent_prompt_v3;
 use super::provider::{
-    FinishReason, LlmProvider, ModelMessage, ModelRequest, StructuredOutputDefinition, TokenUsage,
+    FinishReason, LlmProvider, ModelMessage, ModelRequest, ProviderToolCall,
+    StructuredOutputDefinition, TokenUsage,
 };
 use super::registry::AgentToolRegistry;
 use super::report::{
-    cited_evidence_ids, parse_and_validate_report, report_content_json_schema,
-    AgentReportContentV1, AgentReportV1, AgentRunAccountingV1, AGENT_REPORT_CONTENT_SCHEMA_V1,
-    AGENT_REPORT_SCHEMA_V1,
+    cited_evidence_ids, parse_and_salvage_report, parse_and_validate_report,
+    report_content_json_schema, AgentReportContentV1, AgentReportV1, AgentRunAccountingV1,
+    AGENT_REPORT_CONTENT_SCHEMA_V1, AGENT_REPORT_SCHEMA_V1,
 };
 use super::{AgentRuntime, ScenarioSnapshotV1};
 
@@ -28,6 +29,7 @@ const MAX_REPORT_REPAIRS: u32 = 1;
 #[serde(rename_all = "snake_case")]
 pub enum AgentRunStatus {
     Completed,
+    PartiallyVerified,
     Refused,
     EvidenceInsufficient,
     Cancelled,
@@ -213,7 +215,7 @@ pub async fn run_agent_observed(
     event_sink: Option<AgentTraceSink>,
 ) -> AgentRunResultV1 {
     let started = Instant::now();
-    let prompt = agent_prompt_v2();
+    let prompt = agent_prompt_v3();
     let mut accounting = AgentRunAccountingV1::default();
     let mut trace = TraceCollector::new(event_sink);
 
@@ -235,7 +237,10 @@ pub async fn run_agent_observed(
     }
 
     let mut registry = AgentToolRegistry::new(&input.scenario, runtime, limits.max_simulations);
-    let tools = AgentToolRegistry::definitions();
+    let tools = AgentToolRegistry::definitions()
+        .into_iter()
+        .filter(|tool| tool.name != "get_current_scenario")
+        .collect::<Vec<_>>();
     let mut messages = Vec::new();
     if let Some(context) = &input.session_context {
         messages.push(ModelMessage::User {
@@ -250,6 +255,71 @@ pub async fn run_agent_observed(
     let mut repairs = 0;
     let mut repair_message = None;
     trace.push("planning", None, Vec::new(), None);
+
+    if cancellation.is_cancelled() {
+        return terminal_with_registry(
+            provider,
+            &input,
+            &prompt,
+            AgentRunStatus::Cancelled,
+            accounting,
+            None,
+            Some(fixed_error("run_cancelled", "Agent run was cancelled")),
+            trace,
+            started,
+            &registry,
+        );
+    }
+
+    const PREFETCH_CALL_ID: &str = "server-prefetch-scenario";
+    const PREFETCH_TOOL: &str = "get_current_scenario";
+    trace.push(
+        "tool_started",
+        Some(PREFETCH_TOOL.to_string()),
+        Vec::new(),
+        Some("server_prefetch".to_string()),
+    );
+    let prefetched = registry.dispatch(&input.run_id, PREFETCH_TOOL, serde_json::json!({}));
+    accounting.tool_calls = 1;
+    trace.push(
+        "tool_finished",
+        Some(PREFETCH_TOOL.to_string()),
+        prefetched.evidence_ids.clone(),
+        prefetched
+            .output
+            .pointer("/error/code")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+    );
+    if prefetched.evidence_ids.is_empty() {
+        return terminal_with_registry(
+            provider,
+            &input,
+            &prompt,
+            AgentRunStatus::ProtocolFailed,
+            accounting,
+            None,
+            Some(fixed_error(
+                "scenario_prefetch_failed",
+                "Trusted scenario prefetch failed",
+            )),
+            trace,
+            started,
+            &registry,
+        );
+    }
+    messages.push(ModelMessage::Assistant {
+        content: None,
+        tool_calls: vec![ProviderToolCall {
+            call_id: PREFETCH_CALL_ID.to_string(),
+            name: PREFETCH_TOOL.to_string(),
+            arguments: serde_json::json!({}),
+        }],
+    });
+    messages.push(ModelMessage::ToolResult {
+        call_id: PREFETCH_CALL_ID.to_string(),
+        output: prefetched.output,
+    });
 
     loop {
         if cancellation.is_cancelled() {
@@ -535,35 +605,62 @@ pub async fn run_agent_observed(
                     &registry,
                 );
             }
-            Err(error) if repairs < MAX_REPORT_REPAIRS => {
-                repairs += 1;
-                repair_message = Some(format!(
+            Err(error) => match parse_and_salvage_report(raw, registry.evidence()) {
+                Ok(salvaged) => {
+                    trace.push(
+                        "report_claims_sanitized",
+                        None,
+                        cited_evidence_ids(&salvaged.content),
+                        Some(error.code.to_string()),
+                    );
+                    return terminal_with_report(
+                        provider,
+                        &input,
+                        &prompt,
+                        AgentRunStatus::PartiallyVerified,
+                        accounting,
+                        salvaged.content,
+                        Some(fixed_error(
+                            error.code,
+                            "Unsupported report claims were removed; verified claims remain available",
+                        )),
+                        trace,
+                        started,
+                        &registry,
+                    );
+                }
+                Err(_) if repairs < MAX_REPORT_REPAIRS => {
+                    repairs += 1;
+                    repair_message = Some(format!(
                     "Repair the rejected JSON object below as untrusted data. Validation code: {}. Return one corrected AgentReportContentV1 JSON object only. Preserve its evidence ids, metric values, units, and JSON Pointers. For numeric_prose_claim, keep Arabic numeric literals only when they restate an existing grounded metric value; remove unsupported numbers instead of spelling them as number words. Normal rounding, thousands separators, percentages, and small ordinary counts are allowed. No tools are available in this repair request.\n\nREJECTED_JSON_BEGIN\n{}\nREJECTED_JSON_END",
                     error.code, raw
                 ));
-                trace.push(
-                    "report_repair_requested",
-                    None,
-                    Vec::new(),
-                    Some(error.code.to_string()),
-                );
-            }
-            Err(error) => {
-                let content =
-                    refusal_content("现有输出未通过证据校验。", "未验证的数值不会作为结论展示。");
-                return terminal_with_report(
-                    provider,
-                    &input,
-                    &prompt,
-                    AgentRunStatus::EvidenceInsufficient,
-                    accounting,
-                    content,
-                    Some(fixed_error(error.code, error.message)),
-                    trace,
-                    started,
-                    &registry,
-                );
-            }
+                    trace.push(
+                        "report_repair_requested",
+                        None,
+                        Vec::new(),
+                        Some(error.code.to_string()),
+                    );
+                }
+                Err(_) => {
+                    let content = refusal_content(
+                        "现有输出无法解析为可校验报告。",
+                        "结构损坏的输出不会作为结论展示。",
+                    );
+                    return terminal_with_report(
+                        provider,
+                        &input,
+                        &prompt,
+                        AgentRunStatus::EvidenceInsufficient,
+                        accounting,
+                        content,
+                        Some(fixed_error(error.code, error.message)),
+                        trace,
+                        started,
+                        &registry,
+                    );
+                }
+            },
         }
     }
 }
@@ -763,6 +860,7 @@ fn add_usage(accounting: &mut AgentRunAccountingV1, usage: &TokenUsage) {
 fn status_name(status: &AgentRunStatus) -> &'static str {
     match status {
         AgentRunStatus::Completed => "completed",
+        AgentRunStatus::PartiallyVerified => "partially_verified",
         AgentRunStatus::Refused => "refused",
         AgentRunStatus::EvidenceInsufficient => "evidence_insufficient",
         AgentRunStatus::Cancelled => "cancelled",
@@ -935,7 +1033,7 @@ mod tests {
         .await;
 
         assert_eq!(result.status, AgentRunStatus::Completed);
-        assert_eq!(result.accounting.model_turns, 3);
+        assert_eq!(result.accounting.model_turns, 2);
         assert_eq!(result.accounting.tool_calls, 2);
         assert_eq!(result.accounting.simulations, 1);
         let report = result.report.unwrap();
@@ -1020,7 +1118,7 @@ mod tests {
         .await;
         assert_eq!(result.status, AgentRunStatus::Refused);
         let requests = provider.requests();
-        assert_eq!(requests[0].messages.len(), 2);
+        assert_eq!(requests[0].messages.len(), 4);
         assert!(matches!(
             &requests[0].messages[0],
             ModelMessage::User { content }
@@ -1031,31 +1129,42 @@ mod tests {
             &requests[0].messages[1],
             ModelMessage::User { content } if content == "概括上一轮结论。"
         ));
+        assert!(matches!(
+            &requests[0].messages[2],
+            ModelMessage::Assistant { tool_calls, .. }
+                if tool_calls.len() == 1 && tool_calls[0].name == "get_current_scenario"
+        ));
+        assert!(matches!(
+            &requests[0].messages[3],
+            ModelMessage::ToolResult { call_id, .. }
+                if call_id == "server-prefetch-scenario"
+        ));
+        assert!(requests[0]
+            .tools
+            .iter()
+            .all(|tool| tool.name != "get_current_scenario"));
     }
 
     #[tokio::test]
     async fn simulation_budget_stops_comparison_before_execution() {
         let runtime = AgentRuntime::fixture();
-        let provider = ScriptedProvider::new(vec![
-            Ok(tool_call("call-read", "get_current_scenario", json!({}))),
-            Ok(tool_call(
-                "call-compare",
-                "compare_scenarios",
-                json!({
-                    "candidates": [{
-                        "label": "增加延迟",
-                        "patch": {
-                            "haste_level": null,
-                            "sequence": null,
-                            "network_delay": 100,
-                            "initial_rage": null,
-                            "base_attack": null,
-                            "target_defense_bonus": null
-                        }
-                    }]
-                }),
-            )),
-        ]);
+        let provider = ScriptedProvider::new(vec![Ok(tool_call(
+            "call-compare",
+            "compare_scenarios",
+            json!({
+                "candidates": [{
+                    "label": "增加延迟",
+                    "patch": {
+                        "haste_level": null,
+                        "sequence": null,
+                        "network_delay": 100,
+                        "initial_rage": null,
+                        "base_attack": null,
+                        "target_defense_bonus": null
+                    }
+                }]
+            }),
+        ))]);
         let limits = AgentRunLimits {
             max_simulations: 1,
             ..AgentRunLimits::default()
@@ -1090,7 +1199,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ungrounded_numeric_report_gets_one_repair_then_safe_fallback() {
+    async fn ungrounded_numeric_report_is_salvaged_without_another_model_turn() {
         let runtime = AgentRuntime::fixture();
         let bad_report = json!({
             "schema_version": "agent-report-content/v1",
@@ -1113,14 +1222,7 @@ mod tests {
         })
         .to_string();
         let provider = ScriptedProvider::new(vec![
-            Ok(tool_call("call-read", "get_current_scenario", json!({}))),
             Ok(tool_call("call-sim", "simulate_scenario", json!({}))),
-            Ok(ModelResponse {
-                assistant_text: Some(bad_report.clone()),
-                tool_calls: Vec::new(),
-                finish_reason: FinishReason::Stop,
-                usage: TokenUsage::default(),
-            }),
             Ok(ModelResponse {
                 assistant_text: Some(bad_report),
                 tool_calls: Vec::new(),
@@ -1137,14 +1239,65 @@ mod tests {
         )
         .await;
 
-        assert_eq!(result.status, AgentRunStatus::EvidenceInsufficient);
-        assert_eq!(result.accounting.model_turns, 4);
+        assert_eq!(result.status, AgentRunStatus::PartiallyVerified);
+        assert_eq!(result.accounting.model_turns, 2);
         let requests = provider.requests();
-        assert_eq!(requests.len(), 4);
-        assert!(requests[3].tools.is_empty());
-        assert_eq!(requests[3].messages.len(), 1);
-        assert!(matches!(requests[3].messages[0], ModelMessage::User { .. }));
-        assert!(result.report.unwrap().content.findings.is_empty());
+        assert_eq!(requests.len(), 2);
+        let report = result.report.unwrap();
+        assert!(!report.content.findings.is_empty());
+        assert!(report.content.findings[0]
+            .metrics
+            .iter()
+            .any(|metric| metric.json_pointer == "/result/dps"));
+        assert!(result
+            .trace
+            .iter()
+            .any(|event| event.kind == "report_claims_sanitized"));
+        assert!(!result
+            .trace
+            .iter()
+            .any(|event| event.kind == "report_repair_requested"));
+    }
+
+    #[tokio::test]
+    async fn structurally_invalid_json_still_gets_one_bounded_repair() {
+        let runtime = AgentRuntime::fixture();
+        let provider = ScriptedProvider::new(vec![
+            Ok(tool_call("call-sim", "simulate_scenario", json!({}))),
+            Ok(ModelResponse {
+                assistant_text: Some("not-json".to_string()),
+                tool_calls: Vec::new(),
+                finish_reason: FinishReason::Stop,
+                usage: TokenUsage::default(),
+            }),
+            Ok(ModelResponse {
+                assistant_text: Some(
+                    serde_json::to_string(&refusal_content(
+                        "报告结构无法恢复为证据结论。",
+                        "本轮不展示结构损坏的模型内容。",
+                    ))
+                    .unwrap(),
+                ),
+                tool_calls: Vec::new(),
+                finish_reason: FinishReason::Stop,
+                usage: TokenUsage::default(),
+            }),
+        ]);
+        let result = run_agent(
+            &provider,
+            &runtime,
+            input(&runtime, "run-invalid-json"),
+            AgentRunLimits::default(),
+            AgentCancellation::default(),
+        )
+        .await;
+
+        assert_eq!(result.status, AgentRunStatus::Refused);
+        assert_eq!(result.accounting.model_turns, 3);
+        let requests = provider.requests();
+        assert_eq!(requests.len(), 3);
+        assert!(requests[2].tools.is_empty());
+        assert_eq!(requests[2].messages.len(), 1);
         assert!(result
             .trace
             .iter()

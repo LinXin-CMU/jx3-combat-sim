@@ -408,7 +408,7 @@ api_key_env = "EXAMPLE_OPENAI_KEY"
         let catalog = ProviderCatalog::from_toml(source).unwrap();
         let list = catalog.safe_list_with(|_| None);
 
-        assert_eq!(list.profiles.len(), 4);
+        assert_eq!(list.profiles.len(), 5);
         assert!(list.profiles[0].available);
         assert!(list.profiles[1..].iter().all(|profile| !profile.available));
     }

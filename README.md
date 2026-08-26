@@ -183,7 +183,7 @@ Agent 围绕明确目标自主调用高层工具：
 - `compare_scenarios`
 - `analyze_timeline`
 
-它负责拆解问题、提出假设和组织证据，不直接生成“看起来合理”的伤害数字。当前闭环包括 provider adapter、有界工具循环、数值证据校验、Run API/SSE、append-only 持久会话、有界可见上下文恢复和面试用实验面板。当前 `agent-system/v2` 允许正文以阿拉伯数字复述已绑定 metric，支持四舍五入、千分位和百分比；无对应证据的精确数字仍会被拦截。Phase 1 工具评测保持 20/20；Phase 2 离线模型级评测为 12/12。DeepSeek V4 Pro 固定十题从 1/10 提升到 6/10，复跑为 5/10，三轮越权工具调用均为 0；真实结果不包装成稳定准确率。
+它负责拆解问题、提出假设和组织证据，不直接生成“看起来合理”的伤害数字。当前闭环包括 provider adapter、有界工具循环、数值证据校验、Run API/SSE、append-only 持久会话、有界可见上下文恢复和面试用实验面板。当前 `agent-system/v3` 由服务端预取不可变场景，减少一次无决策价值的模型往返；报告改为逐条校验，错误 metric 或无来源数字会被单独移除并形成 `partially_verified` 报告，不再清空其余可信结论。Phase 1 工具评测保持 20/20；Phase 2 离线模型级评测为 12/12。DeepSeek V4 Pro 固定十题从 1/10 提升到 6/10，复跑为 5/10，三轮越权工具调用均为 0；真实结果不包装成稳定准确率。
 
 一键复验完整离线闭环：
 
@@ -191,7 +191,7 @@ Agent 围绕明确目标自主调用高层工具：
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\agent-phase2-verify.ps1
 ```
 
-Provider 默认只启用不联网的 `offline` profile；可选服务商配置见 [`config/agent.providers.example.toml`](config/agent.providers.example.toml)。API key 只从服务端环境变量读取，不进入网页或用户设置。完整离线验收见 [`docs/baselines/2026-08-26-agent-phase2-offline.md`](docs/baselines/2026-08-26-agent-phase2-offline.md)，真实模型结果见 [`docs/baselines/2026-08-26-agent-deepseek-v4-pro.md`](docs/baselines/2026-08-26-agent-deepseek-v4-pro.md)，作品集叙事与演示流程见 [`docs/AGENT_PORTFOLIO_CASE_STUDY.md`](docs/AGENT_PORTFOLIO_CASE_STUDY.md) 和 [`docs/AGENT_90S_DEMO_SCRIPT.md`](docs/AGENT_90S_DEMO_SCRIPT.md)。公网发布仍需单独确认。
+Provider 默认只启用不联网的 `offline` profile；可选服务商配置见 [`config/agent.providers.example.toml`](config/agent.providers.example.toml)，已包含 DeepSeek V4 Pro 与 V4 Flash 选项。API key 只从服务端环境变量读取，不进入网页或用户设置。完整离线验收见 [`docs/baselines/2026-08-26-agent-phase2-offline.md`](docs/baselines/2026-08-26-agent-phase2-offline.md)，真实模型结果见 [`docs/baselines/2026-08-26-agent-deepseek-v4-pro.md`](docs/baselines/2026-08-26-agent-deepseek-v4-pro.md)，作品集叙事与演示流程见 [`docs/AGENT_PORTFOLIO_CASE_STUDY.md`](docs/AGENT_PORTFOLIO_CASE_STUDY.md) 和 [`docs/AGENT_90S_DEMO_SCRIPT.md`](docs/AGENT_90S_DEMO_SCRIPT.md)。公网发布仍需单独确认。
 
 ### 差异化案例：RL → 宏蒸馏
 

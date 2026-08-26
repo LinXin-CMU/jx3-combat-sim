@@ -56,7 +56,9 @@
     validating: '校验证据',
     report_repair_requested: '修复报告',
     report_citations_normalized: '补全证据引用',
+    report_claims_sanitized: '保留可信结论',
     completed: '分析完成',
+    partially_verified: '部分通过',
     refused: '安全拒绝',
     cancelled: '任务取消',
     evidence_insufficient: '证据校验未通过',
@@ -68,7 +70,7 @@
   };
 
   const statusLabels = {
-    created: '已创建', running: '运行中', completed: '已完成', refused: '已拒绝',
+    created: '已创建', running: '运行中', completed: '已完成', partially_verified: '部分通过', refused: '已拒绝',
     cancelled: '已取消', interrupted: '已中断', evidence_insufficient: '未形成可靠结论',
     budget_exhausted: '预算耗尽', provider_failed: 'Provider 故障',
     protocol_failed: '协议故障', timed_out: '超时', finished: '已结束',
@@ -139,6 +141,7 @@
     if (kind === 'tool_finished') return '已取得工具证据，正在继续分析…';
     if (kind === 'validating') return '正在校验数值、单位与证据引用…';
     if (kind === 'report_repair_requested') return '报告引用未通过，正在尝试修复…';
+    if (kind === 'report_claims_sanitized') return '正在隐藏未验证内容并保留可信结论…';
     if (kind === 'report_citations_normalized') return '已补全可验证引用，正在完成校验…';
     if (kind === 'cancel_requested') return '正在安全停止当前任务…';
     return '正在分析当前循环…';
@@ -163,6 +166,8 @@
     const status = result?.status;
     if (status === 'completed') {
       setStatus(recovered ? '分析完成 · 已恢复验证结论' : '分析完成 · 结论已绑定证据并保存');
+    } else if (status === 'partially_verified') {
+      setStatus(recovered ? '分析完成 · 已恢复部分验证结论' : '分析完成 · 已保留通过逐项校验的结论');
     } else if (status === 'evidence_insufficient') {
       setStatus('分析结束 · 未验证内容已被证据校验器拦截');
     } else if (status === 'refused') {
@@ -334,9 +339,12 @@
     }
     const card = element('article', 'agent-report');
     const evidenceInsufficient = result.status === 'evidence_insufficient';
-    card.classList.toggle('is-limited', evidenceInsufficient);
+    const partiallyVerified = result.status === 'partially_verified';
+    card.classList.toggle('is-limited', evidenceInsufficient || partiallyVerified);
     const head = element('div', 'agent-report-head');
-    head.appendChild(element('b', '', evidenceInsufficient ? '本轮未形成可靠结论' : '已验证分析报告'));
+    head.appendChild(element('b', '', evidenceInsufficient
+      ? '本轮未形成可靠结论'
+      : partiallyVerified ? '部分验证分析报告' : '已验证分析报告'));
     head.appendChild(element('span', '', `${report.provider_profile} / ${report.model} · ${result.accounting?.duration_ms || 0}ms`));
     card.appendChild(head);
     if (evidenceInsufficient) {
@@ -344,6 +352,12 @@
       notice.appendChild(element('b', '', '这不是系统故障'));
       notice.appendChild(element('span', '', '模型输出中的数值或引用未通过模拟器证据校验，未验证内容已被拦截。'));
       if (result.error?.code) notice.title = `校验码：${result.error.code}`;
+      card.appendChild(notice);
+    } else if (partiallyVerified) {
+      const notice = element('div', 'agent-result-notice');
+      notice.appendChild(element('b', '', '逐条校验后保留'));
+      notice.appendChild(element('span', '', '个别模型表述或指标未通过证据校验，已单独隐藏；下方内容仍可继续追问。'));
+      if (result.error?.code) notice.title = `首个校验码：${result.error.code}`;
       card.appendChild(notice);
     }
     card.appendChild(element('div', 'agent-report-summary', report.content?.summary || '—'));
@@ -449,7 +463,8 @@
     const report = result.report;
     const card = element('article', 'sim-ai-result');
     const evidenceInsufficient = result.status === 'evidence_insufficient';
-    card.classList.toggle('is-limited', evidenceInsufficient);
+    const partiallyVerified = result.status === 'partially_verified';
+    card.classList.toggle('is-limited', evidenceInsufficient || partiallyVerified);
     const head = element('div', 'sim-ai-result-head');
     head.appendChild(element('b', '', statusLabels[result.status] || result.status || '分析结果'));
     head.appendChild(element('span', '', `${result.provider_profile || '—'} · ${result.accounting?.duration_ms || 0}ms`));
@@ -460,6 +475,12 @@
       notice.appendChild(element('b', '', '这不是系统故障'));
       notice.appendChild(element('span', '', '模型输出中的数值或引用未通过证据校验，因此没有发布为结论。'));
       if (result.error?.code) notice.title = `校验码：${result.error.code}`;
+      card.appendChild(notice);
+    } else if (partiallyVerified) {
+      const notice = element('div', 'sim-ai-result-notice');
+      notice.appendChild(element('b', '', '部分通过'));
+      notice.appendChild(element('span', '', '未验证的单项内容已隐藏，其余证据结论仍然有效并可继续追问。'));
+      if (result.error?.code) notice.title = `首个校验码：${result.error.code}`;
       card.appendChild(notice);
     }
 

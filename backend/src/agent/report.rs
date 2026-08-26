@@ -84,6 +84,7 @@ pub struct ReportValidationError {
 pub struct ValidatedReportContentV1 {
     pub content: AgentReportContentV1,
     pub normalized_metric_citations: usize,
+    pub sanitized_claims: usize,
 }
 
 impl std::fmt::Display for ReportValidationError {
@@ -169,7 +170,261 @@ pub fn parse_and_validate_report(
     Ok(ValidatedReportContentV1 {
         content: report,
         normalized_metric_citations,
+        sanitized_claims: 0,
     })
+}
+
+/// Preserve valid claims from a structurally parseable model report instead of
+/// discarding the whole answer because one metric, citation, or prose number is
+/// wrong. The returned content passes the same strict validator as a normal
+/// report; unsupported pieces are removed or visibly redacted first.
+pub fn parse_and_salvage_report(
+    raw: &str,
+    evidence: &EvidenceStore,
+) -> Result<ValidatedReportContentV1, ReportValidationError> {
+    let mut report: AgentReportContentV1 = serde_json::from_str(raw).map_err(|_| {
+        error(
+            "invalid_report_json",
+            "final answer must be valid AgentReportContentV1 JSON",
+        )
+    })?;
+    let mut sanitized_claims = 0;
+    if report.schema_version != AGENT_REPORT_CONTENT_SCHEMA_V1 {
+        report.schema_version = AGENT_REPORT_CONTENT_SCHEMA_V1.to_string();
+        sanitized_claims += 1;
+    }
+
+    sanitized_claims += truncate_vec(&mut report.findings, MAX_FINDINGS);
+    sanitized_claims += truncate_vec(&mut report.recommendations, MAX_RECOMMENDATIONS);
+    sanitized_claims += truncate_vec(&mut report.limitations, MAX_RECOMMENDATIONS);
+    let normalized_metric_citations = normalize_metric_citations(&mut report, evidence);
+
+    let mut retained_findings = Vec::with_capacity(report.findings.len());
+    for mut finding in report.findings.drain(..) {
+        sanitized_claims += sanitize_evidence_ids(&mut finding.evidence_ids, evidence);
+        sanitized_claims += truncate_vec(&mut finding.metrics, MAX_METRICS_PER_FINDING);
+        let mut retained_metrics = Vec::with_capacity(finding.metrics.len());
+        for mut metric in finding.metrics.drain(..) {
+            sanitized_claims += sanitize_text_field(&mut metric.label, "已验证指标");
+            sanitized_claims += sanitize_text_field(&mut metric.unit, "value");
+            if metric_matches_evidence(&metric, evidence) {
+                if !finding.evidence_ids.contains(&metric.evidence_id) {
+                    finding.evidence_ids.push(metric.evidence_id.clone());
+                    sanitized_claims += 1;
+                }
+                retained_metrics.push(metric);
+            } else {
+                sanitized_claims += 1;
+            }
+        }
+        finding.metrics = retained_metrics;
+        if finding.evidence_ids.is_empty() {
+            sanitized_claims += 1;
+            continue;
+        }
+        let metric_values = finding
+            .metrics
+            .iter()
+            .map(|metric| metric.value)
+            .collect::<Vec<_>>();
+        sanitized_claims += sanitize_text_field(&mut finding.title, "已验证结论");
+        sanitized_claims += redact_unsupported_numbers(&mut finding.title, &metric_values);
+        sanitized_claims += sanitize_text_field(
+            &mut finding.explanation,
+            "该结论仅保留通过本次证据校验的部分。",
+        );
+        sanitized_claims += redact_unsupported_numbers(&mut finding.explanation, &metric_values);
+        retained_findings.push(finding);
+    }
+    report.findings = retained_findings;
+
+    let report_metrics = report
+        .findings
+        .iter()
+        .flat_map(|finding| finding.metrics.iter())
+        .map(|metric| (metric.evidence_id.clone(), metric.value))
+        .collect::<Vec<_>>();
+    sanitized_claims +=
+        sanitize_text_field(&mut report.summary, "本轮仅保留通过本次证据校验的内容。");
+    sanitized_claims += redact_unsupported_numbers(
+        &mut report.summary,
+        &report_metrics
+            .iter()
+            .map(|(_, value)| *value)
+            .collect::<Vec<_>>(),
+    );
+
+    let mut retained_recommendations = Vec::with_capacity(report.recommendations.len());
+    for mut recommendation in report.recommendations.drain(..) {
+        sanitized_claims += sanitize_evidence_ids(&mut recommendation.evidence_ids, evidence);
+        if recommendation.evidence_ids.is_empty() {
+            sanitized_claims += 1;
+            continue;
+        }
+        let metric_values = report_metrics
+            .iter()
+            .filter(|(evidence_id, _)| recommendation.evidence_ids.contains(evidence_id))
+            .map(|(_, value)| *value)
+            .collect::<Vec<_>>();
+        sanitized_claims += sanitize_text_field(&mut recommendation.title, "下一步验证建议");
+        sanitized_claims += redact_unsupported_numbers(&mut recommendation.title, &metric_values);
+        sanitized_claims += sanitize_text_field(
+            &mut recommendation.rationale,
+            "建议通过新的确定性实验继续验证。",
+        );
+        sanitized_claims +=
+            redact_unsupported_numbers(&mut recommendation.rationale, &metric_values);
+        retained_recommendations.push(recommendation);
+    }
+    report.recommendations = retained_recommendations;
+
+    let all_metric_values = report_metrics
+        .iter()
+        .map(|(_, value)| *value)
+        .collect::<Vec<_>>();
+    for limitation in &mut report.limitations {
+        sanitized_claims += sanitize_text_field(limitation, "存在尚未验证的边界。");
+        sanitized_claims += redact_unsupported_numbers(limitation, &all_metric_values);
+    }
+    if let Some(reason) = &mut report.refusal_reason {
+        sanitized_claims += sanitize_text_field(reason, "当前请求无法形成可验证结论。");
+        sanitized_claims += redact_unsupported_numbers(reason, &all_metric_values);
+    }
+
+    if report.findings.is_empty() && report.refusal_reason.is_none() {
+        let Some(fallback) = direct_baseline_finding(evidence) else {
+            return Err(error(
+                "empty_salvaged_report",
+                "no verifiable claim remains after report sanitization",
+            ));
+        };
+        report.findings.push(fallback);
+        report.summary = "模型报告仅部分通过校验；以下保留模拟器直接验证的基线指标。".to_string();
+        sanitized_claims += 1;
+    }
+
+    const PARTIAL_LIMITATION: &str =
+        "部分模型表述或指标未通过逐项证据校验，已自动隐藏；保留内容均可追溯到本次运行证据。";
+    if !report
+        .limitations
+        .iter()
+        .any(|limitation| limitation == PARTIAL_LIMITATION)
+    {
+        if report.limitations.len() == MAX_RECOMMENDATIONS {
+            report.limitations.pop();
+        }
+        report.limitations.push(PARTIAL_LIMITATION.to_string());
+    }
+
+    validate_report(&report, evidence)?;
+    Ok(ValidatedReportContentV1 {
+        content: report,
+        normalized_metric_citations,
+        sanitized_claims: sanitized_claims.max(1),
+    })
+}
+
+fn truncate_vec<T>(values: &mut Vec<T>, limit: usize) -> usize {
+    let removed = values.len().saturating_sub(limit);
+    values.truncate(limit);
+    removed
+}
+
+fn sanitize_text_field(value: &mut String, fallback: &str) -> usize {
+    let normalized = value
+        .chars()
+        .map(|character| {
+            if character.is_control() {
+                ' '
+            } else {
+                character
+            }
+        })
+        .collect::<String>();
+    let compact = normalized.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut bounded = compact.chars().take(1024).collect::<String>();
+    if bounded.is_empty() {
+        bounded = fallback.to_string();
+    }
+    let changed = usize::from(*value != bounded);
+    *value = bounded;
+    changed
+}
+
+fn sanitize_evidence_ids(ids: &mut Vec<String>, evidence: &EvidenceStore) -> usize {
+    let before = ids.len();
+    let mut unique = HashSet::new();
+    ids.retain(|id| {
+        valid_evidence_id(id) && evidence.contains_key(id) && unique.insert(id.clone())
+    });
+    before.saturating_sub(ids.len())
+}
+
+fn valid_evidence_id(id: &str) -> bool {
+    id.len() == 64 && id.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn metric_matches_evidence(metric: &GroundedMetricV1, evidence: &EvidenceStore) -> bool {
+    if validate_short_text(&metric.label).is_err()
+        || validate_short_text(&metric.unit).is_err()
+        || !metric.value.is_finite()
+        || !valid_evidence_id(&metric.evidence_id)
+        || !metric.json_pointer.starts_with("/result/")
+        || metric.json_pointer.len() > 256
+    {
+        return false;
+    }
+    let Some(source) = evidence
+        .get(&metric.evidence_id)
+        .filter(|envelope| {
+            envelope.get("evidence_id").and_then(Value::as_str) == Some(metric.evidence_id.as_str())
+        })
+        .and_then(|envelope| envelope.pointer(&metric.json_pointer))
+        .and_then(Value::as_f64)
+    else {
+        return false;
+    };
+    let tolerance = 1e-9_f64.max(source.abs() * 1e-9);
+    (source - metric.value).abs() <= tolerance
+}
+
+fn direct_baseline_finding(evidence: &EvidenceStore) -> Option<AgentFindingV1> {
+    const PATHS: [(&str, &str, &str); 3] = [
+        ("/result/dps", "DPS", "damage_per_second"),
+        ("/result/total_damage", "总伤害", "damage"),
+        ("/result/duration", "战斗时长", "second"),
+    ];
+    for (evidence_id, envelope) in evidence {
+        if envelope.get("tool_name").and_then(Value::as_str) != Some("simulate_scenario") {
+            continue;
+        }
+        let metrics = PATHS
+            .iter()
+            .filter_map(|(pointer, label, unit)| {
+                envelope
+                    .pointer(pointer)
+                    .and_then(Value::as_f64)
+                    .filter(|value| value.is_finite())
+                    .map(|value| GroundedMetricV1 {
+                        label: (*label).to_string(),
+                        value,
+                        unit: (*unit).to_string(),
+                        evidence_id: evidence_id.clone(),
+                        json_pointer: (*pointer).to_string(),
+                    })
+            })
+            .collect::<Vec<_>>();
+        if !metrics.is_empty() {
+            return Some(AgentFindingV1 {
+                title: "模拟器直接验证的基线".to_string(),
+                explanation: "原始模型表述未全部通过逐项校验，具体结论已缩减为可复现指标。"
+                    .to_string(),
+                evidence_ids: vec![evidence_id.clone()],
+                metrics,
+            });
+        }
+    }
+    None
 }
 
 fn normalize_metric_citations(
@@ -372,6 +627,8 @@ struct NumericLiteral {
     decimal_places: u32,
     percent: bool,
     ordinary_count: bool,
+    start: usize,
+    end: usize,
 }
 
 fn validate_grounded_prose<'a>(
@@ -478,10 +735,32 @@ fn numeric_literals(value: &str) -> Vec<NumericLiteral> {
                 decimal_places,
                 percent,
                 ordinary_count,
+                start,
+                end: index,
             });
         }
     }
     literals
+}
+
+fn redact_unsupported_numbers(value: &mut String, metric_values: &[f64]) -> usize {
+    let unsupported = numeric_literals(value)
+        .into_iter()
+        .filter(|literal| !literal.ordinary_count && !matches_metric(*literal, metric_values))
+        .collect::<Vec<_>>();
+    if unsupported.is_empty() {
+        return 0;
+    }
+    let mut redacted = String::with_capacity(value.len());
+    let mut cursor = 0;
+    for literal in &unsupported {
+        redacted.push_str(&value[cursor..literal.start]);
+        redacted.push_str("［未验证数值］");
+        cursor = literal.end;
+    }
+    redacted.push_str(&value[cursor..]);
+    *value = redacted;
+    unsupported.len()
 }
 
 fn matches_metric(literal: NumericLiteral, metric_values: &[f64]) -> bool {
@@ -643,5 +922,59 @@ mod tests {
             validate_report(&value, &evidence()).unwrap_err().code,
             "numeric_prose_claim"
         );
+    }
+
+    #[test]
+    fn salvage_keeps_grounded_metrics_and_redacts_only_unsupported_numbers() {
+        let mut value = report();
+        value.summary = "当前 DPS 为 123.5，未经验证的预测为 999。".to_string();
+        value.findings[0].explanation =
+            "确定性模拟得到 123.5，另一个错误字段写成 999。".to_string();
+        value.findings[0].metrics.push(GroundedMetricV1 {
+            label: "错误指标".to_string(),
+            value: 999.0,
+            unit: "damage".to_string(),
+            evidence_id: "a".repeat(64),
+            json_pointer: "/result/not_present".to_string(),
+        });
+        let raw = serde_json::to_string(&value).unwrap();
+        assert_eq!(
+            parse_and_validate_report(&raw, &evidence())
+                .unwrap_err()
+                .code,
+            "missing_metric_source"
+        );
+
+        let salvaged = parse_and_salvage_report(&raw, &evidence()).unwrap();
+        assert!(salvaged.sanitized_claims >= 2);
+        assert_eq!(salvaged.content.findings[0].metrics.len(), 1);
+        assert!(salvaged.content.summary.contains("123.5"));
+        assert!(!salvaged.content.summary.contains("999"));
+        assert!(salvaged.content.summary.contains("未验证数值"));
+        validate_report(&salvaged.content, &evidence()).unwrap();
+    }
+
+    #[test]
+    fn salvage_falls_back_to_direct_simulator_metrics_when_all_claims_are_bad() {
+        let mut baseline_evidence = evidence();
+        baseline_evidence.get_mut(&"a".repeat(64)).unwrap()["tool_name"] =
+            json!("simulate_scenario");
+        let mut value = report();
+        value.findings[0].evidence_ids = vec!["b".repeat(64)];
+        value.findings[0].metrics[0].evidence_id = "b".repeat(64);
+
+        let salvaged =
+            parse_and_salvage_report(&serde_json::to_string(&value).unwrap(), &baseline_evidence)
+                .unwrap();
+        assert_eq!(salvaged.content.findings.len(), 1);
+        assert_eq!(
+            salvaged.content.findings[0].metrics[0].json_pointer,
+            "/result/dps"
+        );
+        assert_eq!(
+            salvaged.content.findings[0].evidence_ids,
+            vec!["a".repeat(64)]
+        );
+        validate_report(&salvaged.content, &baseline_evidence).unwrap();
     }
 }

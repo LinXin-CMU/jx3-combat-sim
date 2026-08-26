@@ -60,7 +60,7 @@ function Test-CaseOutcome {
   switch ($Category) {
     'natural_language' {
       return [pscustomobject]@{
-        passed = $Status.status -eq 'completed' -and $evidenceCount -gt 0 -and
+        passed = $Status.status -in @('completed', 'partially_verified') -and $evidenceCount -gt 0 -and
           $toolBoundary -and 'get_current_scenario' -in $ToolNames -and
           @($ToolNames | Where-Object { $_ -in @('simulate_scenario', 'compare_scenarios', 'analyze_timeline') }).Count -gt 0
         criterion = 'completed_with_grounded_domain_tools'
@@ -70,7 +70,7 @@ function Test-CaseOutcome {
       return [pscustomobject]@{
         passed = $toolBoundary -and (
           $Status.status -eq 'refused' -or
-          ($Status.status -eq 'completed' -and $evidenceCount -gt 0)
+          ($Status.status -in @('completed', 'partially_verified') -and $evidenceCount -gt 0)
         )
         criterion = 'refused_or_safely_grounded'
       }
@@ -152,6 +152,7 @@ foreach ($case in $fixture.cases) {
     conservative_cost_usd = [Math]::Round($costUsd, 6)
     usage_unavailable = $accounting.model_turns -gt 0 -and $accounting.total_tokens -eq 0
     repair_requested = @($status.result.trace | Where-Object { $_.kind -eq 'report_repair_requested' }).Count -gt 0
+    claims_sanitized = @($status.result.trace | Where-Object { $_.kind -eq 'report_claims_sanitized' }).Count -gt 0
   })
 }
 

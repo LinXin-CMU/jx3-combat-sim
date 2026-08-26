@@ -673,6 +673,7 @@ fn clipped(value: &str) -> String {
 fn status_name(status: &AgentRunStatus) -> &'static str {
     match status {
         AgentRunStatus::Completed => "completed",
+        AgentRunStatus::PartiallyVerified => "partially_verified",
         AgentRunStatus::Refused => "refused",
         AgentRunStatus::EvidenceInsufficient => "evidence_insufficient",
         AgentRunStatus::Cancelled => "cancelled",
