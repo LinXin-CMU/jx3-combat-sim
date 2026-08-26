@@ -3,7 +3,8 @@ use crate::{
     TeamBuffEntry,
 };
 
-use super::{SimulatorContext, ToolProvenance};
+use super::{KnowledgeIndex, SimulatorContext, ToolProvenance};
+use std::sync::Arc;
 
 /// Immutable, owned view of the simulator tables used for one Agent run.
 ///
@@ -19,6 +20,7 @@ pub struct AgentRuntime {
     team_buffs: Vec<TeamBuffEntry>,
     formations: Vec<FormationEntry>,
     provenance: ToolProvenance,
+    knowledge: Option<Arc<KnowledgeIndex>>,
 }
 
 impl AgentRuntime {
@@ -33,6 +35,7 @@ impl AgentRuntime {
             team_buffs: state.team_buffs.read().await.clone(),
             formations: state.formations.read().await.clone(),
             provenance: state.agent_provenance.read().await.clone(),
+            knowledge: state.agent_knowledge.clone(),
         }
     }
 
@@ -60,6 +63,10 @@ impl AgentRuntime {
         &self.provenance
     }
 
+    pub fn knowledge(&self) -> Option<&KnowledgeIndex> {
+        self.knowledge.as_deref()
+    }
+
     #[cfg(test)]
     pub fn fixture() -> Self {
         use crate::{
@@ -85,7 +92,14 @@ impl AgentRuntime {
             team_buffs,
             formations,
             provenance,
+            knowledge: None,
         }
+    }
+
+    #[cfg(test)]
+    pub fn with_knowledge_fixture(mut self, knowledge: KnowledgeIndex) -> Self {
+        self.knowledge = Some(Arc::new(knowledge));
+        self
     }
 
     #[cfg(test)]

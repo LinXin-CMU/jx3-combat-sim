@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 pub const AGENT_REPORT_CONTENT_SCHEMA_V1: &str = "agent-report-content/v1";
 pub const AGENT_REPORT_SCHEMA_V1: &str = "agent-report/v1";
@@ -56,10 +56,31 @@ pub struct AgentReportV1 {
     pub prompt_sha256: String,
     pub provider_profile: String,
     pub model: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<AgentKnowledgeSourceV1>,
     pub content: AgentReportContentV1,
     pub evidence_ids: Vec<String>,
     pub accounting: AgentRunAccountingV1,
     pub termination: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct AgentKnowledgeSourceV1 {
+    pub document_id: String,
+    pub title: String,
+    pub season: String,
+    pub category: String,
+    pub source_url: String,
+    pub yuque_url: String,
+    pub source_site: String,
+    pub source_updated_at: String,
+    pub version_match: String,
+    pub fact_eligible: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version_warning: Option<String>,
+    pub document_hash: String,
+    pub evidence_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -68,6 +89,8 @@ pub struct AgentRunAccountingV1 {
     pub model_turns: u32,
     pub tool_calls: u32,
     pub simulations: u32,
+    #[serde(default)]
+    pub knowledge_searches: u32,
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub total_tokens: u64,
@@ -387,6 +410,7 @@ fn metric_matches_evidence(metric: &GroundedMetricV1, evidence: &EvidenceStore) 
         .get(&metric.evidence_id)
         .filter(|envelope| {
             envelope.get("evidence_id").and_then(Value::as_str) == Some(metric.evidence_id.as_str())
+                && metric_tool_allowed(envelope)
         })
         .and_then(|envelope| envelope.pointer(&metric.json_pointer))
         .and_then(Value::as_f64)
@@ -560,6 +584,87 @@ pub fn cited_evidence_ids(report: &AgentReportContentV1) -> Vec<String> {
     ids
 }
 
+pub fn cited_knowledge_sources(
+    evidence_ids: &[String],
+    evidence: &EvidenceStore,
+) -> Vec<AgentKnowledgeSourceV1> {
+    let mut sources = Vec::<AgentKnowledgeSourceV1>::new();
+    let mut positions = HashMap::<String, usize>::new();
+    for evidence_id in evidence_ids {
+        let Some(envelope) = evidence.get(evidence_id) else {
+            continue;
+        };
+        if envelope.get("tool_name").and_then(Value::as_str) != Some("search_knowledge_base") {
+            continue;
+        }
+        let Some(results) = envelope
+            .pointer("/result/results")
+            .and_then(Value::as_array)
+        else {
+            continue;
+        };
+        for result in results {
+            let Some(document_id) = short_value(result, "document_id", 128) else {
+                continue;
+            };
+            let source_url =
+                short_value(result, "source_url", 2048).filter(|url| safe_public_url(url));
+            let yuque_url =
+                short_value(result, "yuque_url", 2048).filter(|url| safe_public_url(url));
+            let Some(primary_url) = source_url.clone().or_else(|| yuque_url.clone()) else {
+                continue;
+            };
+            let key = format!("{document_id}\u{0}{primary_url}");
+            if let Some(existing) = positions
+                .get(&key)
+                .and_then(|position| sources.get_mut(*position))
+            {
+                if !existing.evidence_ids.contains(evidence_id) {
+                    existing.evidence_ids.push(evidence_id.clone());
+                }
+                continue;
+            }
+            let Some(title) = short_value(result, "title", 512) else {
+                continue;
+            };
+            positions.insert(key, sources.len());
+            sources.push(AgentKnowledgeSourceV1 {
+                document_id,
+                title,
+                season: short_value(result, "season", 128).unwrap_or_default(),
+                category: short_value(result, "category", 128).unwrap_or_default(),
+                source_url: primary_url,
+                yuque_url: yuque_url.unwrap_or_default(),
+                source_site: short_value(result, "source_site", 256).unwrap_or_default(),
+                source_updated_at: short_value(result, "source_updated_at", 128)
+                    .unwrap_or_default(),
+                version_match: short_value(result, "version_match", 64).unwrap_or_default(),
+                fact_eligible: result
+                    .get("fact_eligible")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                version_warning: short_value(result, "version_warning", 512),
+                document_hash: short_value(result, "document_hash", 128).unwrap_or_default(),
+                evidence_ids: vec![evidence_id.clone()],
+            });
+        }
+    }
+    sources
+}
+
+fn short_value(value: &Value, field: &str, max_chars: usize) -> Option<String> {
+    let value = value.get(field)?.as_str()?.trim();
+    if value.is_empty() || value.chars().any(char::is_control) {
+        return None;
+    }
+    Some(value.chars().take(max_chars).collect())
+}
+
+fn safe_public_url(url: &str) -> bool {
+    (url.starts_with("https://") || url.starts_with("http://"))
+        && !url.chars().any(char::is_control)
+}
+
 fn validate_evidence_ids<'a>(
     ids: &'a [String],
     evidence: &EvidenceStore,
@@ -611,6 +716,7 @@ fn validate_metric(
         .get(&metric.evidence_id)
         .filter(|envelope| {
             envelope.get("evidence_id").and_then(Value::as_str) == Some(metric.evidence_id.as_str())
+                && metric_tool_allowed(envelope)
         })
         .and_then(|envelope| envelope.pointer(&metric.json_pointer))
         .and_then(Value::as_f64)
@@ -628,6 +734,13 @@ fn validate_metric(
         ));
     }
     Ok(())
+}
+
+fn metric_tool_allowed(envelope: &Value) -> bool {
+    matches!(
+        envelope.get("tool_name").and_then(Value::as_str),
+        Some("simulate_scenario" | "compare_scenarios" | "analyze_timeline")
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -842,7 +955,11 @@ mod tests {
     fn evidence() -> EvidenceStore {
         BTreeMap::from([(
             "a".repeat(64),
-            json!({"evidence_id": "a".repeat(64), "result": {"dps": 123.5, "ratio": 0.3}}),
+            json!({
+                "evidence_id": "a".repeat(64),
+                "tool_name": "simulate_scenario",
+                "result": {"dps": 123.5, "ratio": 0.3}
+            }),
         )])
     }
 
@@ -874,6 +991,58 @@ mod tests {
     }
 
     #[test]
+    fn knowledge_sources_are_derived_only_from_cited_safe_evidence() {
+        let cited = "b".repeat(64);
+        let uncited = "c".repeat(64);
+        let result = json!({
+            "document_id": "doc-current",
+            "title": "暗影千机分山劲白皮书",
+            "season": "暗影千机（2026）",
+            "category": "白皮书",
+            "source_url": "https://example.com/guide",
+            "yuque_url": "https://www.yuque.com/sgyxy/cangyun/guide",
+            "source_site": "example.com",
+            "source_updated_at": "2026-08-26T00:00:00Z",
+            "version_match": "current_exact",
+            "fact_eligible": true,
+            "version_warning": null,
+            "document_hash": "d".repeat(64)
+        });
+        let store = BTreeMap::from([
+            (
+                cited.clone(),
+                json!({
+                    "evidence_id": cited,
+                    "tool_name": "search_knowledge_base",
+                    "result": {"results": [result, {
+                        "document_id": "unsafe",
+                        "title": "unsafe",
+                        "source_url": "javascript:alert(1)"
+                    }]}
+                }),
+            ),
+            (
+                uncited,
+                json!({
+                    "tool_name": "search_knowledge_base",
+                    "result": {"results": [{
+                        "document_id": "uncited",
+                        "title": "uncited",
+                        "source_url": "https://example.com/uncited"
+                    }]}
+                }),
+            ),
+        ]);
+
+        let sources = cited_knowledge_sources(&["b".repeat(64)], &store);
+        assert_eq!(sources.len(), 1);
+        assert_eq!(sources[0].title, "暗影千机分山劲白皮书");
+        assert_eq!(sources[0].version_match, "current_exact");
+        assert!(sources[0].fact_eligible);
+        assert_eq!(sources[0].evidence_ids, vec!["b".repeat(64)]);
+    }
+
+    #[test]
     fn upstream_report_schema_is_closed_and_strict_compatible() {
         let schema = report_content_json_schema();
         assert_eq!(schema["additionalProperties"], false);
@@ -902,6 +1071,33 @@ mod tests {
         assert_eq!(
             validate_report(&mismatch, &evidence()).unwrap_err().code,
             "metric_value_mismatch"
+        );
+    }
+
+    #[test]
+    fn knowledge_scores_cannot_be_published_as_combat_metrics() {
+        let id = "b".repeat(64);
+        let store = BTreeMap::from([(
+            id.clone(),
+            json!({
+                "evidence_id": id,
+                "tool_name": "search_knowledge_base",
+                "result": {"results": [{"score": 99.0}]}
+            }),
+        )]);
+        let mut value = report();
+        value.findings[0].evidence_ids = vec!["b".repeat(64)];
+        value.findings[0].metrics[0] = GroundedMetricV1 {
+            label: "检索分数".to_string(),
+            value: 99.0,
+            unit: "score".to_string(),
+            evidence_id: "b".repeat(64),
+            json_pointer: "/result/results/0/score".to_string(),
+        };
+
+        assert_eq!(
+            validate_report(&value, &store).unwrap_err().code,
+            "missing_metric_source"
         );
     }
 

@@ -4814,6 +4814,8 @@ pub struct SharedState {
     pub agent_runs: Arc<agent::run::AgentRunManager>,
     /// 当前 worker 用户目录内的 append-only Agent 会话。
     pub agent_sessions: Arc<agent::session::AgentSessionStore>,
+    /// 启动时构建的只读、版本感知本地知识索引；未配置时 Agent 保持原有模拟能力。
+    pub agent_knowledge: Option<Arc<agent::KnowledgeIndex>>,
     /// 当前选中的武学版本（初始 V2025_10 山海源流）
     pub version: Arc<RwLock<GameVersion>>,
     /// 当前选中的心法（初始 分山劲）
@@ -9374,6 +9376,26 @@ async fn main() {
     };
     println!("[agent] 已加载 {} 个 provider profile", agent_providers.len());
 
+    let agent_knowledge = match agent::KnowledgeIndex::from_env() {
+        Ok(index) => {
+            println!(
+                "[agent] 知识库已加载：{} 篇文档 / {} 个分块 / corpus {}",
+                index.document_count(),
+                index.chunk_count(),
+                &index.corpus_hash()[..12]
+            );
+            Some(Arc::new(index))
+        }
+        Err(agent::KnowledgeIndexError::NotConfigured) => {
+            println!("[agent] 未配置 JX3_KNOWLEDGE_ROOT，知识库工具关闭");
+            None
+        }
+        Err(error) => {
+            eprintln!("[agent] 知识库加载失败（{error}），已降级为原有模拟 Agent");
+            None
+        }
+    };
+
     // 加载装备数据（优先 equip.json；否则回退 equip/*.tab 并自动生成 JSON 缓存）
     let equip_data = equip::load_equip_smart(Path::new(data_root()));
 
@@ -9404,6 +9426,7 @@ async fn main() {
         agent_providers: Arc::new(agent_providers),
         agent_runs,
         agent_sessions,
+        agent_knowledge,
         version: Arc::new(RwLock::new(version)),
         mount: Arc::new(RwLock::new(mount)),
         constants: Arc::new(RwLock::new(constants)),

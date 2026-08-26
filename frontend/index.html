@@ -6,7 +6,7 @@
   <title>剑网3 苍云PVE循环模拟器</title>
   <link rel="icon" href="favicon.ico" type="image/x-icon">
   <link rel="stylesheet" href="style.css">
-  <link rel="stylesheet" href="agent.css?v=20260826-readable2">
+  <link rel="stylesheet" href="agent.css?v=20260826-knowledge1">
 </head>
 <body>
   <div class="container">
@@ -222,7 +222,7 @@
           <section class="agent-flow" aria-label="Agent 工作流">
             <div><b>01</b><span>策划问题</span></div><i>→</i>
             <div><b>02</b><span>模型规划</span></div><i>→</i>
-            <div><b>03</b><span>模拟实验</span></div><i>→</i>
+            <div><b>03</b><span>检索 / 模拟</span></div><i>→</i>
             <div><b>04</b><span>证据校验</span></div><i>→</i>
             <div><b>05</b><span>结构化结论</span></div>
           </section>
@@ -240,10 +240,11 @@
             <div class="agent-welcome">
               <div class="agent-welcome-mark">✦</div>
               <h3>从一个可验证的问题开始</h3>
-              <p>先在“循环模拟”准备场景，再问 Agent 当前基线、候选改动或时间轴异常。离线 profile 可完整演示工具与证据闭环，不产生模型费用。</p>
+              <p>先在“循环模拟”准备场景，再问 Agent 当前攻略、输出基线、候选改动或时间轴异常。引用资料会标明赛季与原始来源。</p>
               <div class="agent-starter-grid">
                 <button class="sim-btn" data-agent-question="分析当前循环的输出基线，并说明证据边界。">分析当前基线</button>
                 <button class="sim-btn" data-agent-question="找出当前循环中值得进一步验证的时间轴问题。">诊断时间轴</button>
+                <button class="sim-btn" data-agent-question="结合当前版本资料，说明这套循环的核心思路，并标注来源和版本边界。">查询版本攻略</button>
                 <button class="sim-btn" data-agent-question="说明这个场景还缺少哪些证据，避免给出未经验证的结论。">检查证据边界</button>
               </div>
             </div>
@@ -2019,13 +2020,14 @@
         <div class="sim-ai-quick" aria-label="常用分析">
           <button type="button" class="sim-btn" data-sim-ai-question="分析当前循环的输出基线，并说明证据边界。">基线分析</button>
           <button type="button" class="sim-btn" data-sim-ai-question="诊断当前循环的时间轴，找出值得进一步验证的空转、怒气或增益覆盖问题。">时间轴诊断</button>
+          <button type="button" class="sim-btn" data-sim-ai-question="结合当前版本资料，说明这套循环的核心思路，并标注来源和版本边界。">版本攻略</button>
           <button type="button" class="sim-btn" data-sim-ai-question="说明当前循环还缺少哪些证据，并给出下一步最小验证实验。">下一步实验</button>
         </div>
 
         <section class="sim-ai-chat" id="sim_ai_chat" aria-live="polite">
           <div class="sim-ai-welcome">
-            <span>AI 只读当前循环并调用确定性模拟器。</span>
-            <small>不会修改技能、宏、配装或其他游戏数据。</small>
+            <span>AI 只读当前循环、版本知识库与确定性模拟器。</span>
+            <small>资料会标注赛季和来源，不会修改任何游戏数据。</small>
           </div>
         </section>
 
@@ -2037,7 +2039,7 @@
             <span id="sim_ai_provider_model">deterministic-fixture-v1</span>
           </div>
           <div class="sim-ai-input-wrap">
-            <textarea id="sim_ai_question" rows="2" maxlength="16000" placeholder="问当前循环的基线、时间轴或候选改动…"></textarea>
+            <textarea id="sim_ai_question" rows="2" maxlength="16000" placeholder="问当前攻略、循环基线、时间轴或候选改动…"></textarea>
           </div>
           <div class="sim-ai-compose-meta">
             <span id="sim_ai_status">Enter 发送 · Shift+Enter 换行</span>
@@ -2808,7 +2810,7 @@
       s.onload = next; s.onerror = next;
       document.body.appendChild(s);
     }
-    var SCRIPTS = ['state.js', 'app.js', 'agent.js?v=20260826-readable2'];
+    var SCRIPTS = ['state.js', 'app.js', 'agent.js?v=20260826-knowledge1'];
     var go = function () { loadSeq(SCRIPTS); };
     try {
       fetch('/api/settings', { cache: 'no-store' })

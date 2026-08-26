@@ -76,6 +76,25 @@
     protocol_failed: '协议故障', timed_out: '超时', finished: '已结束',
   };
 
+  const toolLabels = {
+    get_current_scenario: '读取当前场景',
+    search_knowledge_base: '检索版本知识库',
+    simulate_scenario: '运行基线模拟',
+    compare_scenarios: '对比候选方案',
+    analyze_timeline: '分析战斗时间轴',
+  };
+
+  const versionLabels = {
+    current_exact: '当前版本',
+    test_server_exact: '当前体服',
+    historical_explicit: '指定历史版本',
+    cross_version: '跨版本资料',
+  };
+
+  function toolLabel(name) {
+    return toolLabels[name] || name || '只读工具';
+  }
+
   function clear(node) {
     while (node.firstChild) node.removeChild(node.firstChild);
   }
@@ -137,7 +156,7 @@
   function thinkingText(event) {
     const kind = event?.trace_kind || event?.kind;
     if (kind === 'planning') return '正在拆解问题并选择验证路径…';
-    if (kind === 'tool_started') return `正在调用 ${event.tool_name || '模拟器'}…`;
+    if (kind === 'tool_started') return `正在${toolLabel(event.tool_name)}…`;
     if (kind === 'tool_finished') return '已取得工具证据，正在继续分析…';
     if (kind === 'validating') return '正在校验数值、单位与证据引用…';
     if (kind === 'report_repair_requested') return '报告引用未通过，正在尝试修复…';
@@ -316,7 +335,7 @@
     if (trace.seen.has(key)) return;
     trace.seen.add(key);
     const kind = event.trace_kind || event.kind;
-    const suffix = event.tool_name ? ` · ${event.tool_name}` : '';
+    const suffix = event.tool_name ? ` · ${toolLabel(event.tool_name)}` : '';
     const step = element('span', 'agent-trace-step', `${traceLabels[kind] || kind}${suffix}`);
     if (event.code) step.title = event.code;
     trace.steps.appendChild(step);
@@ -386,6 +405,64 @@
     parent.appendChild(grid);
   }
 
+  function safeExternalUrl(value) {
+    try {
+      const url = new URL(String(value || ''));
+      return ['https:', 'http:'].includes(url.protocol) ? url.href : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function sourceAnchor(label, value) {
+    const href = safeExternalUrl(value);
+    if (!href) return null;
+    const link = element('a', 'agent-source-link', label);
+    link.href = href;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    return link;
+  }
+
+  function appendKnowledgeSources(parent, sources, compact) {
+    if (!sources?.length) return;
+    const block = element('details', compact ? 'sim-ai-result-sources' : 'agent-sources');
+    block.open = !compact && sources.length <= 3;
+    block.appendChild(element('summary', '', `参考资料（${sources.length}）`));
+    const list = element('div', 'agent-source-list');
+    sources.slice(0, compact ? 4 : 10).forEach(source => {
+      const item = element('article', 'agent-source-item');
+      const titleLink = sourceAnchor(source.title || '未命名资料', source.source_url || source.yuque_url);
+      item.appendChild(titleLink || element('span', 'agent-source-title', source.title || '未命名资料'));
+      const meta = element('div', 'agent-source-meta');
+      [source.season, source.category, versionLabels[source.version_match] || source.version_match]
+        .filter(Boolean)
+        .forEach(value => meta.appendChild(element('span', '', value)));
+      meta.appendChild(element(
+        'span',
+        source.fact_eligible ? 'is-grounded' : 'is-limited',
+        source.fact_eligible ? '正文可核验' : '仅来源入口',
+      ));
+      if (source.version_warning) {
+        const warning = element('span', 'is-warning', '版本信息冲突');
+        warning.title = source.version_warning;
+        meta.appendChild(warning);
+      }
+      item.appendChild(meta);
+      const actions = element('div', 'agent-source-actions');
+      const original = sourceAnchor('查看原始来源 ↗', source.source_url);
+      const yuque = source.yuque_url !== source.source_url
+        ? sourceAnchor('语雀目录 ↗', source.yuque_url)
+        : null;
+      if (original) actions.appendChild(original);
+      if (yuque) actions.appendChild(yuque);
+      if (actions.childNodes.length) item.appendChild(actions);
+      list.appendChild(item);
+    });
+    block.appendChild(list);
+    parent.appendChild(block);
+  }
+
   function renderReport(result) {
     latestResult = result || null;
     els.copy.disabled = !latestResult;
@@ -436,6 +513,7 @@
       recommendations.forEach(item => block.appendChild(element('p', '', `${readableProse(item.title, allMetrics)}：${readableProse(item.rationale, allMetrics)}`)));
       card.appendChild(block);
     }
+    appendKnowledgeSources(card, report.sources || [], false);
     const limitations = report.content?.limitations || [];
     if (limitations.length) {
       const block = element('details', 'agent-boundaries');
@@ -459,8 +537,8 @@
   function clearDockChat() {
     clear(els.dockChat);
     const welcome = element('div', 'sim-ai-welcome');
-    welcome.appendChild(element('span', '', 'AI 只读当前循环并调用确定性模拟器。'));
-    welcome.appendChild(element('small', '', '不会修改技能、宏、配装或其他游戏数据。'));
+    welcome.appendChild(element('span', '', 'AI 只读当前循环、版本知识库与确定性模拟器。'));
+    welcome.appendChild(element('small', '', '资料会标注赛季和来源，不会修改任何游戏数据。'));
     els.dockChat.appendChild(welcome);
     dockTrace = null;
     dockLatestResult = null;
@@ -502,7 +580,7 @@
     if (!trace) return;
     const kind = event.trace_kind || event.kind;
     const label = traceLabels[kind] || kind;
-    const suffix = event.tool_name ? ` · ${event.tool_name}` : '';
+    const suffix = event.tool_name ? ` · ${toolLabel(event.tool_name)}` : '';
     trace.steps.appendChild(element('span', 'sim-ai-progress-step', `${label}${suffix}`));
     scrollDock();
   }
@@ -549,6 +627,7 @@
       appendMetricGrid(block, (finding.metrics || []).slice(0, 4), 'sim-ai-result-metrics');
       card.appendChild(block);
     });
+    appendKnowledgeSources(card, report?.sources || [], true);
     const limitations = report?.content?.limitations || [];
     if (limitations.length) {
       const block = element('details', 'sim-ai-result-boundaries');
@@ -569,11 +648,12 @@
     const welcome = element('div', 'agent-welcome');
     welcome.appendChild(element('div', 'agent-welcome-mark', '✦'));
     welcome.appendChild(element('h3', '', '从一个可验证的问题开始'));
-    welcome.appendChild(element('p', '', '先在“循环模拟”准备场景，再问 Agent 当前基线、候选改动或时间轴异常。离线 profile 可完整演示工具与证据闭环，不产生模型费用。'));
+    welcome.appendChild(element('p', '', '先在“循环模拟”准备场景，再问 Agent 当前攻略、输出基线、候选改动或时间轴异常。引用资料会标明赛季与原始来源。'));
     const starters = element('div', 'agent-starter-grid');
     [
       ['分析当前基线', '分析当前循环的输出基线，并说明证据边界。'],
       ['诊断时间轴', '找出当前循环中值得进一步验证的时间轴问题。'],
+      ['查询版本攻略', '结合当前版本资料，说明这套循环的核心思路，并标注来源和版本边界。'],
       ['检查证据边界', '说明这个场景还缺少哪些证据，避免给出未经验证的结论。'],
     ].forEach(([label, question]) => {
       const button = element('button', 'sim-btn', label);
@@ -727,7 +807,7 @@
           appendDockTraceStep(dockTrace, event);
           updateThinking(dockThinking, event);
           const label = traceLabels[kind] || kind;
-          setStatus(`${label}${event.tool_name ? ` · ${event.tool_name}` : ''}`);
+          setStatus(`${label}${event.tool_name ? ` · ${toolLabel(event.tool_name)}` : ''}`);
         }
       });
     });
@@ -833,7 +913,7 @@
           appendTraceStep(activeTrace, event);
           updateThinking(activeThinking, event);
           const label = traceLabels[kind] || kind;
-          setStatus(`${label}${event.tool_name ? ` · ${event.tool_name}` : ''}`);
+          setStatus(`${label}${event.tool_name ? ` · ${toolLabel(event.tool_name)}` : ''}`);
         }
       });
     });
@@ -902,10 +982,18 @@
       `- scenario: ${latestResult.scenario_hash}`,
       `- prompt: ${latestResult.prompt_version} / ${latestResult.prompt_sha256}`,
       `- tools/simulations: ${latestResult.accounting?.tool_calls || 0} / ${latestResult.accounting?.simulations || 0}`,
+      `- knowledge searches: ${latestResult.accounting?.knowledge_searches || 0}`,
       `- evidence: ${(report?.evidence_ids || []).join(', ') || 'none'}`,
       '',
       report?.content?.summary || latestResult.error?.message || 'No report',
     ];
+    if (report?.sources?.length) {
+      lines.push('', '## 参考资料');
+      report.sources.forEach(source => {
+        const href = safeExternalUrl(source.source_url || source.yuque_url);
+        if (href) lines.push(`- [${source.title || '未命名资料'}](${href}) · ${source.season || '版本未标注'} · ${versionLabels[source.version_match] || source.version_match || '匹配状态未知'}`);
+      });
+    }
     try {
       await navigator.clipboard.writeText(lines.join('\n'));
       setStatus('已复制可复现实验摘要');

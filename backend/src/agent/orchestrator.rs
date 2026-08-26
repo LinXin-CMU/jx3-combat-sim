@@ -7,16 +7,16 @@ use std::time::{Duration, Instant};
 use tokio::sync::Notify;
 
 use super::evidence::validate_trace_id;
-use super::prompt::agent_prompt_v4;
+use super::prompt::agent_prompt_v5;
 use super::provider::{
     FinishReason, LlmProvider, ModelMessage, ModelRequest, ProviderToolCall,
     StructuredOutputDefinition, TokenUsage,
 };
 use super::registry::AgentToolRegistry;
 use super::report::{
-    cited_evidence_ids, parse_and_salvage_report, parse_and_validate_report,
-    report_content_json_schema, AgentReportContentV1, AgentReportV1, AgentRunAccountingV1,
-    AGENT_REPORT_CONTENT_SCHEMA_V1, AGENT_REPORT_SCHEMA_V1,
+    cited_evidence_ids, cited_knowledge_sources, parse_and_salvage_report,
+    parse_and_validate_report, report_content_json_schema, AgentReportContentV1, AgentReportV1,
+    AgentRunAccountingV1, AGENT_REPORT_CONTENT_SCHEMA_V1, AGENT_REPORT_SCHEMA_V1,
 };
 use super::{AgentRuntime, ScenarioSnapshotV1};
 
@@ -215,7 +215,7 @@ pub async fn run_agent_observed(
     event_sink: Option<AgentTraceSink>,
 ) -> AgentRunResultV1 {
     let started = Instant::now();
-    let prompt = agent_prompt_v4();
+    let prompt = agent_prompt_v5();
     let mut accounting = AgentRunAccountingV1::default();
     let mut trace = TraceCollector::new(event_sink);
 
@@ -236,8 +236,18 @@ pub async fn run_agent_observed(
         );
     }
 
-    let mut registry = AgentToolRegistry::new(&input.scenario, runtime, limits.max_simulations);
-    let tools = AgentToolRegistry::definitions()
+    let mut registry = AgentToolRegistry::new_with_knowledge(
+        &input.scenario,
+        runtime,
+        limits.max_simulations,
+        runtime.knowledge(),
+    );
+    let definitions = if runtime.knowledge().is_some() {
+        AgentToolRegistry::definitions_with_knowledge()
+    } else {
+        AgentToolRegistry::definitions()
+    };
+    let tools = definitions
         .into_iter()
         .filter(|tool| tool.name != "get_current_scenario")
         .collect::<Vec<_>>();
@@ -516,6 +526,10 @@ pub async fn run_agent_observed(
                     &registry,
                 );
             }
+            let domain_experiment_requested = response
+                .tool_calls
+                .iter()
+                .any(|call| is_domain_experiment(&call.name));
             messages.push(ModelMessage::Assistant {
                 content: response.assistant_text,
                 tool_calls: response.tool_calls.clone(),
@@ -553,6 +567,7 @@ pub async fn run_agent_observed(
                     output: outcome.output,
                 });
                 if outcome.budget_exhausted {
+                    let knowledge_budget = call.name == "search_knowledge_base";
                     return terminal_with_registry(
                         provider,
                         &input,
@@ -561,8 +576,16 @@ pub async fn run_agent_observed(
                         accounting,
                         None,
                         Some(fixed_error(
-                            "simulation_budget",
-                            "Simulation budget is exhausted",
+                            if knowledge_budget {
+                                "knowledge_search_budget"
+                            } else {
+                                "simulation_budget"
+                            },
+                            if knowledge_budget {
+                                "Knowledge search budget is exhausted"
+                            } else {
+                                "Simulation budget is exhausted"
+                            },
                         )),
                         trace,
                         started,
@@ -570,10 +593,11 @@ pub async fn run_agent_observed(
                     );
                 }
             }
-            // Each exposed domain tool already returns a complete experiment.
-            // The next turn is report-only so JSON mode can be enabled for
-            // providers that cannot combine tools with structured output.
-            final_report_only = true;
+            // Knowledge retrieval may precede one deterministic experiment.
+            // Once a domain tool runs, the next turn is report-only so JSON
+            // mode remains compatible with providers that cannot combine tools
+            // and structured output.
+            final_report_only = domain_experiment_requested;
             continue;
         }
 
@@ -675,6 +699,13 @@ pub async fn run_agent_observed(
     }
 }
 
+fn is_domain_experiment(tool_name: &str) -> bool {
+    matches!(
+        tool_name,
+        "simulate_scenario" | "compare_scenarios" | "analyze_timeline"
+    )
+}
+
 fn validate_input(input: &AgentRunInput, limits: &AgentRunLimits) -> Result<(), ()> {
     validate_trace_id(&input.run_id).map_err(|_| ())?;
     if input.question.trim().is_empty()
@@ -733,8 +764,11 @@ fn terminal_with_report(
     registry: &AgentToolRegistry<'_>,
 ) -> AgentRunResultV1 {
     accounting.simulations = registry.used_simulations();
+    accounting.knowledge_searches = registry.used_knowledge_searches();
     accounting.duration_ms = elapsed_ms(started);
     let termination = status_name(&status).to_string();
+    let evidence_ids = cited_evidence_ids(&content);
+    let sources = cited_knowledge_sources(&evidence_ids, registry.evidence());
     let report = AgentReportV1 {
         schema_version: AGENT_REPORT_SCHEMA_V1.to_string(),
         question: input.question.clone(),
@@ -743,7 +777,8 @@ fn terminal_with_report(
         prompt_sha256: prompt.sha256.clone(),
         provider_profile: provider.profile_id().to_string(),
         model: provider.model().to_string(),
-        evidence_ids: cited_evidence_ids(&content),
+        sources,
+        evidence_ids,
         content,
         accounting: accounting.clone(),
         termination: termination.clone(),
@@ -780,6 +815,7 @@ fn terminal_with_registry(
     registry: &AgentToolRegistry<'_>,
 ) -> AgentRunResultV1 {
     accounting.simulations = registry.used_simulations();
+    accounting.knowledge_searches = registry.used_knowledge_searches();
     accounting.duration_ms = elapsed_ms(started);
     trace.push(
         status_name(&status),
@@ -891,9 +927,12 @@ mod tests {
     use crate::agent::provider::{FakeProvider, ModelResponse, ProviderError, ProviderToolCall};
     use crate::{Attributes, TargetConfig};
     use async_trait::async_trait;
-    use serde_json::json;
+    use serde_json::{json, Value};
     use std::collections::{HashMap, VecDeque};
+    use std::fs;
+    use std::path::PathBuf;
     use std::sync::Mutex;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     struct ScriptedProvider {
         responses: Mutex<VecDeque<Result<ModelResponse, ProviderError>>>,
@@ -930,6 +969,72 @@ mod tests {
                 .unwrap()
                 .pop_front()
                 .expect("scripted response exhausted")
+        }
+    }
+
+    struct KnowledgeProvider;
+
+    #[async_trait]
+    impl LlmProvider for KnowledgeProvider {
+        fn profile_id(&self) -> &str {
+            "knowledge-fixture"
+        }
+
+        fn model(&self) -> &str {
+            "fixture-v1"
+        }
+
+        async fn complete(&self, request: &ModelRequest) -> Result<ModelResponse, ProviderError> {
+            let knowledge_evidence = request.messages.iter().rev().find_map(|message| {
+                let ModelMessage::ToolResult { output, .. } = message else {
+                    return None;
+                };
+                (output.get("tool_name").and_then(Value::as_str) == Some("search_knowledge_base"))
+                    .then_some(output)
+            });
+            if let Some(output) = knowledge_evidence {
+                let evidence_id = output
+                    .pointer("/evidence/0/evidence_id")
+                    .and_then(Value::as_str)
+                    .unwrap();
+                return Ok(ModelResponse {
+                    assistant_text: Some(
+                        serde_json::to_string(&json!({
+                            "schema_version": "agent-report-content/v1",
+                            "summary": "当前版本资料给出了盾飞阶段的循环边界。",
+                            "findings": [{
+                                "title": "当前版本循环资料",
+                                "explanation": "盾飞阶段需要关注劫刀数量并避免流血中断。",
+                                "evidence_ids": [evidence_id],
+                                "metrics": []
+                            }],
+                            "recommendations": [],
+                            "limitations": [],
+                            "refusal_reason": null
+                        }))
+                        .unwrap(),
+                    ),
+                    tool_calls: Vec::new(),
+                    finish_reason: FinishReason::Stop,
+                    usage: TokenUsage::default(),
+                });
+            }
+
+            assert!(request
+                .tools
+                .iter()
+                .any(|tool| tool.name == "search_knowledge_base"));
+            Ok(tool_call(
+                "call-knowledge",
+                "search_knowledge_base",
+                json!({
+                    "query": "盾飞劫刀流血",
+                    "version_scope": "current_only",
+                    "season": null,
+                    "category": "基础",
+                    "top_k": 3
+                }),
+            ))
         }
     }
 
@@ -1052,6 +1157,35 @@ mod tests {
             report.content.findings[0].metrics[0].json_pointer,
             "/result/dps"
         );
+    }
+
+    #[tokio::test]
+    async fn knowledge_only_run_exposes_versioned_sources_without_a_simulation() {
+        let (root, knowledge) = knowledge_fixture();
+        let runtime = AgentRuntime::fixture().with_knowledge_fixture(knowledge);
+        let result = run_agent(
+            &KnowledgeProvider,
+            &runtime,
+            input(&runtime, "run-knowledge"),
+            AgentRunLimits::default(),
+            AgentCancellation::default(),
+        )
+        .await;
+
+        assert_eq!(result.status, AgentRunStatus::Completed);
+        assert_eq!(result.prompt_version, "agent-system/v5");
+        assert_eq!(result.accounting.knowledge_searches, 1);
+        assert_eq!(result.accounting.simulations, 0);
+        let report = result.report.unwrap();
+        assert_eq!(report.sources.len(), 1);
+        assert_eq!(report.sources[0].season, "暗影千机（2026）");
+        assert_eq!(report.sources[0].version_match, "current_exact");
+        assert!(report.sources[0].fact_eligible);
+        assert_eq!(report.sources[0].source_url, "https://example.com/current");
+
+        let expected_root = std::env::temp_dir();
+        assert!(root.starts_with(&expected_root));
+        let _ = fs::remove_dir_all(root);
     }
 
     #[tokio::test]
@@ -1314,5 +1448,41 @@ mod tests {
             .trace
             .iter()
             .any(|event| event.kind == "report_repair_requested"));
+    }
+
+    fn knowledge_fixture() -> (PathBuf, super::super::KnowledgeIndex) {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("jx3-orchestrator-knowledge-{nonce}"));
+        let relative = "暗影千机（2026）/基础/当前循环.md";
+        let path = root.join(relative);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(
+            &path,
+            "---\ntitle: 当前循环\n---\n\n# 当前循环\n\n盾飞阶段需要关注劫刀数量，并避免流血中断。\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("_migration-manifest.json"),
+            serde_json::to_vec_pretty(&json!({
+                "entries": [{
+                    "title": "当前循环",
+                    "season": "暗影千机（2026）",
+                    "category": "基础",
+                    "kind": "yuque_document",
+                    "source": "https://example.com/current",
+                    "output": relative,
+                    "source_site": "example.com",
+                    "yuque_url": "https://www.yuque.com/sgyxy/cangyun/current",
+                    "updated_at": "2026-08-26T00:00:00Z"
+                }]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let index = super::super::KnowledgeIndex::load(&root).unwrap();
+        (root, index)
     }
 }

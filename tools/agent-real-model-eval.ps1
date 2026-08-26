@@ -14,6 +14,7 @@ if (-not $OutputPath) {
 }
 $allowedTools = @(
   'get_current_scenario',
+  'search_knowledge_base',
   'simulate_scenario',
   'compare_scenarios',
   'analyze_timeline'
@@ -142,8 +143,10 @@ foreach ($case in $fixture.cases) {
     model_turns = $accounting.model_turns
     tool_calls = $accounting.tool_calls
     simulations = $accounting.simulations
+    knowledge_searches = $accounting.knowledge_searches
     tools = $toolNames
     evidence_count = @($status.result.report.evidence_ids | Where-Object { $_ }).Count
+    source_count = @($status.result.report.sources | Where-Object { $_ }).Count
     metric_count = $metricCount
     input_tokens = $accounting.input_tokens
     output_tokens = $accounting.output_tokens

@@ -116,7 +116,7 @@ body.agent-fullheight #page-agent.active {
 .agent-welcome-mark { width: 44px; height: 44px; margin: 0 auto 12px; display: grid; place-items: center; border: 1px solid var(--gold-dim); border-radius: 50%; color: var(--gold); font-size: 22px; background: var(--gold-tint); }
 .agent-welcome h3 { color: var(--agent-ink); margin: 0 0 8px; font-size: 18px; }
 .agent-welcome p { font-size: 13px; line-height: 1.65; }
-.agent-starter-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-top: 16px; }
+.agent-starter-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 8px; margin-top: 16px; }
 .agent-starter-grid .sim-btn { min-height: 36px; font-size: 12px; }
 .agent-message { max-width: 900px; margin: 0 auto 14px; }
 .agent-message-label { margin-bottom: 5px; color: var(--agent-muted); font-size: 11px; }
@@ -139,6 +139,22 @@ body.agent-fullheight #page-agent.active {
 .agent-metric { min-width: 130px; padding: 7px 9px; border: 1px solid var(--agent-line); border-radius: 4px; background: var(--surface2); }
 .agent-metric b { display: block; color: var(--warning); font-size: 15px; }
 .agent-metric span { color: var(--agent-muted); font-size: 11px; }
+.agent-sources,
+.sim-ai-result-sources { border-top: 1px solid var(--agent-line); color: var(--agent-muted); }
+.agent-sources summary,
+.sim-ai-result-sources summary { padding: 9px 12px; color: var(--text); font-size: 11px; cursor: pointer; user-select: none; }
+.agent-source-list { display: grid; gap: 7px; padding: 0 12px 11px; }
+.agent-source-item { min-width: 0; padding: 8px 9px; border: 1px solid var(--agent-line); border-radius: 5px; background: var(--surface2); }
+.agent-source-link,
+.agent-source-title { display: block; overflow: hidden; color: var(--text); font-size: 12px; font-weight: 600; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
+.agent-source-link:hover { color: var(--gold); text-decoration: underline; text-underline-offset: 2px; }
+.agent-source-meta { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.agent-source-meta span { padding: 2px 5px; border-radius: 3px; color: var(--agent-muted); background: var(--bg); font-size: 10px; }
+.agent-source-meta .is-grounded { color: var(--green); }
+.agent-source-meta .is-limited,
+.agent-source-meta .is-warning { color: var(--warning); }
+.agent-source-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
+.agent-source-actions .agent-source-link { color: var(--gold); font-size: 10px; font-weight: 500; }
 .agent-evidence { padding: 8px 12px 10px; border-top: 1px solid var(--agent-line); color: var(--agent-muted); font-size: 11px; overflow-wrap: anywhere; }
 .agent-error { color: var(--red); }
 .agent-report.is-limited { border-color: var(--warning); }
@@ -357,6 +373,8 @@ body.agent-fullheight #page-agent.active {
 .sim-ai-result-finding { padding: 9px 11px; border-top: 1px solid var(--agent-line); }
 .sim-ai-result-finding b { display: block; margin-bottom: 3px; font-size: 12px; }
 .sim-ai-result-finding p { margin: 0; color: var(--agent-muted); font-size: 11px; line-height: 1.55; }
+.sim-ai-result-sources .agent-source-list { padding-right: 10px; padding-left: 10px; }
+.sim-ai-result-sources .agent-source-item { background: var(--bg); }
 .sim-ai-result-metrics { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px; padding: 0 11px 10px; }
 .sim-ai-result-finding .sim-ai-result-metrics { padding: 7px 0 0; }
 .sim-ai-result-metric { min-width: 0; padding: 7px 8px; border: 1px solid var(--agent-line); border-radius: 6px; background: var(--bg); animation: sim-ai-metric-in .26s cubic-bezier(.22,1,.36,1) both; }
