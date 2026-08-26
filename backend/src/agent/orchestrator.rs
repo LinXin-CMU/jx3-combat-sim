@@ -7,12 +7,14 @@ use std::time::{Duration, Instant};
 use tokio::sync::Notify;
 
 use super::evidence::validate_trace_id;
-use super::prompt::agent_prompt_v6;
+use super::prompt::agent_prompt_v7;
 use super::provider::{
     FinishReason, LlmProvider, ModelMessage, ModelRequest, ProviderToolCall,
     StructuredOutputDefinition, TokenUsage,
 };
-use super::registry::{AgentToolRegistry, MAX_KNOWLEDGE_SEARCHES};
+use super::registry::{
+    normalize_reference_query, AgentToolRegistry, MAX_KNOWLEDGE_SEARCHES,
+};
 use super::report::{
     cited_evidence_ids, cited_knowledge_sources, parse_and_salvage_report,
     parse_and_validate_report, report_content_json_schema, AgentFindingV1, AgentReportContentV1,
@@ -215,7 +217,7 @@ pub async fn run_agent_observed(
     event_sink: Option<AgentTraceSink>,
 ) -> AgentRunResultV1 {
     let started = Instant::now();
-    let prompt = agent_prompt_v6();
+    let prompt = agent_prompt_v7();
     let mut accounting = AgentRunAccountingV1::default();
     let mut trace = TraceCollector::new(event_sink);
 
@@ -535,11 +537,28 @@ pub async fn run_agent_observed(
         }
 
         if !response.tool_calls.is_empty() {
-            if accounting
+            let requested_knowledge_calls = response
                 .tool_calls
-                .saturating_add(response.tool_calls.len() as u32)
-                > limits.max_tool_calls
-            {
+                .iter()
+                .filter(|call| call.name == "search_knowledge_base")
+                .count() as u32;
+            let reference_lookup_requested = response
+                .tool_calls
+                .iter()
+                .any(is_reference_lookup_call);
+            let mut available_knowledge_calls =
+                MAX_KNOWLEDGE_SEARCHES.saturating_sub(registry.used_knowledge_searches());
+            if reference_lookup_requested {
+                // Identity/source lookups are point queries. One bounded retrieval is enough;
+                // allowing a second query encourages associative drift from the matched alias
+                // to nearby names instead of answering from the direct passage.
+                available_knowledge_calls = available_knowledge_calls.min(1);
+            }
+            let coalesced_knowledge_calls =
+                requested_knowledge_calls.saturating_sub(available_knowledge_calls);
+            let effective_tool_calls =
+                (response.tool_calls.len() as u32).saturating_sub(coalesced_knowledge_calls);
+            if accounting.tool_calls.saturating_add(effective_tool_calls) > limits.max_tool_calls {
                 return terminal_with_registry(
                     provider,
                     &input,
@@ -564,7 +583,10 @@ pub async fn run_agent_observed(
                 content: response.assistant_text,
                 tool_calls: response.tool_calls.clone(),
             });
-            for call in response.tool_calls {
+            let mut knowledge_calls_processed = 0_u32;
+            let mut knowledge_calls_coalesced = 0_u32;
+            let mut reference_lookup_processed = false;
+            for mut call in response.tool_calls {
                 if cancellation.is_cancelled() {
                     return terminal_with_registry(
                         provider,
@@ -578,6 +600,27 @@ pub async fn run_agent_observed(
                         started,
                         &registry,
                     );
+                }
+                if call.name == "search_knowledge_base"
+                    && knowledge_calls_processed >= available_knowledge_calls
+                {
+                    knowledge_calls_coalesced += 1;
+                    messages.push(ModelMessage::ToolResult {
+                        call_id: call.call_id,
+                        output: AgentToolRegistry::coalesced_knowledge_search().output,
+                    });
+                    continue;
+                }
+                let reference_lookup_call = is_reference_lookup_call(&call);
+                if call.name == "search_knowledge_base" {
+                    knowledge_calls_processed += 1;
+                    reference_lookup_processed |= reference_lookup_call;
+                }
+                if reference_lookup_call {
+                    let planned_query = normalize_reference_query(&input.question);
+                    if let Some(arguments) = call.arguments.as_object_mut() {
+                        arguments.insert("query".to_string(), serde_json::json!(planned_query));
+                    }
                 }
                 accounting.tool_calls += 1;
                 trace.push("tool_started", Some(call.name.clone()), Vec::new(), None);
@@ -623,12 +666,23 @@ pub async fn run_agent_observed(
                     );
                 }
             }
+            if knowledge_calls_coalesced > 0 {
+                trace.push(
+                    "knowledge_searches_coalesced",
+                    None,
+                    Vec::new(),
+                    Some("redundant_searches_suppressed".to_string()),
+                );
+            }
             // Knowledge retrieval may precede one deterministic experiment.
             // Once a domain tool runs, the next turn is report-only so JSON
             // mode remains compatible with providers that cannot combine tools
             // and structured output.
             final_report_only = domain_experiment_requested;
-            if registry.used_knowledge_searches() >= MAX_KNOWLEDGE_SEARCHES {
+            if registry.used_knowledge_searches() >= MAX_KNOWLEDGE_SEARCHES
+                || knowledge_calls_coalesced > 0
+                || reference_lookup_processed
+            {
                 final_report_only = true;
             }
             continue;
@@ -737,6 +791,15 @@ fn is_domain_experiment(tool_name: &str) -> bool {
         tool_name,
         "simulate_scenario" | "compare_scenarios" | "analyze_timeline"
     )
+}
+
+fn is_reference_lookup_call(call: &ProviderToolCall) -> bool {
+    call.name == "search_knowledge_base"
+        && call
+            .arguments
+            .get("version_scope")
+            .and_then(|value| value.as_str())
+            == Some("reference_lookup")
 }
 
 fn validate_input(input: &AgentRunInput, limits: &AgentRunLimits) -> Result<(), ()> {
@@ -1200,6 +1263,73 @@ mod tests {
         }
     }
 
+    struct ReferenceKnowledgeProvider;
+
+    #[async_trait]
+    impl LlmProvider for ReferenceKnowledgeProvider {
+        fn profile_id(&self) -> &str {
+            "reference-knowledge-fixture"
+        }
+
+        fn model(&self) -> &str {
+            "fixture-v1"
+        }
+
+        async fn complete(&self, request: &ModelRequest) -> Result<ModelResponse, ProviderError> {
+            let knowledge = request.messages.iter().rev().find_map(|message| {
+                let ModelMessage::ToolResult { output, .. } = message else {
+                    return None;
+                };
+                (output.get("tool_name").and_then(Value::as_str) == Some("search_knowledge_base"))
+                    .then_some(output)
+            });
+            if let Some(output) = knowledge {
+                assert_eq!(
+                    output
+                        .pointer("/evidence/0/result/results/0/reference_entities/0/name")
+                        .and_then(Value::as_str),
+                    Some("author_a")
+                );
+                let evidence_id = output
+                    .pointer("/evidence/0/evidence_id")
+                    .and_then(Value::as_str)
+                    .unwrap();
+                return Ok(ModelResponse {
+                    assistant_text: Some(
+                        serde_json::to_string(&json!({
+                            "schema_version": "agent-report-content/v1",
+                            "summary": "资料中的这个称呼指向作者甲。",
+                            "findings": [{
+                                "title": "人物称呼",
+                                "explanation": "旧赛季资料中，作者甲使用了这个自称。",
+                                "evidence_ids": [evidence_id],
+                                "metrics": []
+                            }],
+                            "recommendations": [],
+                            "limitations": ["人物来源资料不能用于证明当前版本玩法机制。"],
+                            "refusal_reason": null
+                        }))
+                        .unwrap(),
+                    ),
+                    tool_calls: Vec::new(),
+                    finish_reason: FinishReason::Stop,
+                    usage: TokenUsage::default(),
+                });
+            }
+            Ok(tool_call(
+                "call-reference-knowledge",
+                "search_knowledge_base",
+                json!({
+                    "query": "请检索世一苍相关人物",
+                    "version_scope": "reference_lookup",
+                    "season": null,
+                    "category": null,
+                    "top_k": 3
+                }),
+            ))
+        }
+    }
+
     fn scenario(runtime: &AgentRuntime) -> ScenarioSnapshotV1 {
         ScenarioSnapshotV1::capture(
             runtime.game_version(),
@@ -1335,7 +1465,7 @@ mod tests {
         .await;
 
         assert_eq!(result.status, AgentRunStatus::Completed);
-        assert_eq!(result.prompt_version, "agent-system/v6");
+        assert_eq!(result.prompt_version, "agent-system/v7");
         assert_eq!(result.accounting.knowledge_searches, 1);
         assert_eq!(result.accounting.simulations, 0);
         let report = result.report.unwrap();
@@ -1367,7 +1497,7 @@ mod tests {
         .await;
 
         assert_eq!(result.status, AgentRunStatus::Completed);
-        assert_eq!(result.prompt_version, "agent-system/v6");
+        assert_eq!(result.prompt_version, "agent-system/v7");
         assert_eq!(result.accounting.knowledge_searches, 1);
         assert_eq!(result.accounting.simulations, 0);
         let report = result.report.unwrap();
@@ -1376,6 +1506,82 @@ mod tests {
         assert_eq!(report.sources[0].version_match, "current_exact");
         assert!(report.sources[0].fact_eligible);
         assert!(report.content.findings[0].metrics.is_empty());
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn reference_lookup_surfaces_old_identity_without_current_gameplay_claims() {
+        let (root, knowledge) = knowledge_fixture();
+        let runtime = AgentRuntime::fixture().with_knowledge_fixture(knowledge);
+        let mut run_input = input(&runtime, "run-reference-knowledge");
+        run_input.question = "世一苍是谁？给我一个名字。".to_string();
+        let result = run_agent(
+            &ReferenceKnowledgeProvider,
+            &runtime,
+            run_input,
+            AgentRunLimits::default(),
+            AgentCancellation::default(),
+        )
+        .await;
+
+        assert_eq!(result.status, AgentRunStatus::Completed);
+        assert_eq!(result.accounting.knowledge_searches, 1);
+        let report = result.report.unwrap();
+        assert_eq!(report.sources.len(), 1);
+        assert_eq!(report.sources[0].season, "万灵当歌（2023）");
+        assert_eq!(report.sources[0].version_match, "reference_only");
+        assert!(report.content.limitations[0].contains("当前版本玩法机制"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn reference_lookup_is_a_single_retrieval_then_report_state() {
+        let (root, knowledge) = knowledge_fixture();
+        let runtime = AgentRuntime::fixture().with_knowledge_fixture(knowledge);
+        let provider = ScriptedProvider::new(vec![
+            Ok(tool_call(
+                "call-reference-once",
+                "search_knowledge_base",
+                json!({
+                    "query": "世一苍",
+                    "version_scope": "reference_lookup",
+                    "season": null,
+                    "category": null,
+                    "top_k": 3
+                }),
+            )),
+            Ok(ModelResponse {
+                assistant_text: Some(
+                    serde_json::to_string(&refusal_content(
+                        "人物资料已检索一次，本轮不再扩散查询相邻名字。",
+                        "只依据直接命中的人物来源收束。",
+                    ))
+                    .unwrap(),
+                ),
+                tool_calls: Vec::new(),
+                finish_reason: FinishReason::Stop,
+                usage: TokenUsage::default(),
+            }),
+        ]);
+        let mut run_input = input(&runtime, "run-reference-once");
+        run_input.question = "世一苍是谁？给我一个名字。".to_string();
+        let result = run_agent(
+            &provider,
+            &runtime,
+            run_input,
+            AgentRunLimits::default(),
+            AgentCancellation::default(),
+        )
+        .await;
+
+        assert_eq!(result.status, AgentRunStatus::Refused);
+        assert_eq!(result.accounting.knowledge_searches, 1);
+        assert_ne!(result.status, AgentRunStatus::BudgetExhausted);
+        let requests = provider.requests();
+        assert_eq!(requests.len(), 2);
+        assert!(requests[1].tools.is_empty());
 
         let _ = fs::remove_dir_all(root);
     }
@@ -1631,6 +1837,87 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn parallel_knowledge_searches_are_coalesced_without_budget_termination() {
+        let (root, knowledge) = knowledge_fixture();
+        let runtime = AgentRuntime::fixture().with_knowledge_fixture(knowledge);
+        let calls = (0..4)
+            .map(|index| ProviderToolCall {
+                call_id: format!("call-knowledge-{index}"),
+                name: "search_knowledge_base".to_string(),
+                arguments: json!({
+                    "query": format!("不存在的玩家名{index}"),
+                    "version_scope": "current_only",
+                    "season": null,
+                    "category": null,
+                    "top_k": 3
+                }),
+            })
+            .collect::<Vec<_>>();
+        let provider = ScriptedProvider::new(vec![
+            Ok(ModelResponse {
+                assistant_text: None,
+                tool_calls: calls,
+                finish_reason: FinishReason::ToolCalls,
+                usage: TokenUsage::default(),
+            }),
+            Ok(ModelResponse {
+                assistant_text: Some(
+                    serde_json::to_string(&refusal_content(
+                        "本地版本资料中没有足够信息确认这个名字。",
+                        "检索请求已在服务端合并，不再用重复搜索替代证据。",
+                    ))
+                    .unwrap(),
+                ),
+                tool_calls: Vec::new(),
+                finish_reason: FinishReason::Stop,
+                usage: TokenUsage::default(),
+            }),
+        ]);
+
+        let result = run_agent(
+            &provider,
+            &runtime,
+            input(&runtime, "run-parallel-knowledge-searches"),
+            AgentRunLimits::default(),
+            AgentCancellation::default(),
+        )
+        .await;
+
+        assert_eq!(result.status, AgentRunStatus::Refused);
+        assert_eq!(result.accounting.knowledge_searches, 2);
+        assert_eq!(result.accounting.tool_calls, 3);
+        assert_ne!(result.status, AgentRunStatus::BudgetExhausted);
+        assert_eq!(
+            result
+                .trace
+                .iter()
+                .filter(|event| {
+                    event.kind == "tool_finished"
+                        && event.tool_name.as_deref() == Some("search_knowledge_base")
+                })
+                .count(),
+            2
+        );
+        assert!(result
+            .trace
+            .iter()
+            .any(|event| event.kind == "knowledge_searches_coalesced"));
+        let requests = provider.requests();
+        assert_eq!(requests.len(), 2);
+        assert!(requests[1].tools.is_empty());
+        assert_eq!(
+            requests[1]
+                .messages
+                .iter()
+                .filter(|message| matches!(message, ModelMessage::ToolResult { .. }))
+                .count(),
+            5
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
     async fn provider_failure_has_fixed_terminal_status() {
         let runtime = AgentRuntime::fixture();
         let provider = ScriptedProvider::new(vec![Err(ProviderError::upstream_status(429))]);
@@ -1810,20 +2097,41 @@ mod tests {
             "---\ntitle: 当前循环\n---\n\n# 当前循环\n\n盾飞阶段需要关注劫刀数量，并避免流血中断。\n",
         )
         .unwrap();
+        let reference_relative = "万灵当歌（2023）/白皮书/旧版作者.md";
+        let reference_path = root.join(reference_relative);
+        fs::create_dir_all(reference_path.parent().unwrap()).unwrap();
+        fs::write(
+            &reference_path,
+            "---\ntitle: 旧版作者\n---\n\n# 人物来源\n\n大家好，世一苍回来了。视频作者 author_a，修改自过崽攻略。\n",
+        )
+        .unwrap();
         fs::write(
             root.join("_migration-manifest.json"),
             serde_json::to_vec_pretty(&json!({
-                "entries": [{
-                    "title": "当前循环",
-                    "season": "暗影千机（2026）",
-                    "category": "基础",
-                    "kind": "yuque_document",
-                    "source": "https://example.com/current",
-                    "output": relative,
-                    "source_site": "example.com",
-                    "yuque_url": "https://www.yuque.com/sgyxy/cangyun/current",
-                    "updated_at": "2026-08-26T00:00:00Z"
-                }]
+                "entries": [
+                    {
+                        "title": "当前循环",
+                        "season": "暗影千机（2026）",
+                        "category": "基础",
+                        "kind": "yuque_document",
+                        "source": "https://example.com/current",
+                        "output": relative,
+                        "source_site": "example.com",
+                        "yuque_url": "https://www.yuque.com/sgyxy/cangyun/current",
+                        "updated_at": "2026-08-26T00:00:00Z"
+                    },
+                    {
+                        "title": "旧版作者",
+                        "season": "万灵当歌（2023）",
+                        "category": "白皮书",
+                        "kind": "yuque_document",
+                        "source": "https://example.com/reference",
+                        "output": reference_relative,
+                        "source_site": "example.com",
+                        "yuque_url": "https://www.yuque.com/sgyxy/cangyun/reference",
+                        "updated_at": "2023-08-26T00:00:00Z"
+                    }
+                ]
             }))
             .unwrap(),
         )

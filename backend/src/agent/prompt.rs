@@ -12,6 +12,8 @@ pub const AGENT_PROMPT_VERSION_V5: &str = "agent-system/v5";
 const AGENT_SYSTEM_PROMPT_V5: &str = include_str!("../../prompts/agent_system_v5.md");
 pub const AGENT_PROMPT_VERSION_V6: &str = "agent-system/v6";
 const AGENT_SYSTEM_PROMPT_V6: &str = include_str!("../../prompts/agent_system_v6.md");
+pub const AGENT_PROMPT_VERSION_V7: &str = "agent-system/v7";
+const AGENT_SYSTEM_PROMPT_V7: &str = include_str!("../../prompts/agent_system_v7.md");
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PromptSpec {
@@ -74,27 +76,40 @@ pub fn agent_prompt_v6() -> PromptSpec {
     }
 }
 
+pub fn agent_prompt_v7() -> PromptSpec {
+    let sha256 = format!("{:x}", Sha256::digest(AGENT_SYSTEM_PROMPT_V7.as_bytes()));
+    PromptSpec {
+        version: AGENT_PROMPT_VERSION_V7,
+        sha256,
+        instructions: AGENT_SYSTEM_PROMPT_V7,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn prompt_is_versioned_and_content_addressed() {
-        let prompt = agent_prompt_v6();
-        assert_eq!(prompt.version, "agent-system/v6");
+        let prompt = agent_prompt_v7();
+        assert_eq!(prompt.version, "agent-system/v7");
         assert_eq!(prompt.sha256.len(), 64);
         assert!(prompt.instructions.contains("get_current_scenario"));
         assert!(prompt.instructions.contains("already called"));
         assert!(prompt.instructions.contains("JSON Pointer"));
         assert!(prompt.instructions.contains("Arabic numerals"));
-        assert!(prompt
-            .instructions
-            .contains("exactly one domain experiment"));
+        assert!(prompt.instructions.contains("exactly one domain"));
         assert!(prompt.instructions.contains("machine unit identifiers"));
         assert!(prompt.instructions.contains("search_knowledge_base"));
         assert!(prompt.instructions.contains("fact_eligible"));
         assert!(prompt.instructions.contains("version_match"));
         assert!(prompt.instructions.contains("category=null"));
         assert!(prompt.instructions.contains("exact season text"));
+        assert!(prompt.instructions.contains("one at a time"));
+        assert!(prompt.instructions.contains("coalesce redundant requests"));
+        assert!(prompt.instructions.contains("only the distinctive name or nickname"));
+        assert!(prompt.instructions.contains("one retrieved document"));
+        assert!(prompt.instructions.contains("reference_entities"));
+        assert!(prompt.instructions.contains("single point lookup"));
     }
 }

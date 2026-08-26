@@ -834,6 +834,13 @@ fn numeric_literals(value: &str) -> Vec<NumericLiteral> {
         }
 
         let number_end = index;
+        let embedded_identifier = start
+            .checked_sub(1)
+            .and_then(|position| bytes.get(position))
+            .is_some_and(|byte| byte.is_ascii_alphabetic() || *byte == b'_')
+            || bytes
+                .get(number_end)
+                .is_some_and(|byte| byte.is_ascii_alphabetic() || *byte == b'_');
         let percent = if bytes.get(index) == Some(&b'%') {
             index += 1;
             true
@@ -846,6 +853,9 @@ fn numeric_literals(value: &str) -> Vec<NumericLiteral> {
         } else {
             false
         };
+        if embedded_identifier {
+            continue;
+        }
         let raw = value[start..number_end].replace(',', "");
         if let Ok(parsed) = raw.parse::<f64>() {
             let ordinary_count = !signed
@@ -1147,6 +1157,11 @@ mod tests {
         named_skill.summary = "绝刀·50怒是当前主要输出技能。".to_string();
         named_skill.findings[0].title = "绝刀·50怒贡献突出".to_string();
         validate_report(&named_skill, &evidence()).unwrap();
+
+        let mut named_account = report();
+        named_account.summary = "资料中的视频作者名为 dereck365。".to_string();
+        named_account.findings[0].title = "账号 dereck365".to_string();
+        validate_report(&named_account, &evidence()).unwrap();
     }
 
     #[test]

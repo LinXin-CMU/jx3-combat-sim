@@ -79,6 +79,7 @@ pub enum KnowledgeVersionMatch {
     TestServerExact,
     HistoricalExplicit,
     CrossVersion,
+    ReferenceOnly,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -87,6 +88,7 @@ pub enum KnowledgeVersionScope {
     CurrentOnly,
     SpecificSeason { season: String },
     CrossVersion,
+    ReferenceLookup,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -151,6 +153,16 @@ pub struct KnowledgeSearchResult {
     pub document_hash: String,
     pub chunk_hash: String,
     pub score: f64,
+    pub exact_phrase_match: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reference_entities: Vec<KnowledgeReferenceEntity>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct KnowledgeReferenceEntity {
+    pub relation: String,
+    pub name: String,
+    pub basis: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -494,24 +506,39 @@ impl KnowledgeIndex {
             .into_iter()
             .filter(|(_, _, chunk)| seen_documents.insert(chunk.document_id.clone()))
             .take(query.top_k)
-            .map(|(score, version_match, chunk)| KnowledgeSearchResult {
-                document_id: chunk.document_id.clone(),
-                title: chunk.title.clone(),
-                season: chunk.season.clone(),
-                category: chunk.category.clone(),
-                heading: chunk.heading.clone(),
-                snippet: snippet(&chunk.text),
-                source_url: chunk.source_url.clone(),
-                yuque_url: chunk.yuque_url.clone(),
-                source_site: chunk.source_site.clone(),
-                source_updated_at: chunk.source_updated_at.clone(),
-                quality: chunk.quality,
-                fact_eligible: fact_eligible(chunk),
-                version_match,
-                version_warning: chunk.version_warning.clone(),
-                document_hash: chunk.document_hash.clone(),
-                chunk_hash: chunk.chunk_hash.clone(),
-                score: round_score(score),
+            .map(|(score, version_match, chunk)| {
+                let exact_phrase_match = chunk.text.to_lowercase().contains(&raw_query)
+                    || chunk.title.to_lowercase().contains(&raw_query);
+                let reference_entities = if matches!(
+                    &query.version_scope,
+                    KnowledgeVersionScope::ReferenceLookup
+                ) && exact_phrase_match
+                {
+                    extract_reference_entities(&chunk.text)
+                } else {
+                    Vec::new()
+                };
+                KnowledgeSearchResult {
+                    document_id: chunk.document_id.clone(),
+                    title: chunk.title.clone(),
+                    season: chunk.season.clone(),
+                    category: chunk.category.clone(),
+                    heading: chunk.heading.clone(),
+                    snippet: snippet(&chunk.text),
+                    source_url: chunk.source_url.clone(),
+                    yuque_url: chunk.yuque_url.clone(),
+                    source_site: chunk.source_site.clone(),
+                    source_updated_at: chunk.source_updated_at.clone(),
+                    quality: chunk.quality,
+                    fact_eligible: fact_eligible(chunk),
+                    version_match,
+                    version_warning: chunk.version_warning.clone(),
+                    document_hash: chunk.document_hash.clone(),
+                    chunk_hash: chunk.chunk_hash.clone(),
+                    score: round_score(score),
+                    exact_phrase_match,
+                    reference_entities,
+                }
             })
             .collect();
 
@@ -563,6 +590,7 @@ impl KnowledgeIndex {
                     return Err(KnowledgeIndexError::CrossVersionIntentRequired);
                 }
             }
+            KnowledgeVersionScope::ReferenceLookup => {}
         }
         Ok(())
     }
@@ -665,6 +693,7 @@ fn version_match(
                 KnowledgeVersionMatch::CrossVersion
             },
         ),
+        KnowledgeVersionScope::ReferenceLookup => Some(KnowledgeVersionMatch::ReferenceOnly),
     }
 }
 
@@ -837,6 +866,43 @@ fn lexical_tokens(value: &str) -> Vec<String> {
     tokens
 }
 
+fn extract_reference_entities(text: &str) -> Vec<KnowledgeReferenceEntity> {
+    let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut entities = Vec::new();
+    for marker in ["视频作者"] {
+        let mut remainder = collapsed.as_str();
+        while let Some(position) = remainder.find(marker) {
+            remainder = &remainder[position + marker.len()..];
+            let candidate = remainder
+                .trim_start_matches(|character: char| {
+                    character.is_whitespace()
+                        || matches!(character, ':' | '：' | '-' | '—' | '[' | '【')
+                })
+                .chars()
+                .take_while(|character| {
+                    character.is_ascii_alphanumeric()
+                        || matches!(character, '_' | '-' | '.')
+                        || is_cjk(*character)
+                })
+                .take(64)
+                .collect::<String>();
+            if !candidate.is_empty()
+                && candidate != "简介"
+                && !entities
+                    .iter()
+                    .any(|entity: &KnowledgeReferenceEntity| entity.name == candidate)
+            {
+                entities.push(KnowledgeReferenceEntity {
+                    relation: "video_author".to_string(),
+                    name: candidate,
+                    basis: "explicit_label_in_matched_passage".to_string(),
+                });
+            }
+        }
+    }
+    entities
+}
+
 fn is_cjk(character: char) -> bool {
     matches!(
         character as u32,
@@ -971,7 +1037,7 @@ mod tests {
                     "基础",
                     "external_mirror",
                     "full",
-                    "# 旧版循环\n\n山海源流的盾飞循环使用旧版劫刀节奏。",
+                    "# 旧版循环\n\n大家好，世一苍回来了。视频作者 author_a，修改自过崽攻略。山海源流的盾飞循环使用旧版劫刀节奏。",
                 ),
                 fixture_entry(
                     &root,
@@ -1089,6 +1155,35 @@ mod tests {
             .results
             .iter()
             .all(|result| { result.version_match == KnowledgeVersionMatch::CurrentExact }));
+    }
+
+    #[test]
+    fn reference_lookup_can_find_an_identity_without_treating_it_as_current_gameplay() {
+        let fixture = Fixture::create();
+        let index = KnowledgeIndex::load(&fixture.root).unwrap();
+        let response = index
+            .search(
+                &KnowledgeVersionContext::from_game_version(GameVersion::AnYingQianJi),
+                query(KnowledgeVersionScope::ReferenceLookup, "世一苍"),
+            )
+            .unwrap();
+
+        assert_eq!(response.results.len(), 1);
+        assert_eq!(response.results[0].season, "山海源流（2025）");
+        assert_eq!(
+            response.results[0].version_match,
+            KnowledgeVersionMatch::ReferenceOnly
+        );
+        assert!(response.results[0].fact_eligible);
+        assert!(response.results[0].exact_phrase_match);
+        assert_eq!(
+            response.results[0].reference_entities,
+            vec![KnowledgeReferenceEntity {
+                relation: "video_author".to_string(),
+                name: "author_a".to_string(),
+                basis: "explicit_label_in_matched_passage".to_string(),
+            }]
+        );
     }
 
     #[test]
@@ -1409,6 +1504,27 @@ mod tests {
     }
 
     #[test]
+    fn configured_vault_extracts_explicit_reference_entity() {
+        let Some(root) = env::var_os(KNOWLEDGE_ROOT_ENV) else {
+            return;
+        };
+        let index = KnowledgeIndex::load(Path::new(&root)).unwrap();
+        let response = index
+            .search(
+                &KnowledgeVersionContext::from_game_version(GameVersion::AnYingQianJi),
+                query(KnowledgeVersionScope::ReferenceLookup, "世一苍"),
+            )
+            .unwrap();
+        let result = response.results.first().expect("reference result");
+
+        assert!(result.title.contains("万灵当歌_ 苍云分山PVE指南"));
+        assert!(result.exact_phrase_match);
+        assert!(result.reference_entities.iter().any(|entity| {
+            entity.relation == "video_author" && entity.name == "dereck365"
+        }));
+    }
+
+    #[test]
     fn configured_vault_prints_versioned_preview_queries() {
         let Some(root) = env::var_os(KNOWLEDGE_ROOT_ENV) else {
             return;
@@ -1624,6 +1740,7 @@ mod tests {
                         .unwrap_or_else(|| panic!("missing season in {}", case.id)),
                 },
                 "cross_version" => KnowledgeVersionScope::CrossVersion,
+                "reference_lookup" => KnowledgeVersionScope::ReferenceLookup,
                 other => panic!("unknown scope {other} in {}", case.id),
             };
             let outcome = index.search(
@@ -1784,6 +1901,7 @@ mod tests {
             KnowledgeVersionMatch::TestServerExact => "test_server_exact",
             KnowledgeVersionMatch::HistoricalExplicit => "historical_explicit",
             KnowledgeVersionMatch::CrossVersion => "cross_version",
+            KnowledgeVersionMatch::ReferenceOnly => "reference_only",
         }
     }
 

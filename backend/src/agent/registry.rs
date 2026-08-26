@@ -110,7 +110,7 @@ impl<'a> AgentToolRegistry<'a> {
         let mut definitions = Self::definitions();
         definitions.push(ToolDefinition {
             name: "search_knowledge_base".to_string(),
-            description: "Search the bounded local JX3 knowledge snapshot. Version scope is enforced by the server; use null for category unless an exact allowed category is needed, and copy an exact allowed season for specific_season.".to_string(),
+            description: "Search the bounded local JX3 knowledge snapshot. Version scope is enforced by the server; use reference_lookup only for version-independent people, author, source, or nickname identity; use null for category unless an exact allowed category is needed, and copy an exact allowed season for specific_season.".to_string(),
             parameters: knowledge_search_schema(seasons, categories),
         });
         definitions
@@ -130,6 +130,15 @@ impl<'a> AgentToolRegistry<'a> {
 
     pub fn used_knowledge_searches(&self) -> u32 {
         self.knowledge_searches
+    }
+
+    pub fn coalesced_knowledge_search() -> ToolDispatchOutcome {
+        failure(
+            "search_knowledge_base",
+            "knowledge_search_coalesced",
+            "this redundant search was coalesced; use the completed search results and return a report",
+            false,
+        )
     }
 
     pub fn dispatch(
@@ -279,23 +288,56 @@ impl<'a> AgentToolRegistry<'a> {
                 let context =
                     KnowledgeVersionContext::from_game_version(self.runtime.game_version());
                 match knowledge.search(&context, query) {
-                    Ok(result) => match EvidenceEnvelopeV1::new(
-                        trace_id,
-                        tool_name,
-                        &self.scenario.scenario_hash,
-                        evidence_args,
-                        result,
-                        self.runtime.provenance(),
-                        started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
-                    ) {
-                        Ok(evidence) => self.success(tool_name, vec![serialize_evidence(evidence)]),
-                        Err(_) => failure(
-                            tool_name,
-                            "knowledge_evidence_failed",
-                            "knowledge search evidence could not be created",
-                            false,
-                        ),
-                    },
+                    Ok(result) => {
+                        // A search response can contain several documents. Give every result its
+                        // own evidence identity so the model can cite the exact supporting chunk
+                        // instead of accidentally attaching every retrieved source to one claim.
+                        // Keep one empty response envelope when nothing matched so insufficiency
+                        // remains an auditable result.
+                        let evidence_results = if result.results.is_empty() {
+                            vec![result]
+                        } else {
+                            result
+                                .results
+                                .iter()
+                                .cloned()
+                                .map(|item| {
+                                    let mut single = result.clone();
+                                    single.results = vec![item];
+                                    single
+                                })
+                                .collect()
+                        };
+                        let duration_ms = started
+                            .elapsed()
+                            .as_millis()
+                            .try_into()
+                            .unwrap_or(u64::MAX);
+                        let mut envelopes = Vec::with_capacity(evidence_results.len());
+                        for evidence_result in evidence_results {
+                            let evidence = match EvidenceEnvelopeV1::new(
+                                trace_id,
+                                tool_name,
+                                &self.scenario.scenario_hash,
+                                evidence_args.clone(),
+                                evidence_result,
+                                self.runtime.provenance(),
+                                duration_ms,
+                            ) {
+                                Ok(evidence) => evidence,
+                                Err(_) => {
+                                    return failure(
+                                        tool_name,
+                                        "knowledge_evidence_failed",
+                                        "knowledge search evidence could not be created",
+                                        false,
+                                    )
+                                }
+                            };
+                            envelopes.push(serialize_evidence(evidence));
+                        }
+                        self.success(tool_name, envelopes)
+                    }
                     Err(error) => knowledge_failure(tool_name, error),
                 }
             }
@@ -445,18 +487,73 @@ impl KnowledgeArguments {
                     ))?,
             },
             "cross_version" if self.season.is_none() => KnowledgeVersionScope::CrossVersion,
+            "reference_lookup" if self.season.is_none() => KnowledgeVersionScope::ReferenceLookup,
             _ => {
                 return Err(KnowledgeIndexError::InvalidQuery(
                     "version scope and season do not match",
                 ))
             }
         };
+        let query = if matches!(&version_scope, KnowledgeVersionScope::ReferenceLookup) {
+            normalize_reference_query(&self.query)
+        } else {
+            self.query
+        };
         Ok(KnowledgeSearchQuery {
-            query: self.query,
+            query,
             version_scope,
             category: self.category,
             top_k: self.top_k,
         })
+    }
+}
+
+pub(super) fn normalize_reference_query(value: &str) -> String {
+    let original = value.trim();
+    let mut normalized = original.to_string();
+    // Reference lookup is an entity point query, not a semantic gameplay query.
+    // Remove conversational intent words so exact alias matching and deterministic
+    // relationship extraction can run even when a provider submits a full question.
+    for noise in [
+        "给我一个名字",
+        "给出一个名字",
+        "告诉我名字",
+        "你觉得",
+        "请问",
+        "到底",
+        "具体",
+        "真实身份",
+        "这个人",
+        "是谁",
+        "谁是",
+        "身份",
+        "玩家",
+        "作者",
+        "昵称",
+        "名字",
+        "苍云",
+        "剑网三",
+        "剑网3",
+    ] {
+        normalized = normalized.replace(noise, "");
+    }
+    let normalized = normalized
+        .chars()
+        .filter(|character| {
+            !character.is_whitespace()
+                && !matches!(
+                    *character,
+                    '?' | '？' | '!' | '！' | ',' | '，' | '。' | ':' | '：' | '"' | '\''
+                        | '“' | '”' | '‘' | '’' | '[' | ']' | '【' | '】' | '(' | ')' | '（'
+                        | '）'
+                )
+        })
+        .collect::<String>();
+    let normalized = normalized.trim_matches('的').to_string();
+    if normalized.is_empty() {
+        original.to_string()
+    } else {
+        normalized
     }
 }
 
@@ -629,7 +726,7 @@ fn knowledge_search_schema(seasons: &[String], categories: &[String]) -> Value {
             "query": {"type": "string", "minLength": 1, "maxLength": 200},
             "version_scope": {
                 "type": "string",
-                "enum": ["current_only", "specific_season", "cross_version"]
+                "enum": ["current_only", "specific_season", "cross_version", "reference_lookup"]
             },
             "season": {"type": ["string", "null"], "enum": season_values, "maxLength": 64},
             "category": {"type": ["string", "null"], "enum": category_values, "maxLength": 64},
@@ -703,6 +800,10 @@ mod tests {
             knowledge.parameters["properties"]["category"]["enum"],
             json!([null, "基础", "白皮书"])
         );
+        assert!(knowledge.parameters["properties"]["version_scope"]["enum"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("reference_lookup")));
         let encoded = serde_json::to_string(knowledge).unwrap();
         assert!(!encoded.contains("path"));
         assert!(!encoded.contains("url"));
@@ -736,6 +837,22 @@ mod tests {
             valid.version_scope,
             KnowledgeVersionScope::SpecificSeason { .. }
         ));
+
+        let reference = KnowledgeArguments {
+            query: "世一苍是谁".to_string(),
+            version_scope: "reference_lookup".to_string(),
+            season: None,
+            category: None,
+            top_k: 3,
+        }
+        .into_query()
+        .unwrap();
+        assert!(matches!(
+            reference.version_scope,
+            KnowledgeVersionScope::ReferenceLookup
+        ));
+        assert_eq!(reference.query, "世一苍");
+        assert_eq!(normalize_reference_query("谁是苍云玩家 dereck365？"), "dereck365");
     }
 
     #[test]
@@ -757,7 +874,12 @@ mod tests {
         });
         let first = registry.dispatch("knowledge-run", "search_knowledge_base", arguments.clone());
         assert_eq!(first.output["ok"], true);
-        assert_eq!(first.evidence_ids.len(), 1);
+        assert_eq!(first.evidence_ids.len(), 2);
+        assert!(first.output["evidence"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|evidence| evidence["result"]["results"].as_array().unwrap().len() == 1));
         assert_eq!(
             first.output["evidence"][0]["result"]["results"][0]["season"],
             "暗影千机（2026）"
@@ -810,20 +932,39 @@ mod tests {
             "---\ntitle: 当前循环\n---\n\n# 当前循环\n\n盾飞阶段使用劫刀并关注流血。\n",
         )
         .unwrap();
+        let second_relative = "暗影千机（2026）/基础/流血.md";
+        fs::write(
+            root.join(second_relative),
+            "---\ntitle: 流血说明\n---\n\n# 流血说明\n\n盾飞后衔接劫刀可用于流血思路。\n",
+        )
+        .unwrap();
         fs::write(
             root.join("_migration-manifest.json"),
             serde_json::to_vec_pretty(&json!({
-                "entries": [{
-                    "title": "当前循环",
-                    "season": "暗影千机（2026）",
-                    "category": "基础",
-                    "kind": "yuque_document",
-                    "source": "https://www.yuque.com/sgyxy/cangyun/current",
-                    "output": relative,
-                    "source_site": "www.yuque.com",
-                    "yuque_url": "https://www.yuque.com/sgyxy/cangyun/current",
-                    "updated_at": "2026-08-26T00:00:00Z"
-                }]
+                "entries": [
+                    {
+                        "title": "当前循环",
+                        "season": "暗影千机（2026）",
+                        "category": "基础",
+                        "kind": "yuque_document",
+                        "source": "https://www.yuque.com/sgyxy/cangyun/current",
+                        "output": relative,
+                        "source_site": "www.yuque.com",
+                        "yuque_url": "https://www.yuque.com/sgyxy/cangyun/current",
+                        "updated_at": "2026-08-26T00:00:00Z"
+                    },
+                    {
+                        "title": "流血说明",
+                        "season": "暗影千机（2026）",
+                        "category": "基础",
+                        "kind": "yuque_document",
+                        "source": "https://www.yuque.com/sgyxy/cangyun/bleed",
+                        "output": second_relative,
+                        "source_site": "www.yuque.com",
+                        "yuque_url": "https://www.yuque.com/sgyxy/cangyun/bleed",
+                        "updated_at": "2026-08-26T00:00:00Z"
+                    }
+                ]
             }))
             .unwrap(),
         )

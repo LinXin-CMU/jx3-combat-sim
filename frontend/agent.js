@@ -57,6 +57,7 @@
     report_repair_requested: '修复报告',
     report_citations_normalized: '补全证据引用',
     report_claims_sanitized: '保留可信结论',
+    knowledge_searches_coalesced: '合并冗余检索',
     completed: '分析完成',
     partially_verified: '部分通过',
     refused: '安全拒绝',
@@ -89,6 +90,7 @@
     test_server_exact: '当前体服',
     historical_explicit: '指定历史版本',
     cross_version: '跨版本资料',
+    reference_only: '人物 / 来源资料',
   };
 
   const providerErrorLabels = {
@@ -176,6 +178,7 @@
     if (kind === 'report_repair_requested') return '报告引用未通过，正在尝试修复…';
     if (kind === 'report_claims_sanitized') return '正在隐藏未验证内容并保留可信结论…';
     if (kind === 'report_citations_normalized') return '已补全可验证引用，正在完成校验…';
+    if (kind === 'knowledge_searches_coalesced') return '已合并重复检索，正在依据现有结果收束结论…';
     if (kind === 'cancel_requested') return '正在安全停止当前任务…';
     return '正在分析当前循环…';
   }

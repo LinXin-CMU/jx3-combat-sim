@@ -211,6 +211,15 @@
       "expected_fact_eligible": true
     },
     {
+      "id": "reference_player_identity",
+      "game_version": "anying",
+      "scope": "reference_lookup",
+      "query": "世一苍",
+      "expected_titles_any": ["万灵当歌_ 苍云分山PVE指南"],
+      "expected_version_match": "reference_only",
+      "expected_fact_eligible": true
+    },
+    {
       "id": "test_server_current_release",
       "game_version": "anying_test",
       "scope": "current_only",
