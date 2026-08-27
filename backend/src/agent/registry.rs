@@ -9,6 +9,7 @@ use super::{
     CandidatePatchV1, EvidenceEnvelopeV1, KnowledgeAudience, KnowledgeIndex, KnowledgeIndexError,
     KnowledgeMountScope, KnowledgeSearchQuery, KnowledgeVersionContext, KnowledgeVersionScope,
     PatchValueV1, ScenarioPatchV1, ScenarioSnapshotV1, ToolBudget, ToolError,
+    MAX_KNOWLEDGE_RESULTS,
 };
 use crate::Mount;
 
@@ -125,7 +126,7 @@ impl<'a> AgentToolRegistry<'a> {
         let mut definitions = Self::definitions();
         definitions.push(ToolDefinition {
             name: "search_knowledge_base".to_string(),
-            description: "Search the bounded local JX3 knowledge snapshot. Version scope is enforced by the server; use reference_lookup only for version-independent people, author, source, or nickname identity; use null for category unless an exact allowed category is needed, and copy an exact allowed season for specific_season.".to_string(),
+            description: "Search the bounded local JX3 knowledge snapshot. The server adaptively selects evidence count and source roles; do not request a fixed top-k. Version scope is enforced by the server; use reference_lookup only for version-independent people, author, source, or nickname identity; use null for category unless an exact allowed category is needed, and copy an exact allowed season for specific_season.".to_string(),
             parameters: knowledge_search_schema(seasons, categories),
         });
         definitions
@@ -302,12 +303,12 @@ impl<'a> AgentToolRegistry<'a> {
                     serde_json::to_value(&query).expect("knowledge query must remain serializable");
                 let context =
                     KnowledgeVersionContext::from_game_version(self.runtime.game_version());
-                let result = if matches!(&query.version_scope, KnowledgeVersionScope::ReferenceLookup)
-                {
-                    knowledge.search(&context, query)
-                } else {
-                    knowledge.search_with_audience(&context, query, self.knowledge_audience)
-                };
+                let result =
+                    if matches!(&query.version_scope, KnowledgeVersionScope::ReferenceLookup) {
+                        knowledge.search(&context, query)
+                    } else {
+                        knowledge.search_with_audience(&context, query, self.knowledge_audience)
+                    };
                 match result {
                     Ok(result) => {
                         // A search response can contain several documents. Give every result its
@@ -329,11 +330,8 @@ impl<'a> AgentToolRegistry<'a> {
                                 })
                                 .collect()
                         };
-                        let duration_ms = started
-                            .elapsed()
-                            .as_millis()
-                            .try_into()
-                            .unwrap_or(u64::MAX);
+                        let duration_ms =
+                            started.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
                         let mut envelopes = Vec::with_capacity(evidence_results.len());
                         for evidence_result in evidence_results {
                             let evidence = match EvidenceEnvelopeV1::new(
@@ -492,7 +490,6 @@ struct KnowledgeArguments {
     version_scope: String,
     season: Option<String>,
     category: Option<String>,
-    top_k: usize,
 }
 
 impl KnowledgeArguments {
@@ -524,7 +521,7 @@ impl KnowledgeArguments {
             query,
             version_scope,
             category: self.category,
-            top_k: self.top_k,
+            top_k: MAX_KNOWLEDGE_RESULTS,
         })
     }
 }
@@ -564,8 +561,27 @@ pub(super) fn normalize_reference_query(value: &str) -> String {
             !character.is_whitespace()
                 && !matches!(
                     *character,
-                    '?' | '？' | '!' | '！' | ',' | '，' | '。' | ':' | '：' | '"' | '\''
-                        | '“' | '”' | '‘' | '’' | '[' | ']' | '【' | '】' | '(' | ')' | '（'
+                    '?' | '？'
+                        | '!'
+                        | '！'
+                        | ','
+                        | '，'
+                        | '。'
+                        | ':'
+                        | '：'
+                        | '"'
+                        | '\''
+                        | '“'
+                        | '”'
+                        | '‘'
+                        | '’'
+                        | '['
+                        | ']'
+                        | '【'
+                        | '】'
+                        | '('
+                        | ')'
+                        | '（'
                         | '）'
                 )
         })
@@ -751,9 +767,8 @@ fn knowledge_search_schema(seasons: &[String], categories: &[String]) -> Value {
             },
             "season": {"type": ["string", "null"], "enum": season_values, "maxLength": 64},
             "category": {"type": ["string", "null"], "enum": category_values, "maxLength": 64},
-            "top_k": {"type": "integer", "minimum": 1, "maximum": 5}
         },
-        "required": ["query", "version_scope", "season", "category", "top_k"],
+        "required": ["query", "version_scope", "season", "category"],
         "additionalProperties": false
     })
 }
@@ -812,7 +827,7 @@ mod tests {
         let knowledge = definitions.last().unwrap();
         assert_eq!(knowledge.name, "search_knowledge_base");
         assert_eq!(knowledge.parameters["additionalProperties"], false);
-        assert_eq!(knowledge.parameters["properties"]["top_k"]["maximum"], 5);
+        assert!(knowledge.parameters["properties"].get("top_k").is_none());
         assert_eq!(
             knowledge.parameters["properties"]["season"]["enum"],
             json!([null, "暗影千机（2026）", "太极秘录（2025）"])
@@ -838,7 +853,6 @@ mod tests {
             version_scope: "current_only".to_string(),
             season: Some("山海源流（2025）".to_string()),
             category: None,
-            top_k: 5,
         };
         assert!(matches!(
             invalid.into_query().unwrap_err(),
@@ -850,7 +864,6 @@ mod tests {
             version_scope: "specific_season".to_string(),
             season: Some("山海源流（2025）".to_string()),
             category: Some("基础".to_string()),
-            top_k: 3,
         }
         .into_query()
         .unwrap();
@@ -864,7 +877,6 @@ mod tests {
             version_scope: "reference_lookup".to_string(),
             season: None,
             category: None,
-            top_k: 3,
         }
         .into_query()
         .unwrap();
@@ -873,7 +885,10 @@ mod tests {
             KnowledgeVersionScope::ReferenceLookup
         ));
         assert_eq!(reference.query, "世一苍");
-        assert_eq!(normalize_reference_query("谁是苍云玩家 dereck365？"), "dereck365");
+        assert_eq!(
+            normalize_reference_query("谁是苍云玩家 dereck365？"),
+            "dereck365"
+        );
     }
 
     #[test]
@@ -890,8 +905,7 @@ mod tests {
             "query": "盾飞劫刀流血",
             "version_scope": "current_only",
             "season": null,
-            "category": null,
-            "top_k": 3
+            "category": null
         });
         let first = registry.dispatch("knowledge-run", "search_knowledge_base", arguments.clone());
         assert_eq!(first.output["ok"], true);

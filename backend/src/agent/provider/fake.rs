@@ -60,8 +60,7 @@ impl LlmProvider for FakeProvider {
                                     "query": bounded_user_question(request),
                                     "version_scope": "current_only",
                                     "season": null,
-                                    "category": null,
-                                    "top_k": 3
+                                    "category": null
                                 }),
                             }],
                             finish_reason: FinishReason::ToolCalls,

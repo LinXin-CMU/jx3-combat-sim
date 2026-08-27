@@ -31,7 +31,7 @@ pub use knowledge::{
     KnowledgeAudience, KnowledgeClientScope, KnowledgeIndex, KnowledgeIndexError,
     KnowledgeMountScope, KnowledgeQuality, KnowledgeRetrievalInfo, KnowledgeSearchQuery,
     KnowledgeSearchResponse, KnowledgeSearchResult, KnowledgeVersionContext, KnowledgeVersionMatch,
-    KnowledgeVersionScope,
+    KnowledgeVersionScope, MAX_KNOWLEDGE_RESULTS,
 };
 pub use runtime::AgentRuntime;
 pub use schema::{ScenarioError, ScenarioSnapshotV1, SCENARIO_SCHEMA_V1};

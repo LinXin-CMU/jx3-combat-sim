@@ -20,6 +20,8 @@ pub const AGENT_PROMPT_VERSION_V9: &str = "agent-system/v9";
 const AGENT_SYSTEM_PROMPT_V9: &str = include_str!("../../prompts/agent_system_v9.md");
 pub const AGENT_PROMPT_VERSION_V10: &str = "agent-system/v10";
 const AGENT_SYSTEM_PROMPT_V10: &str = include_str!("../../prompts/agent_system_v10.md");
+pub const AGENT_PROMPT_VERSION_V11: &str = "agent-system/v11";
+const AGENT_SYSTEM_PROMPT_V11: &str = include_str!("../../prompts/agent_system_v11.md");
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PromptSpec {
@@ -118,14 +120,23 @@ pub fn agent_prompt_v10() -> PromptSpec {
     }
 }
 
+pub fn agent_prompt_v11() -> PromptSpec {
+    let sha256 = format!("{:x}", Sha256::digest(AGENT_SYSTEM_PROMPT_V11.as_bytes()));
+    PromptSpec {
+        version: AGENT_PROMPT_VERSION_V11,
+        sha256,
+        instructions: AGENT_SYSTEM_PROMPT_V11,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn prompt_is_versioned_and_content_addressed() {
-        let prompt = agent_prompt_v10();
-        assert_eq!(prompt.version, "agent-system/v10");
+        let prompt = agent_prompt_v11();
+        assert_eq!(prompt.version, "agent-system/v11");
         assert_eq!(prompt.sha256.len(), 64);
         assert!(prompt.instructions.contains("get_current_scenario"));
         assert!(prompt.instructions.contains("already called"));
@@ -140,7 +151,9 @@ mod tests {
         assert!(prompt.instructions.contains("exact season text"));
         assert!(prompt.instructions.contains("one at a time"));
         assert!(prompt.instructions.contains("coalesce redundant requests"));
-        assert!(prompt.instructions.contains("only the distinctive name or nickname"));
+        assert!(prompt
+            .instructions
+            .contains("only the distinctive name or nickname"));
         assert!(prompt.instructions.contains("one retrieved document"));
         assert!(prompt.instructions.contains("reference_entities"));
         assert!(prompt.instructions.contains("single point lookup"));
@@ -150,6 +163,8 @@ mod tests {
         assert!(prompt
             .instructions
             .contains("Unless the user explicitly says otherwise"));
+        assert!(prompt.instructions.contains("selected adaptively"));
+        assert!(prompt.instructions.contains("selection` summary"));
         assert!(prompt.instructions.contains("Observation"));
         assert!(prompt.instructions.contains("结论 → 主要瓶颈"));
         assert!(prompt.instructions.contains("typed candidate field"));

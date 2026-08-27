@@ -7,14 +7,12 @@ use std::time::{Duration, Instant};
 use tokio::sync::Notify;
 
 use super::evidence::validate_trace_id;
-use super::prompt::agent_prompt_v10;
+use super::prompt::agent_prompt_v11;
 use super::provider::{
     FinishReason, LlmProvider, ModelMessage, ModelRequest, ProviderToolCall,
     StructuredOutputDefinition, TokenUsage,
 };
-use super::registry::{
-    normalize_reference_query, AgentToolRegistry, MAX_KNOWLEDGE_SEARCHES,
-};
+use super::registry::{normalize_reference_query, AgentToolRegistry, MAX_KNOWLEDGE_SEARCHES};
 use super::report::{
     cited_evidence_ids, cited_knowledge_sources, parse_and_salvage_report,
     parse_and_validate_report, report_content_json_schema, AgentFindingV1, AgentReportContentV1,
@@ -218,7 +216,7 @@ pub async fn run_agent_observed(
     event_sink: Option<AgentTraceSink>,
 ) -> AgentRunResultV1 {
     let started = Instant::now();
-    let prompt = agent_prompt_v10();
+    let prompt = agent_prompt_v11();
     let mut accounting = AgentRunAccountingV1::default();
     let mut trace = TraceCollector::new(event_sink);
 
@@ -589,10 +587,8 @@ pub async fn run_agent_observed(
                 .iter()
                 .filter(|call| call.name == "search_knowledge_base")
                 .count() as u32;
-            let reference_lookup_requested = response
-                .tool_calls
-                .iter()
-                .any(is_reference_lookup_call);
+            let reference_lookup_requested =
+                response.tool_calls.iter().any(is_reference_lookup_call);
             let mut available_knowledge_calls =
                 MAX_KNOWLEDGE_SEARCHES.saturating_sub(registry.used_knowledge_searches());
             if reference_lookup_requested {
@@ -1214,8 +1210,7 @@ mod tests {
                     "query": "盾飞劫刀流血",
                     "version_scope": "current_only",
                     "season": null,
-                    "category": "基础",
-                    "top_k": 3
+                    "category": "基础"
                 }),
             ))
         }
@@ -1311,8 +1306,7 @@ mod tests {
                     "query": "盾飞劫刀流血循环",
                     "version_scope": "current_only",
                     "season": null,
-                    "category": "基础",
-                    "top_k": 3
+                    "category": "基础"
                 }),
             ))
         }
@@ -1378,8 +1372,7 @@ mod tests {
                     "query": "请检索世一苍相关人物",
                     "version_scope": "reference_lookup",
                     "season": null,
-                    "category": null,
-                    "top_k": 3
+                    "category": null
                 }),
             ))
         }
@@ -1536,7 +1529,7 @@ mod tests {
         .await;
 
         assert_eq!(result.status, AgentRunStatus::Completed);
-        assert_eq!(result.prompt_version, "agent-system/v10");
+        assert_eq!(result.prompt_version, "agent-system/v11");
         assert_eq!(result.accounting.knowledge_searches, 1);
         assert_eq!(result.accounting.simulations, 0);
         let report = result.report.unwrap();
@@ -1615,7 +1608,7 @@ mod tests {
         .await;
 
         assert_eq!(result.status, AgentRunStatus::Completed);
-        assert_eq!(result.prompt_version, "agent-system/v10");
+        assert_eq!(result.prompt_version, "agent-system/v11");
         assert_eq!(result.accounting.knowledge_searches, 1);
         assert_eq!(result.accounting.simulations, 0);
         let report = result.report.unwrap();
@@ -1666,8 +1659,7 @@ mod tests {
                     "query": "世一苍",
                     "version_scope": "reference_lookup",
                     "season": null,
-                    "category": null,
-                    "top_k": 3
+                    "category": null
                 }),
             )),
             Ok(ModelResponse {
@@ -1898,8 +1890,7 @@ mod tests {
                     "query": "不存在的机制甲",
                     "version_scope": "current_only",
                     "season": null,
-                    "category": null,
-                    "top_k": 3
+                    "category": null
                 }),
             )),
             Ok(tool_call(
@@ -1909,8 +1900,7 @@ mod tests {
                     "query": "不存在的机制乙",
                     "version_scope": "current_only",
                     "season": null,
-                    "category": null,
-                    "top_k": 3
+                    "category": null
                 }),
             )),
             Ok(ModelResponse {
@@ -1966,8 +1956,7 @@ mod tests {
                     "query": format!("不存在的玩家名{index}"),
                     "version_scope": "current_only",
                     "season": null,
-                    "category": null,
-                    "top_k": 3
+                    "category": null
                 }),
             })
             .collect::<Vec<_>>();

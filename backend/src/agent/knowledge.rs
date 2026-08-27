@@ -21,7 +21,7 @@ const MAX_DOCUMENTS: usize = 5_000;
 const MAX_DOCUMENT_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_CORPUS_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_QUERY_CHARACTERS: usize = 200;
-const MAX_TOP_K: usize = 5;
+pub const MAX_KNOWLEDGE_RESULTS: usize = 8;
 const CHUNK_CHARACTERS: usize = 1_200;
 const CHUNK_OVERLAP: usize = 120;
 const SNIPPET_CHARACTERS: usize = 420;
@@ -120,10 +120,7 @@ pub struct KnowledgeAudience {
 }
 
 impl KnowledgeAudience {
-    pub fn from_question(
-        question: &str,
-        fallback_mount: Option<KnowledgeMountScope>,
-    ) -> Self {
+    pub fn from_question(question: &str, fallback_mount: Option<KnowledgeMountScope>) -> Self {
         let normalized = question.to_lowercase();
         let mentions_wujie = normalized.contains("无界")
             || normalized.contains("分山劲·悟")
@@ -230,6 +227,38 @@ pub struct KnowledgeRetrievalInfo {
     pub fallback_code: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KnowledgeQueryIntent {
+    Rotation,
+    Macro,
+    Equipment,
+    Encounter,
+    Mechanism,
+    General,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KnowledgeSourceRole {
+    Whitepaper,
+    Practical,
+    Mechanism,
+    Macro,
+    General,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KnowledgeSelectionInfo {
+    pub strategy: String,
+    pub intent: KnowledgeQueryIntent,
+    pub confidence: String,
+    pub candidate_documents: usize,
+    pub returned_documents: usize,
+    pub source_roles: Vec<KnowledgeSourceRole>,
+    pub decision: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct KnowledgeReferenceEntity {
     pub relation: String,
@@ -245,6 +274,7 @@ pub struct KnowledgeSearchResponse {
     pub requested_scope: KnowledgeVersionScope,
     pub audience: KnowledgeAudience,
     pub retrieval: KnowledgeRetrievalInfo,
+    pub selection: KnowledgeSelectionInfo,
     pub results: Vec<KnowledgeSearchResult>,
 }
 
@@ -339,9 +369,7 @@ impl KnowledgeIndex {
                 match DenseKnowledgeIndex::load_or_build(&index.corpus_hash, &texts, &cache_root) {
                     Ok(dense) => index.dense = Some(Arc::new(dense)),
                     Err(error) => {
-                        eprintln!(
-                            "[agent][knowledge] Embedded 初始化失败（{error}），已降级 BM25"
-                        );
+                        eprintln!("[agent][knowledge] Embedded 初始化失败（{error}），已降级 BM25");
                         index.dense_fallback_code = Some(error.code.to_string());
                     }
                 }
@@ -580,6 +608,7 @@ impl KnowledgeIndex {
         }
         let query_terms = query_tokens.into_iter().collect::<BTreeSet<_>>();
         let raw_query = query.query.trim().to_lowercase();
+        let query_intent = knowledge_query_intent(&query.query);
         let test_server_release_hint = match query.version_scope {
             KnowledgeVersionScope::CurrentOnly
                 if context.game_version == GameVersion::AnYingQianJiTest
@@ -723,7 +752,15 @@ impl KnowledgeIndex {
         ranked.sort_by(|left, right| {
             fact_eligible(&self.chunks[right.0])
                 .cmp(&fact_eligible(&self.chunks[left.0]))
-                .then_with(|| right.1.partial_cmp(&left.1).unwrap_or(Ordering::Equal))
+                .then_with(|| {
+                    adaptive_rank_score(query_intent, &self.chunks[right.0], right.1)
+                        .partial_cmp(&adaptive_rank_score(
+                            query_intent,
+                            &self.chunks[left.0],
+                            left.1,
+                        ))
+                        .unwrap_or(Ordering::Equal)
+                })
                 .then_with(|| self.chunks[left.0].title.cmp(&self.chunks[right.0].title))
                 .then_with(|| {
                     self.chunks[left.0]
@@ -733,12 +770,23 @@ impl KnowledgeIndex {
         });
 
         let mut seen_documents = HashSet::new();
-        let results = ranked
+        let ranked_documents = ranked
             .into_iter()
             .filter(|(chunk_index, _, _)| {
                 seen_documents.insert(self.chunks[*chunk_index].document_id.clone())
             })
-            .take(query.top_k)
+            .take(query.top_k.min(MAX_KNOWLEDGE_RESULTS))
+            .collect::<Vec<_>>();
+        let (selected_documents, selection) = select_adaptive_documents(
+            query_intent,
+            &raw_query,
+            &ranked_documents,
+            &self.chunks,
+            &lexical_scores,
+            &dense_scores,
+        );
+        let results = selected_documents
+            .into_iter()
             .map(|(chunk_index, score, version_match)| {
                 let chunk = &self.chunks[chunk_index];
                 let exact_phrase_match = chunk.text.to_lowercase().contains(&raw_query)
@@ -784,6 +832,7 @@ impl KnowledgeIndex {
             requested_scope: query.version_scope,
             audience,
             retrieval: self.retrieval_info_with_fallback(query_fallback),
+            selection,
             results,
         })
     }
@@ -913,6 +962,206 @@ fn classify_chunk_audience(
     )
 }
 
+fn knowledge_query_intent(query: &str) -> KnowledgeQueryIntent {
+    let normalized = query.to_lowercase();
+    if ["一键宏", "宏", "按键", "键位"]
+        .iter()
+        .any(|keyword| normalized.contains(keyword))
+    {
+        KnowledgeQueryIntent::Macro
+    } else if ["配装", "装备", "属性", "破招", "加速阈值"]
+        .iter()
+        .any(|keyword| normalized.contains(keyword))
+    {
+        KnowledgeQueryIntent::Equipment
+    } else if ["副本", "实战", "首领", "boss", "秘境", "打法"]
+        .iter()
+        .any(|keyword| normalized.contains(keyword))
+    {
+        KnowledgeQueryIntent::Encounter
+    } else if ["循环", "空转", "手法", "盾飞", "劫刀", "流血", "节奏"]
+        .iter()
+        .any(|keyword| normalized.contains(keyword))
+    {
+        KnowledgeQueryIntent::Rotation
+    } else if ["机制", "系数", "概率", "技改", "伤害", "重置"]
+        .iter()
+        .any(|keyword| normalized.contains(keyword))
+    {
+        KnowledgeQueryIntent::Mechanism
+    } else {
+        KnowledgeQueryIntent::General
+    }
+}
+
+fn knowledge_source_role(chunk: &KnowledgeChunk) -> KnowledgeSourceRole {
+    if chunk.category.contains("白皮书") || chunk.title.contains("白皮书") {
+        KnowledgeSourceRole::Whitepaper
+    } else if chunk.category.contains("实战")
+        || ["实战", "副本", "攻略", "打法"]
+            .iter()
+            .any(|keyword| chunk.title.contains(keyword))
+    {
+        KnowledgeSourceRole::Practical
+    } else if chunk.category.contains("宏") || chunk.title.contains('宏') {
+        KnowledgeSourceRole::Macro
+    } else if ["机制", "系数", "技改", "推导", "基础", "通用"]
+        .iter()
+        .any(|keyword| chunk.category.contains(keyword) || chunk.title.contains(keyword))
+    {
+        KnowledgeSourceRole::Mechanism
+    } else {
+        KnowledgeSourceRole::General
+    }
+}
+
+fn adaptive_rank_score(
+    intent: KnowledgeQueryIntent,
+    chunk: &KnowledgeChunk,
+    retrieval_score: f64,
+) -> f64 {
+    let role = knowledge_source_role(chunk);
+    let multiplier = match (intent, role) {
+        (KnowledgeQueryIntent::Rotation, KnowledgeSourceRole::Whitepaper) => 1.18,
+        (KnowledgeQueryIntent::Rotation, KnowledgeSourceRole::Practical) => 1.14,
+        (KnowledgeQueryIntent::Rotation, KnowledgeSourceRole::Mechanism) => 1.05,
+        (KnowledgeQueryIntent::Rotation, KnowledgeSourceRole::Macro) => 0.94,
+        (KnowledgeQueryIntent::Macro, KnowledgeSourceRole::Macro) => 1.22,
+        (KnowledgeQueryIntent::Macro, KnowledgeSourceRole::Whitepaper) => 1.04,
+        (KnowledgeQueryIntent::Equipment, KnowledgeSourceRole::Whitepaper) => 1.16,
+        (KnowledgeQueryIntent::Equipment, KnowledgeSourceRole::Mechanism) => 1.08,
+        (KnowledgeQueryIntent::Encounter, KnowledgeSourceRole::Practical) => 1.20,
+        (KnowledgeQueryIntent::Encounter, KnowledgeSourceRole::Whitepaper) => 1.06,
+        (KnowledgeQueryIntent::Mechanism, KnowledgeSourceRole::Mechanism) => 1.18,
+        (KnowledgeQueryIntent::Mechanism, KnowledgeSourceRole::Whitepaper) => 1.08,
+        _ => 1.0,
+    };
+    retrieval_score * multiplier
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AdaptiveConfidence {
+    High,
+    Medium,
+    Low,
+}
+
+impl AdaptiveConfidence {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::High => "high",
+            Self::Medium => "medium",
+            Self::Low => "low",
+        }
+    }
+}
+
+type RankedKnowledgeDocument = (usize, f64, KnowledgeVersionMatch);
+
+fn select_adaptive_documents(
+    intent: KnowledgeQueryIntent,
+    raw_query: &str,
+    ranked: &[RankedKnowledgeDocument],
+    chunks: &[KnowledgeChunk],
+    lexical_scores: &HashMap<usize, f64>,
+    dense_scores: &HashMap<usize, f64>,
+) -> (Vec<RankedKnowledgeDocument>, KnowledgeSelectionInfo) {
+    if ranked.is_empty() {
+        return (
+            Vec::new(),
+            KnowledgeSelectionInfo {
+                strategy: "adaptive_evidence/v1".to_string(),
+                intent,
+                confidence: "none".to_string(),
+                candidate_documents: 0,
+                returned_documents: 0,
+                source_roles: Vec::new(),
+                decision: "no_match".to_string(),
+            },
+        );
+    }
+
+    let first_index = ranked[0].0;
+    let first = &chunks[first_index];
+    let exact_phrase = first.title.to_lowercase().contains(raw_query)
+        || first.text.to_lowercase().contains(raw_query);
+    let lexical = lexical_scores.contains_key(&first_index);
+    let dense = dense_scores.get(&first_index).copied();
+    let confidence = if exact_phrase || (lexical && dense.is_some_and(|score| score >= 0.60)) {
+        AdaptiveConfidence::High
+    } else if lexical || dense.is_some_and(|score| score >= 0.55) {
+        AdaptiveConfidence::Medium
+    } else {
+        AdaptiveConfidence::Low
+    };
+
+    let mut target = match confidence {
+        AdaptiveConfidence::High => 3,
+        AdaptiveConfidence::Medium => 4,
+        AdaptiveConfidence::Low => 6,
+    }
+    .min(ranked.len());
+    if matches!(intent, KnowledgeQueryIntent::General) && target < ranked.len() {
+        target += 1;
+    }
+
+    let mut selected = ranked.iter().take(target).copied().collect::<Vec<_>>();
+    let mut roles = selected
+        .iter()
+        .map(|(index, _, _)| knowledge_source_role(&chunks[*index]))
+        .collect::<HashSet<_>>();
+    let desired_role_count = match intent {
+        KnowledgeQueryIntent::Rotation
+        | KnowledgeQueryIntent::Equipment
+        | KnowledgeQueryIntent::Encounter
+        | KnowledgeQueryIntent::Mechanism => 2,
+        KnowledgeQueryIntent::Macro | KnowledgeQueryIntent::General => 1,
+    };
+    let initial_target = target;
+    if roles.len() < desired_role_count {
+        for candidate in ranked.iter().skip(target) {
+            let role = knowledge_source_role(&chunks[candidate.0]);
+            if roles.insert(role) {
+                selected.push(*candidate);
+                if roles.len() >= desired_role_count || selected.len() >= MAX_KNOWLEDGE_RESULTS {
+                    break;
+                }
+            }
+        }
+    }
+    roles = selected
+        .iter()
+        .map(|(index, _, _)| knowledge_source_role(&chunks[*index]))
+        .collect();
+    let mut source_roles = roles.into_iter().collect::<Vec<_>>();
+    source_roles.sort_by_key(|role| match role {
+        KnowledgeSourceRole::Whitepaper => 0,
+        KnowledgeSourceRole::Practical => 1,
+        KnowledgeSourceRole::Mechanism => 2,
+        KnowledgeSourceRole::Macro => 3,
+        KnowledgeSourceRole::General => 4,
+    });
+    let decision = if selected.len() > initial_target {
+        "expanded_for_source_coverage"
+    } else {
+        match confidence {
+            AdaptiveConfidence::High => "stopped_on_high_confidence",
+            AdaptiveConfidence::Medium => "balanced_evidence",
+            AdaptiveConfidence::Low => "expanded_for_low_confidence",
+        }
+    };
+    let selection = KnowledgeSelectionInfo {
+        strategy: "adaptive_evidence/v1".to_string(),
+        intent,
+        confidence: confidence.as_str().to_string(),
+        candidate_documents: ranked.len(),
+        returned_documents: selected.len(),
+        source_roles,
+        decision: decision.to_string(),
+    };
+    (selected, selection)
+}
+
 fn dense_document_text(chunk: &KnowledgeChunk) -> String {
     format!(
         "标题：{}\n赛季：{}\n分类：{}\n章节：{}\n{}",
@@ -949,9 +1198,9 @@ fn validate_query(query: &KnowledgeSearchQuery) -> Result<(), KnowledgeIndexErro
             "query contains control characters",
         ));
     }
-    if !(1..=MAX_TOP_K).contains(&query.top_k) {
+    if !(1..=MAX_KNOWLEDGE_RESULTS).contains(&query.top_k) {
         return Err(KnowledgeIndexError::InvalidQuery(
-            "top_k must be within 1..=5",
+            "top_k must be within 1..=8",
         ));
     }
     Ok(())
@@ -1509,10 +1758,8 @@ mod tests {
     fn ambiguous_questions_default_to_flagship_and_selected_mount() {
         let fixture = Fixture::create();
         let index = KnowledgeIndex::load(&fixture.root).unwrap();
-        let audience = KnowledgeAudience::from_question(
-            "怎样减少空转",
-            Some(KnowledgeMountScope::Fenshanjin),
-        );
+        let audience =
+            KnowledgeAudience::from_question("怎样减少空转", Some(KnowledgeMountScope::Fenshanjin));
         let response = index
             .search_with_audience(
                 &KnowledgeVersionContext::from_game_version(GameVersion::AnYingQianJi),
@@ -1522,8 +1769,14 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.audience.client, KnowledgeClientScope::Flagship);
-        assert_eq!(response.audience.mount, Some(KnowledgeMountScope::Fenshanjin));
-        assert!(response.results.iter().any(|result| result.title.contains("分山劲白皮书")));
+        assert_eq!(
+            response.audience.mount,
+            Some(KnowledgeMountScope::Fenshanjin)
+        );
+        assert!(response
+            .results
+            .iter()
+            .any(|result| result.title.contains("分山劲白皮书")));
         assert!(response
             .results
             .iter()
@@ -1537,7 +1790,10 @@ mod tests {
         let response = index
             .search(
                 &KnowledgeVersionContext::from_game_version(GameVersion::AnYingQianJi),
-                query(KnowledgeVersionScope::CurrentOnly, "无界分山劲·悟怎样减少空转"),
+                query(
+                    KnowledgeVersionScope::CurrentOnly,
+                    "无界分山劲·悟怎样减少空转",
+                ),
             )
             .unwrap();
 
@@ -1557,6 +1813,85 @@ mod tests {
         );
         assert_eq!(audience.client, KnowledgeClientScope::Flagship);
         assert_eq!(audience.mount, Some(KnowledgeMountScope::Tieguyi));
+    }
+
+    #[test]
+    fn adaptive_selection_stops_early_on_strong_evidence_and_expands_when_weak() {
+        let fixture = Fixture::create();
+        let index = KnowledgeIndex::load(&fixture.root).unwrap();
+        let mut seen = HashSet::new();
+        let ranked = index
+            .chunks
+            .iter()
+            .enumerate()
+            .filter(|(_, chunk)| seen.insert(chunk.document_id.clone()))
+            .take(MAX_KNOWLEDGE_RESULTS)
+            .enumerate()
+            .map(|(rank, (index, _))| {
+                (
+                    index,
+                    20.0 - rank as f64,
+                    KnowledgeVersionMatch::CurrentExact,
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(ranked.len(), MAX_KNOWLEDGE_RESULTS);
+
+        let first = ranked[0].0;
+        let mut lexical = HashMap::new();
+        lexical.insert(first, 12.0);
+        let mut dense = HashMap::new();
+        dense.insert(first, 0.72);
+        let (strong, strong_info) = select_adaptive_documents(
+            KnowledgeQueryIntent::Rotation,
+            &index.chunks[first].title.to_lowercase(),
+            &ranked,
+            &index.chunks,
+            &lexical,
+            &dense,
+        );
+        let (weak, weak_info) = select_adaptive_documents(
+            KnowledgeQueryIntent::Rotation,
+            "语义模糊的问题",
+            &ranked,
+            &index.chunks,
+            &HashMap::new(),
+            &HashMap::new(),
+        );
+
+        assert_eq!(strong_info.confidence, "high");
+        assert!(matches!(
+            strong_info.decision.as_str(),
+            "stopped_on_high_confidence" | "expanded_for_source_coverage"
+        ));
+        assert!(strong.len() < weak.len());
+        assert_eq!(weak_info.confidence, "low");
+        assert_eq!(weak_info.decision, "expanded_for_low_confidence");
+        assert!(weak.len() <= MAX_KNOWLEDGE_RESULTS);
+    }
+
+    #[test]
+    fn source_roles_are_soft_preferences_instead_of_fixed_quotas() {
+        let fixture = Fixture::create();
+        let index = KnowledgeIndex::load(&fixture.root).unwrap();
+        let whitepaper = index
+            .chunks
+            .iter()
+            .find(|chunk| chunk.title == "暗影千机_ 分山劲白皮书")
+            .unwrap();
+        let general_source = index
+            .chunks
+            .iter()
+            .find(|chunk| chunk.title == "在线计算器")
+            .unwrap();
+        assert!(
+            adaptive_rank_score(KnowledgeQueryIntent::Rotation, whitepaper, 10.0)
+                > adaptive_rank_score(KnowledgeQueryIntent::Rotation, general_source, 10.0)
+        );
+        assert_eq!(
+            knowledge_source_role(whitepaper),
+            KnowledgeSourceRole::Whitepaper
+        );
     }
 
     #[test]
@@ -2339,7 +2674,9 @@ mod tests {
             .iter()
             .find(|result| result.title.contains(expected_title))
             .expect("hybrid retrieval should recover the semantic rotation result");
-        assert!(recovered.dense_similarity.is_some_and(|score| score >= 0.55));
+        assert!(recovered
+            .dense_similarity
+            .is_some_and(|score| score >= 0.55));
         println!(
             "HYBRID_GAIN query={} recovered={} dense_similarity={:?}",
             "怎样减少战斗中的空转", recovered.title, recovered.dense_similarity
