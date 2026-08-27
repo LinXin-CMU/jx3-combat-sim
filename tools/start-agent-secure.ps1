@@ -3,6 +3,9 @@ param(
   [string]$ConfigPath = '',
   [string]$UserdataPath = '',
   [string]$KnowledgeRoot = '',
+  [ValidateSet('embedded', 'bm25')]
+  [string]$KnowledgeRetrieval = 'embedded',
+  [string]$EmbeddingEndpoint = 'https://huggingface.co',
   [string]$ApiKeyEnv = 'JX3_DEEPSEEK_API_KEY'
 )
 
@@ -29,6 +32,8 @@ $resolvedExe = (Resolve-Path -LiteralPath $exe).Path
 $resolvedConfig = (Resolve-Path -LiteralPath $ConfigPath).Path
 $resolvedUserdata = (Resolve-Path -LiteralPath $UserdataPath).Path
 $resolvedKnowledge = if ($KnowledgeRoot) { (Resolve-Path -LiteralPath $KnowledgeRoot).Path } else { $null }
+$knowledgeCache = Join-Path $resolvedUserdata 'knowledge_index\v1'
+New-Item -ItemType Directory -Path $knowledgeCache -Force | Out-Null
 $credential = [Environment]::GetEnvironmentVariable($ApiKeyEnv, 'User')
 if ([string]::IsNullOrWhiteSpace($credential)) {
   throw "Credential environment variable $ApiKeyEnv is unavailable at User scope."
@@ -43,6 +48,9 @@ $names = @(
   'JX3_USERDATA_DIR',
   'JX3_AGENT_CONFIG',
   'JX3_KNOWLEDGE_ROOT',
+  'JX3_KNOWLEDGE_RETRIEVAL',
+  'JX3_KNOWLEDGE_CACHE_DIR',
+  'HF_ENDPOINT',
   $ApiKeyEnv
 )
 $previous = @{}
@@ -57,6 +65,9 @@ try {
   [Environment]::SetEnvironmentVariable('JX3_USERDATA_DIR', $resolvedUserdata, 'Process')
   [Environment]::SetEnvironmentVariable('JX3_AGENT_CONFIG', $resolvedConfig, 'Process')
   [Environment]::SetEnvironmentVariable('JX3_KNOWLEDGE_ROOT', $resolvedKnowledge, 'Process')
+  [Environment]::SetEnvironmentVariable('JX3_KNOWLEDGE_RETRIEVAL', $KnowledgeRetrieval, 'Process')
+  [Environment]::SetEnvironmentVariable('JX3_KNOWLEDGE_CACHE_DIR', $knowledgeCache, 'Process')
+  [Environment]::SetEnvironmentVariable('HF_ENDPOINT', $EmbeddingEndpoint, 'Process')
   [Environment]::SetEnvironmentVariable($ApiKeyEnv, $credential, 'Process')
   $server = Start-Process -FilePath $resolvedExe -WorkingDirectory $backendRoot `
     -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
@@ -89,5 +100,6 @@ if (-not $healthy) {
   port = $Port
   config = Split-Path -Leaf $resolvedConfig
   knowledge = if ($resolvedKnowledge) { Split-Path -Leaf $resolvedKnowledge } else { 'disabled' }
+  retrieval = $KnowledgeRetrieval
   credential_source = "User environment: $ApiKeyEnv"
 } | ConvertTo-Json -Compress

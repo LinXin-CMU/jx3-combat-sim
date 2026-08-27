@@ -6,12 +6,16 @@ use std::env;
 use std::fmt;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
 
+use super::knowledge_dense::{DenseKnowledgeIndex, DENSE_MODEL_ID};
 use crate::GameVersion;
 
 pub const KNOWLEDGE_INDEX_SCHEMA_V1: &str = "agent-knowledge-index/v1";
 pub const KNOWLEDGE_SEARCH_SCHEMA_V1: &str = "agent-knowledge-search/v1";
 pub const KNOWLEDGE_ROOT_ENV: &str = "JX3_KNOWLEDGE_ROOT";
+pub const KNOWLEDGE_RETRIEVAL_ENV: &str = "JX3_KNOWLEDGE_RETRIEVAL";
+pub const KNOWLEDGE_CACHE_ENV: &str = "JX3_KNOWLEDGE_CACHE_DIR";
 const MANIFEST_FILE: &str = "_migration-manifest.json";
 const MAX_DOCUMENTS: usize = 5_000;
 const MAX_DOCUMENT_BYTES: u64 = 8 * 1024 * 1024;
@@ -153,9 +157,22 @@ pub struct KnowledgeSearchResult {
     pub document_hash: String,
     pub chunk_hash: String,
     pub score: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lexical_score: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dense_similarity: Option<f64>,
     pub exact_phrase_match: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reference_entities: Vec<KnowledgeReferenceEntity>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct KnowledgeRetrievalInfo {
+    pub requested_mode: String,
+    pub active_mode: String,
+    pub dense_model: Option<String>,
+    pub cache_state: String,
+    pub fallback_code: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -171,6 +188,7 @@ pub struct KnowledgeSearchResponse {
     pub corpus_hash: String,
     pub current_season: String,
     pub requested_scope: KnowledgeVersionScope,
+    pub retrieval: KnowledgeRetrievalInfo,
     pub results: Vec<KnowledgeSearchResult>,
 }
 
@@ -230,12 +248,56 @@ pub struct KnowledgeIndex {
     average_document_length: f64,
     seasons: BTreeSet<String>,
     categories: BTreeSet<String>,
+    dense: Option<Arc<DenseKnowledgeIndex>>,
+    requested_retrieval: String,
+    dense_fallback_code: Option<String>,
 }
 
 impl KnowledgeIndex {
     pub fn from_env() -> Result<Self, KnowledgeIndexError> {
         let root = env::var_os(KNOWLEDGE_ROOT_ENV).ok_or(KnowledgeIndexError::NotConfigured)?;
-        Self::load(Path::new(&root))
+        let mut index = Self::load(Path::new(&root))?;
+        let requested = env::var(KNOWLEDGE_RETRIEVAL_ENV)
+            .unwrap_or_else(|_| "embedded".to_string())
+            .trim()
+            .to_ascii_lowercase();
+        index.requested_retrieval = requested.clone();
+        match requested.as_str() {
+            "bm25" => {}
+            "embedded" => {
+                let cache_root = env::var_os(KNOWLEDGE_CACHE_ENV)
+                    .map(PathBuf::from)
+                    .or_else(|| {
+                        env::var_os("JX3_USERDATA_DIR")
+                            .map(PathBuf::from)
+                            .map(|root| root.join("knowledge_index").join("v1"))
+                    })
+                    .unwrap_or_else(|| {
+                        PathBuf::from("userdata").join("knowledge_index").join("v1")
+                    });
+                let texts = index
+                    .chunks
+                    .iter()
+                    .map(dense_document_text)
+                    .collect::<Vec<_>>();
+                match DenseKnowledgeIndex::load_or_build(&index.corpus_hash, &texts, &cache_root) {
+                    Ok(dense) => index.dense = Some(Arc::new(dense)),
+                    Err(error) => {
+                        eprintln!(
+                            "[agent][knowledge] Embedded 初始化失败（{error}），已降级 BM25"
+                        );
+                        index.dense_fallback_code = Some(error.code.to_string());
+                    }
+                }
+            }
+            _ => {
+                eprintln!(
+                    "[agent][knowledge] 未知检索模式，已降级 BM25；请设置 {KNOWLEDGE_RETRIEVAL_ENV}=embedded|bm25"
+                );
+                index.dense_fallback_code = Some("invalid_retrieval_mode".to_string());
+            }
+        }
+        Ok(index)
     }
 
     pub fn load(root: &Path) -> Result<Self, KnowledgeIndexError> {
@@ -386,6 +448,9 @@ impl KnowledgeIndex {
             average_document_length,
             seasons,
             categories,
+            dense: None,
+            requested_retrieval: "bm25".to_string(),
+            dense_fallback_code: None,
         })
     }
 
@@ -415,6 +480,10 @@ impl KnowledgeIndex {
 
     pub fn categories(&self) -> impl Iterator<Item = &str> {
         self.categories.iter().map(String::as_str)
+    }
+
+    pub fn retrieval_info(&self) -> KnowledgeRetrievalInfo {
+        self.retrieval_info_with_fallback(self.dense_fallback_code.clone())
     }
 
     pub fn search(
@@ -447,8 +516,9 @@ impl KnowledgeIndex {
             }
             _ => None,
         };
-        let mut ranked = Vec::new();
-        for chunk in &self.chunks {
+        let mut eligible = Vec::new();
+        let mut lexical_ranked = Vec::new();
+        for (chunk_index, chunk) in self.chunks.iter().enumerate() {
             let Some(version_match) = version_match(
                 context,
                 &query.version_scope,
@@ -467,6 +537,7 @@ impl KnowledgeIndex {
             if test_server_release_hint.is_some_and(|release| !chunk.title.contains(release)) {
                 continue;
             }
+            eligible.push((chunk_index, version_match));
             let lexical_score = self.bm25_score(chunk, &query_terms);
             if lexical_score <= 0.0 || !lexical_score.is_finite() {
                 continue;
@@ -491,33 +562,117 @@ impl KnowledgeIndex {
             if chunk.version_warning.is_some() {
                 score *= 0.75;
             }
-            ranked.push((score, version_match, chunk));
+            lexical_ranked.push((chunk_index, score, version_match));
         }
+        lexical_ranked.sort_by(|left, right| {
+            fact_eligible(&self.chunks[right.0])
+                .cmp(&fact_eligible(&self.chunks[left.0]))
+                .then_with(|| right.1.partial_cmp(&left.1).unwrap_or(Ordering::Equal))
+                .then_with(|| self.chunks[left.0].title.cmp(&self.chunks[right.0].title))
+                .then_with(|| {
+                    self.chunks[left.0]
+                        .heading
+                        .cmp(&self.chunks[right.0].heading)
+                })
+        });
+
+        let lexical_scores = lexical_ranked
+            .iter()
+            .map(|(index, score, _)| (*index, *score))
+            .collect::<HashMap<_, _>>();
+        let lexical_ranks = lexical_ranked
+            .iter()
+            .take(100)
+            .enumerate()
+            .map(|(rank, (index, _, _))| (*index, rank + 1))
+            .collect::<HashMap<_, _>>();
+        let version_matches = eligible.iter().copied().collect::<HashMap<_, _>>();
+
+        let mut query_fallback = self.dense_fallback_code.clone();
+        let dense_hits = if let Some(dense) = &self.dense {
+            let eligible_indices = eligible.iter().map(|(index, _)| *index).collect::<Vec<_>>();
+            match dense.rank(&query.query, &eligible_indices) {
+                Ok(hits) => hits,
+                Err(error) => {
+                    eprintln!(
+                        "[agent][knowledge] Embedded 查询失败（{}），本次检索降级 BM25",
+                        error.code
+                    );
+                    query_fallback = Some(error.code.to_string());
+                    Vec::new()
+                }
+            }
+        } else {
+            Vec::new()
+        };
+        let dense_scores = dense_hits
+            .iter()
+            .take(100)
+            .map(|hit| (hit.chunk_index, hit.similarity as f64))
+            .collect::<HashMap<_, _>>();
+        let dense_ranks = dense_hits
+            .iter()
+            .take(100)
+            .enumerate()
+            .map(|(rank, hit)| (hit.chunk_index, rank + 1))
+            .collect::<HashMap<_, _>>();
+
+        let hybrid_active = self.dense.is_some() && query_fallback.is_none();
+        let mut candidate_indices = lexical_ranks.keys().copied().collect::<HashSet<_>>();
+        if hybrid_active {
+            candidate_indices.extend(dense_ranks.keys().copied().filter(|chunk_index| {
+                lexical_ranks.contains_key(chunk_index)
+                    || dense_scores
+                        .get(chunk_index)
+                        .is_some_and(|similarity| *similarity >= 0.55)
+            }));
+        }
+        let mut ranked = candidate_indices
+            .into_iter()
+            .filter_map(|chunk_index| {
+                let version_match = *version_matches.get(&chunk_index)?;
+                let score = if hybrid_active {
+                    reciprocal_rank_fusion(
+                        lexical_ranks.get(&chunk_index).copied(),
+                        dense_ranks.get(&chunk_index).copied(),
+                    )
+                } else {
+                    *lexical_scores.get(&chunk_index).unwrap_or(&0.0)
+                };
+                (score > 0.0).then_some((chunk_index, score, version_match))
+            })
+            .collect::<Vec<_>>();
         ranked.sort_by(|left, right| {
-            fact_eligible(right.2)
-                .cmp(&fact_eligible(left.2))
-                .then_with(|| right.0.partial_cmp(&left.0).unwrap_or(Ordering::Equal))
-                .then_with(|| left.2.title.cmp(&right.2.title))
-                .then_with(|| left.2.heading.cmp(&right.2.heading))
+            fact_eligible(&self.chunks[right.0])
+                .cmp(&fact_eligible(&self.chunks[left.0]))
+                .then_with(|| right.1.partial_cmp(&left.1).unwrap_or(Ordering::Equal))
+                .then_with(|| self.chunks[left.0].title.cmp(&self.chunks[right.0].title))
+                .then_with(|| {
+                    self.chunks[left.0]
+                        .heading
+                        .cmp(&self.chunks[right.0].heading)
+                })
         });
 
         let mut seen_documents = HashSet::new();
         let results = ranked
             .into_iter()
-            .filter(|(_, _, chunk)| seen_documents.insert(chunk.document_id.clone()))
+            .filter(|(chunk_index, _, _)| {
+                seen_documents.insert(self.chunks[*chunk_index].document_id.clone())
+            })
             .take(query.top_k)
-            .map(|(score, version_match, chunk)| {
+            .map(|(chunk_index, score, version_match)| {
+                let chunk = &self.chunks[chunk_index];
                 let exact_phrase_match = chunk.text.to_lowercase().contains(&raw_query)
                     || chunk.title.to_lowercase().contains(&raw_query);
-                let reference_entities = if matches!(
-                    &query.version_scope,
-                    KnowledgeVersionScope::ReferenceLookup
-                ) && exact_phrase_match
-                {
-                    extract_reference_entities(&chunk.text)
-                } else {
-                    Vec::new()
-                };
+                let reference_entities =
+                    if matches!(&query.version_scope, KnowledgeVersionScope::ReferenceLookup)
+                        && exact_phrase_match
+                    {
+                        extract_reference_entities(&chunk.text)
+                    } else {
+                        Vec::new()
+                    };
                 KnowledgeSearchResult {
                     document_id: chunk.document_id.clone(),
                     title: chunk.title.clone(),
@@ -536,6 +691,8 @@ impl KnowledgeIndex {
                     document_hash: chunk.document_hash.clone(),
                     chunk_hash: chunk.chunk_hash.clone(),
                     score: round_score(score),
+                    lexical_score: lexical_scores.get(&chunk_index).copied().map(round_score),
+                    dense_similarity: dense_scores.get(&chunk_index).copied().map(round_score),
                     exact_phrase_match,
                     reference_entities,
                 }
@@ -547,8 +704,32 @@ impl KnowledgeIndex {
             corpus_hash: self.corpus_hash.clone(),
             current_season: context.current_season.to_string(),
             requested_scope: query.version_scope,
+            retrieval: self.retrieval_info_with_fallback(query_fallback),
             results,
         })
+    }
+
+    fn retrieval_info_with_fallback(
+        &self,
+        fallback_code: Option<String>,
+    ) -> KnowledgeRetrievalInfo {
+        let active = self.dense.is_some() && fallback_code.is_none();
+        KnowledgeRetrievalInfo {
+            requested_mode: self.requested_retrieval.clone(),
+            active_mode: if active { "hybrid_rrf" } else { "bm25" }.to_string(),
+            dense_model: active.then(|| DENSE_MODEL_ID.to_string()),
+            cache_state: self
+                .dense
+                .as_ref()
+                .map(|dense| dense.cache_state().as_str())
+                .unwrap_or(if self.requested_retrieval == "bm25" {
+                    "disabled"
+                } else {
+                    "unavailable"
+                })
+                .to_string(),
+            fallback_code,
+        }
     }
 
     fn validate_version_scope(
@@ -612,6 +793,25 @@ impl KnowledgeIndex {
             })
             .sum()
     }
+}
+
+fn dense_document_text(chunk: &KnowledgeChunk) -> String {
+    format!(
+        "标题：{}\n赛季：{}\n分类：{}\n章节：{}\n{}",
+        chunk.title, chunk.season, chunk.category, chunk.heading, chunk.text
+    )
+}
+
+fn reciprocal_rank_fusion(lexical_rank: Option<usize>, dense_rank: Option<usize>) -> f64 {
+    const RRF_K: f64 = 60.0;
+    const DENSE_WEIGHT: f64 = 0.7;
+    let lexical = lexical_rank
+        .map(|rank| 1.0 / (RRF_K + rank as f64))
+        .unwrap_or(0.0);
+    let dense = dense_rank
+        .map(|rank| DENSE_WEIGHT / (RRF_K + rank as f64))
+        .unwrap_or(0.0);
+    (lexical + dense) * 1_000.0
 }
 
 fn fact_eligible(chunk: &KnowledgeChunk) -> bool {
@@ -1519,9 +1719,10 @@ mod tests {
 
         assert!(result.title.contains("万灵当歌_ 苍云分山PVE指南"));
         assert!(result.exact_phrase_match);
-        assert!(result.reference_entities.iter().any(|entity| {
-            entity.relation == "video_author" && entity.name == "dereck365"
-        }));
+        assert!(result
+            .reference_entities
+            .iter()
+            .any(|entity| { entity.relation == "video_author" && entity.name == "dereck365" }));
     }
 
     #[test]
@@ -1714,7 +1915,13 @@ mod tests {
         let Some(root) = env::var_os(KNOWLEDGE_ROOT_ENV) else {
             return;
         };
-        let index = KnowledgeIndex::load(Path::new(&root)).unwrap();
+        let index = if env::var(KNOWLEDGE_RETRIEVAL_ENV)
+            .is_ok_and(|mode| mode.eq_ignore_ascii_case("embedded"))
+        {
+            KnowledgeIndex::from_env().unwrap()
+        } else {
+            KnowledgeIndex::load(Path::new(&root)).unwrap()
+        };
         let suite: KnowledgeEvalSuite =
             serde_json::from_str(include_str!("../../tests/agent_knowledge_eval/cases.json"))
                 .unwrap();
@@ -1774,7 +1981,18 @@ mod tests {
                     response.results.is_empty(),
                     "expected no answer in {}, got {}",
                     case.id,
-                    response.results[0].title
+                    response
+                        .results
+                        .iter()
+                        .map(|result| format!(
+                            "{} (lexical={:?}, dense={:?}, fused={})",
+                            result.title,
+                            result.lexical_score,
+                            result.dense_similarity,
+                            result.score
+                        ))
+                        .collect::<Vec<_>>()
+                        .join(" | ")
                 );
             }
             if !case.allowed_seasons.is_empty() {
@@ -1867,6 +2085,7 @@ mod tests {
                 "corpus_hash": index.corpus_hash(),
                 "documents": index.document_count(),
                 "chunks": index.chunk_count(),
+                "retrieval": index.retrieval_info(),
                 "cases": suite.cases.len(),
                 "recall_cases": recall_cases,
                 "recall_hits": recall_hits,
@@ -1882,6 +2101,57 @@ mod tests {
             recall_at_5,
             suite.minimum_recall_at_5
         );
+    }
+
+    #[test]
+    fn configured_vault_hybrid_recovers_a_semantic_rotation_query() {
+        let Some(root) = env::var_os(KNOWLEDGE_ROOT_ENV) else {
+            return;
+        };
+        if !env::var(KNOWLEDGE_RETRIEVAL_ENV)
+            .is_ok_and(|mode| mode.eq_ignore_ascii_case("embedded"))
+        {
+            return;
+        }
+        let lexical = KnowledgeIndex::load(Path::new(&root)).unwrap();
+        let hybrid = KnowledgeIndex::from_env().unwrap();
+        let context = KnowledgeVersionContext::from_game_version(GameVersion::AnYingQianJi);
+        let request = KnowledgeSearchQuery {
+            query: "怎样减少战斗中的空转".to_string(),
+            version_scope: KnowledgeVersionScope::CurrentOnly,
+            category: None,
+            top_k: 5,
+        };
+        let lexical_results = lexical.search(&context, request.clone()).unwrap();
+        let hybrid_results = hybrid.search(&context, request).unwrap();
+        let expected_title = "英雄及挑战阆风悬城_ 分山实战技巧";
+        assert!(
+            lexical_results
+                .results
+                .iter()
+                .all(|result| !result.title.contains(expected_title)),
+            "comparison query no longer distinguishes the two retrieval modes"
+        );
+        let recovered = hybrid_results
+            .results
+            .iter()
+            .find(|result| result.title.contains(expected_title))
+            .expect("hybrid retrieval should recover the semantic rotation result");
+        assert!(recovered.dense_similarity.is_some_and(|score| score >= 0.55));
+        println!(
+            "HYBRID_GAIN query={} recovered={} dense_similarity={:?}",
+            "怎样减少战斗中的空转", recovered.title, recovered.dense_similarity
+        );
+    }
+
+    #[test]
+    fn reciprocal_rank_fusion_rewards_agreement_without_requiring_both_channels() {
+        let lexical_only = reciprocal_rank_fusion(Some(1), None);
+        let dense_only = reciprocal_rank_fusion(None, Some(1));
+        let agreed = reciprocal_rank_fusion(Some(1), Some(1));
+        assert!(agreed > lexical_only);
+        assert!(lexical_only > dense_only);
+        assert!(dense_only > 0.0);
     }
 
     fn knowledge_eval_error_code(error: &KnowledgeIndexError) -> &'static str {

@@ -21,6 +21,7 @@ ahash = "0.8"
 smallvec = "1"
 sha2 = "0.10"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+fastembed = { version = "6.0.1", default-features = false, features = ["ort-download-binaries-rustls-tls", "hf-hub-rustls-tls"] }
 
 [build-dependencies]
 winres = "0.1"

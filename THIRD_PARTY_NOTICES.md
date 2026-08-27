@@ -27,6 +27,8 @@ MIT 许可证不授予下列内容的版权、商标权或再分发许可：
 
 Rust 与 Python 依赖通过 `Cargo.lock`、`Cargo.toml` 和 `python/requirements.txt` 声明，本仓库不复制其完整源码。使用、修改或再分发依赖时应遵守各依赖自身许可证。
 
+本地语义检索使用 Apache-2.0 许可的 `fastembed-rs` 运行 ONNX 模型；默认中文向量模型为 MIT 许可的 `BAAI/bge-small-zh-v1.5`（运行时由 FastEmbed 的兼容模型仓库下载）。模型与生成的向量缓存只保存在未提交的 `backend/userdata/knowledge_index/`，不纳入本仓库源码许可。
+
 ## 公开发布门槛
 
 将仓库转为公开前，必须至少完成以下一项：

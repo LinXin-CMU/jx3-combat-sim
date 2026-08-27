@@ -19,15 +19,15 @@
 - 前端：原生 HTML/CSS/JavaScript，无构建步骤；主要逻辑集中在 `frontend/app.js`。
 - AI/搜索：宏生成与 GA、配装搜索、HTTP-RPC 强化学习环境、自研 PPO/行为克隆训练与分析。
 - 部署：同一 Rust 可执行文件支持本地、worker、router 三种模式；router 为每个用户启动隔离 worker。
-- 已验证基线：`cargo test` 为 155 个测试通过；前端可用 `node --check frontend/app.js` 与 `node --check frontend/agent.js` 做语法检查。
+- 已验证基线：`cargo test` 为 164 个测试通过；前端可用 `node --check frontend/app.js` 与 `node --check frontend/agent.js` 做语法检查。
 - Agent 离线评测：`tools/agent-eval.ps1` 运行 20 个工具级 fixture，必须保持 20/20、非法写入 0、userdata 不变且测试运行态可恢复。
 - Agent P1 基线：`docs/baselines/2026-08-25-agent-tool-layer.md` 记录 release 性能、确定性、成功/拒绝 trace 和完整回归；后续模型层不得弱化这些边界。
 - Agent P2 设计：`docs/AGENT_PHASE_2_PLAN.md` 已定义 provider、工具循环、SSE、报告和会话持久化边界；工程与真实模型评测已完成，公网仍是人工确认节点。
 - Agent P2 provider 基线：`docs/baselines/2026-08-25-agent-provider-layer.md` 记录 adapter、凭据、mock、隔离 HTTP 与完整回归；DeepSeek V4 Pro 的后续真实基线见 `docs/baselines/2026-08-26-agent-deepseek-v4-pro.md`。
-- Agent P2 离线基线：`docs/baselines/2026-08-26-agent-phase2-offline.md` 保留当时 113 项 Rust 测试的历史快照；当前为 155 项、20/20 工具评测、12/12 模型级离线评测。真实 Agent 会话已在用户确认后仅增量写入 `agent_sessions/v1`，既有 178 个文件及其清单哈希不变。
-- Agent 知识基线：本地 Vault 为 159 篇文档、3796 分块、13 个赛季；固定集 Recall@5 为 21/21，25 条版本/资格/拒答断言通过。`tools/agent-phase2-verify.ps1` 使用隔离 target、端口和 userdata 复现完整离线验收，详见 `docs/baselines/2026-08-26-agent-knowledge-k5.md`。
+- Agent P2 离线基线：`docs/baselines/2026-08-26-agent-phase2-offline.md` 保留当时 113 项 Rust 测试的历史快照；当前为 164 项、20/20 工具评测、12/12 模型级离线评测。真实 Agent 会话已在用户确认后仅增量写入 `agent_sessions/v1`，既有 178 个文件及其清单哈希不变。
+- Agent 知识基线：本地 Vault 为 159 篇文档、3796 分块、13 个赛季；固定集 Recall@5 为 23/23，27 条版本/资格/拒答断言通过。默认运行模式为 Embedded 混合检索：`BAAI/bge-small-zh-v1.5`（512 维）+ BM25 + weighted RRF；模型与 7.4 MiB 向量缓存只在 `backend/userdata/knowledge_index/v1`，失败时显式降级 BM25。详见 `docs/baselines/2026-08-27-agent-embedded-retrieval.md`。
 - Agent K5B 真实模型基线：6 题分别评测 DeepSeek V4 Pro 与 V4 Flash，零重试，按规划/版本/证据/表达代理分层；v6 使用动态筛选枚举、两次检索后强制收束，并在空响应时保留已取得证据。最终修正综合分 Pro 77.8、Flash 92.6；模型越权尝试 1、系统越权执行 0。详见 `docs/baselines/2026-08-27-agent-k5b-real-model.md`。
-- Agent K6 检索控制：当前 Prompt v7 要求逐次检索；Orchestrator 对同轮冗余检索做合并并转入报告，不再以知识预算耗尽终止。`reference_lookup` 允许人物、作者和来源身份跨赛季召回，但 `reference_only` 证据不能支撑当前玩法机制。固定检索正例现为 21/21。
+- Agent K6/K8 检索控制：当前 Prompt v7 要求逐次检索；Orchestrator 对同轮冗余检索做合并并转入报告，不再以知识预算耗尽终止。`reference_lookup` 允许人物、作者和来源身份跨赛季召回，但 `reference_only` 证据不能支撑当前玩法机制。版本与资格过滤发生在稀疏/向量召回之前，Dense 无权绕过边界；固定检索正例现为 23/23。
 
 更完整的现状审计见 `docs/PROJECT_BASELINE.md`，作品集与 Agent 路线见 `docs/AGENT_PORTFOLIO_PLAN.md`。
 

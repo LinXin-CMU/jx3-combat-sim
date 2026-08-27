@@ -9379,10 +9379,12 @@ async fn main() {
     let agent_knowledge = match agent::KnowledgeIndex::from_env() {
         Ok(index) => {
             println!(
-                "[agent] 知识库已加载：{} 篇文档 / {} 个分块 / corpus {}",
+                "[agent] 知识库已加载：{} 篇文档 / {} 个分块 / corpus {} / retrieval {} / cache {}",
                 index.document_count(),
                 index.chunk_count(),
-                &index.corpus_hash()[..12]
+                &index.corpus_hash()[..12],
+                index.retrieval_info().active_mode,
+                index.retrieval_info().cache_state
             );
             Some(Arc::new(index))
         }
