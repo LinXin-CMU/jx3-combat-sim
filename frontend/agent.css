@@ -125,8 +125,20 @@ body.agent-fullheight #page-agent.active {
 .agent-message.agent .agent-message-body { border-left: 2px solid var(--gold); }
 .agent-trace { max-width: 900px; margin: 0 auto 14px; padding: 10px 12px; border: 1px dashed var(--agent-line); border-radius: 6px; }
 .agent-trace-title { display: flex; justify-content: space-between; gap: 8px; color: var(--agent-muted); font-size: 11px; }
-.agent-trace-steps { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-.agent-trace-step { padding: 3px 7px; border-radius: 3px; background: var(--gold-tint); color: var(--gold); font-size: 11px; }
+.agent-trace-note { margin: 4px 0 0; color: var(--agent-muted); font-size: 10px; line-height: 1.5; }
+.agent-trace-steps { display: grid; gap: 0; margin-top: 7px; }
+.agent-trace-step { position: relative; display: flex; min-height: 44px; gap: 9px; padding: 4px 6px; color: var(--agent-muted); font-size: 11px; }
+.agent-trace-step:not(:last-child)::before { position: absolute; top: 13px; bottom: -4px; left: 10px; width: 1px; background: var(--agent-line); content: ''; }
+.agent-trace-marker { position: relative; z-index: 1; width: 9px; height: 9px; flex: 0 0 auto; margin-top: 4px; border: 1px solid var(--gold-dim); border-radius: 50%; background: var(--agent-panel); }
+.agent-trace-step.is-done .agent-trace-marker { border-color: var(--green); background: var(--green); box-shadow: 0 0 0 3px rgba(var(--green-rgb),.08); }
+.agent-trace-step.is-running .agent-trace-marker { border-color: var(--gold); background: var(--gold); animation: sim-ai-context-pulse 1.35s ease-in-out infinite; }
+.agent-trace-step.is-warning .agent-trace-marker { border-color: var(--warning); background: var(--warning); }
+.agent-trace-copy { display: flex; min-width: 0; flex: 1; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.agent-trace-body { display: grid; min-width: 0; gap: 2px; }
+.agent-trace-copy b { color: var(--agent-ink); font-size: 11px; font-weight: 600; }
+.agent-trace-overview { color: var(--agent-muted); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.agent-trace-copy small { max-width: 220px; flex: 0 0 auto; color: var(--agent-muted); font-size: 10px; overflow-wrap: anywhere; text-align: right; }
+.agent-trace-step.is-warning .agent-trace-copy b { color: var(--warning); }
 .agent-report { max-width: 900px; margin: 0 auto 18px; border: 1px solid var(--gold-dim); border-radius: 7px; overflow: hidden; background: var(--agent-panel); }
 .agent-report-head { display: flex; justify-content: space-between; gap: 12px; padding: 10px 12px; background: var(--gold-tint); border-bottom: 1px solid var(--agent-line); }
 .agent-report-head b { color: var(--emphasis-fg); font-size: 13px; }
@@ -156,6 +168,28 @@ body.agent-fullheight #page-agent.active {
 .agent-source-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
 .agent-source-actions .agent-source-link { color: var(--gold); font-size: 10px; font-weight: 500; }
 .agent-evidence { padding: 8px 12px 10px; border-top: 1px solid var(--agent-line); color: var(--agent-muted); font-size: 11px; overflow-wrap: anywhere; }
+.agent-debug,
+.sim-ai-debug { border-top: 1px solid var(--agent-line); color: var(--agent-muted); }
+.agent-debug summary,
+.sim-ai-debug summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 12px; color: var(--text); font-size: 11px; cursor: pointer; user-select: none; }
+.agent-debug summary small,
+.sim-ai-debug summary small { overflow: hidden; color: var(--warning); font-size: 10px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.agent-debug-grid,
+.sim-ai-debug-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 6px; padding: 0 12px 9px; }
+.agent-debug-grid div,
+.sim-ai-debug-grid div { min-width: 0; padding: 7px 8px; border: 1px solid var(--agent-line); border-radius: 4px; background: var(--surface2); }
+.agent-debug-grid span,
+.sim-ai-debug-grid span { display: block; color: var(--agent-muted); font-size: 9px; }
+.agent-debug-grid b,
+.sim-ai-debug-grid b { display: block; margin-top: 3px; overflow: hidden; color: var(--agent-ink); font-size: 10px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.agent-debug-hint,
+.sim-ai-debug-hint,
+.agent-debug-safe,
+.sim-ai-debug-safe { margin: 0; padding: 0 12px 8px; font-size: 10px; line-height: 1.5; }
+.agent-debug-hint,
+.sim-ai-debug-hint { color: var(--warning); }
+.agent-debug-safe,
+.sim-ai-debug-safe { color: var(--agent-muted); }
 .agent-error { color: var(--red); }
 .agent-report.is-limited { border-color: var(--warning); }
 .agent-result-notice,
@@ -421,8 +455,20 @@ body.agent-fullheight #page-agent.active {
 .sim-ai-bubble.user .sim-ai-bubble-body { border-color: var(--gold-dim); border-radius: 6px 6px 2px 6px; background: var(--gold-tint); }
 .sim-ai-progress { margin: 0 0 12px; padding: 9px 10px; border: 1px dashed var(--agent-line); border-radius: 6px; color: var(--agent-muted); font-size: 11px; }
 .sim-ai-progress-head { display: flex; justify-content: space-between; gap: 8px; }
-.sim-ai-progress-steps { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
-.sim-ai-progress-step { padding: 3px 6px; border-radius: 3px; color: var(--gold); background: var(--gold-tint); animation: sim-ai-chip-in .22s cubic-bezier(.22,1,.36,1) both; }
+.sim-ai-progress-note { margin: 3px 0 0; font-size: 9px; line-height: 1.45; }
+.sim-ai-progress-steps { display: grid; gap: 0; margin-top: 6px; }
+.sim-ai-progress-step { position: relative; display: flex; min-height: 42px; gap: 7px; padding: 3px 4px; color: var(--agent-muted); animation: sim-ai-chip-in .22s cubic-bezier(.22,1,.36,1) both; }
+.sim-ai-progress-step:not(:last-child)::before { position: absolute; top: 11px; bottom: -3px; left: 7px; width: 1px; background: var(--agent-line); content: ''; }
+.sim-ai-progress-marker { position: relative; z-index: 1; width: 8px; height: 8px; flex: 0 0 auto; margin-top: 4px; border: 1px solid var(--gold-dim); border-radius: 50%; background: var(--agent-panel-2); }
+.sim-ai-progress-step.is-done .sim-ai-progress-marker { border-color: var(--green); background: var(--green); }
+.sim-ai-progress-step.is-running .sim-ai-progress-marker { border-color: var(--gold); background: var(--gold); animation: sim-ai-context-pulse 1.35s ease-in-out infinite; }
+.sim-ai-progress-step.is-warning .sim-ai-progress-marker { border-color: var(--warning); background: var(--warning); }
+.sim-ai-progress-copy { display: flex; min-width: 0; flex: 1; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.sim-ai-progress-body { display: grid; min-width: 0; gap: 1px; }
+.sim-ai-progress-copy b { color: var(--agent-ink); font-size: 10px; font-weight: 600; }
+.sim-ai-progress-overview { color: var(--agent-muted); font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; }
+.sim-ai-progress-copy small { max-width: 105px; flex: 0 0 auto; color: var(--agent-muted); font-size: 9px; overflow-wrap: anywhere; text-align: right; }
+.sim-ai-progress-step.is-warning .sim-ai-progress-copy b { color: var(--warning); }
 .sim-ai-result { margin-bottom: 13px; border: 1px solid var(--gold-dim); border-radius: 6px; overflow: hidden; background: var(--agent-panel-2); }
 .sim-ai-result.is-limited { border-color: var(--warning); }
 .sim-ai-result-head { display: flex; justify-content: space-between; gap: 8px; padding: 9px 11px; border-bottom: 1px solid var(--agent-line); color: var(--gold); font-size: 12px; }
@@ -435,6 +481,10 @@ body.agent-fullheight #page-agent.active {
 .sim-ai-result-sources .agent-source-item { background: var(--bg); }
 .sim-ai-result-metrics { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px; padding: 0 11px 10px; }
 .sim-ai-result-finding .sim-ai-result-metrics { padding: 7px 0 0; }
+.sim-ai-debug-grid { grid-template-columns: repeat(2,minmax(0,1fr)); padding-right: 10px; padding-left: 10px; }
+.sim-ai-debug summary { padding-right: 10px; padding-left: 10px; }
+.sim-ai-debug-hint,
+.sim-ai-debug-safe { padding-right: 10px; padding-left: 10px; }
 .sim-ai-result-metric { min-width: 0; padding: 7px 8px; border: 1px solid var(--agent-line); border-radius: 6px; background: var(--bg); animation: sim-ai-metric-in .26s cubic-bezier(.22,1,.36,1) both; }
 .sim-ai-result-metric:nth-child(2) { animation-delay: .04s; }
 .sim-ai-result-metric:nth-child(3) { animation-delay: .08s; }

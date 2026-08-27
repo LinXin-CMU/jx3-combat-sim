@@ -220,6 +220,7 @@ Provider 默认只启用不联网的 `offline` profile；可选服务商配置�
 - [`docs/AGENT_PORTFOLIO_CASE_STUDY.md`](docs/AGENT_PORTFOLIO_CASE_STUDY.md)：战斗分析 Agent 的问题—设计—结果—反思案例；
 - [`docs/AGENT_90S_DEMO_SCRIPT.md`](docs/AGENT_90S_DEMO_SCRIPT.md)：90 秒面试演示脚本；
 - [`docs/baselines/2026-08-26-agent-deepseek-v4-pro.md`](docs/baselines/2026-08-26-agent-deepseek-v4-pro.md)：真实模型兼容、固定评测、成本和多轮会话基线；
+- [`docs/baselines/2026-08-27-agent-observability.md`](docs/baselines/2026-08-27-agent-observability.md)：分阶段执行概述、历史重放、脱敏失败诊断与浏览器验收；
 - [`backend/tests/agent_eval/README.md`](backend/tests/agent_eval/README.md)：20 题无模型评测结构、运行方式与安全边界；
 - [`backend/tests/agent_model_eval/README.md`](backend/tests/agent_model_eval/README.md)：12 题离线模型级评测、长会话和越权测试；
 - [`docs/PHASE_0_PLAN.md`](docs/PHASE_0_PLAN.md)：公开仓库卫生计划；

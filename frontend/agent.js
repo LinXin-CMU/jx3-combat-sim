@@ -63,6 +63,7 @@
     report_citations_normalized: '补全证据引用',
     report_claims_sanitized: '保留可信结论',
     provider_empty_retry: '重试生成报告',
+    provider_empty_evidence_preserved: '保留已有证据',
     knowledge_searches_coalesced: '合并冗余检索',
     knowledge_only_client_scope: '限定为知识问答',
     completed: '分析完成',
@@ -106,6 +107,7 @@
     provider_http_403: '模型供应商拒绝访问，请检查账户权限。',
     provider_http_429: '模型供应商请求繁忙，请稍后重试。',
     provider_http_5xx: '模型供应商服务暂时异常，请稍后重试。',
+    provider_http_error: '模型供应商返回了非成功状态；请展开失败调试信息查看阶段和诊断码。',
     provider_timeout: '模型供应商响应超时，请稍后重试。',
     provider_network_error: '无法连接模型供应商，请检查网络或代理设置。',
   };
@@ -381,26 +383,214 @@
   function createTrace(runId) {
     const wrap = element('section', 'agent-trace');
     const title = element('div', 'agent-trace-title');
-    title.appendChild(element('span', '', '规范化执行轨迹'));
+    title.appendChild(element('span', '', '可验证执行轨迹 · 阶段概述'));
     title.appendChild(element('span', '', runId || '—'));
+    const note = element('p', 'agent-trace-note', '展示阶段目标、工具动作、证据产出与校验结果；不展示模型隐藏推理。');
     const steps = element('div', 'agent-trace-steps');
     wrap.appendChild(title);
+    wrap.appendChild(note);
     wrap.appendChild(steps);
     els.transcript.appendChild(wrap);
-    return { wrap, steps, seen: new Set() };
+    return { wrap, steps, seen: new Set(), openTools: new Map(), activeStep: null };
+  }
+
+  function traceStepMeta(event) {
+    const evidenceCount = Array.isArray(event?.evidence_ids) ? event.evidence_ids.length : 0;
+    if (event?.code && isTraceWarning(event)) return `诊断码 · ${event.code}`;
+    if (evidenceCount) return `${evidenceCount} 份证据`;
+    if (event?.code) return `状态码 · ${event.code}`;
+    return '';
+  }
+
+  function isTraceWarning(event) {
+    const kind = event?.trace_kind || event?.kind;
+    return kind === 'tool_finished' && !!event?.code
+      || ['report_repair_requested', 'report_claims_sanitized', 'provider_empty_retry',
+        'provider_empty_evidence_preserved', 'evidence_insufficient', 'budget_exhausted',
+        'provider_failed', 'protocol_failed', 'timed_out', 'cancel_requested', 'cancelled']
+        .includes(kind);
+  }
+
+  function finishActiveTraceStep(trace) {
+    if (!trace?.activeStep) return;
+    trace.activeStep.classList.remove('is-running');
+    trace.activeStep.classList.add('is-done');
+    trace.activeStep = null;
+  }
+
+  function traceStageOverview(event) {
+    const kind = event?.trace_kind || event?.kind;
+    const evidenceCount = Array.isArray(event?.evidence_ids) ? event.evidence_ids.length : 0;
+    const toolStarted = {
+      get_current_scenario: '读取服务端冻结的场景快照，锁定版本、心法、配置与输入口径。',
+      search_knowledge_base: '按问题与版本约束检索本地资料，优先返回可溯源且版本匹配的内容。',
+      simulate_scenario: '在冻结场景上运行确定性基线，战斗数值只由模拟器产生。',
+      compare_scenarios: '仅改变声明过的候选参数，在同一场景口径下对比结果。',
+      analyze_timeline: '聚合技能、资源、冷却与增益事件，定位可观察的时间轴现象。',
+    };
+    if (kind === 'tool_started') return toolStarted[event.tool_name] || '调用一个只读工具，为下一阶段取得可验证证据。';
+    if (kind === 'tool_finished') {
+      if (event?.code) return `工具已结束，但返回诊断码 ${event.code}；后续不会把受限结果包装成可靠结论。`;
+      return evidenceCount
+        ? `工具完成并登记 ${evidenceCount} 份证据；后续结论必须绑定这些证据。`
+        : '工具完成但未登记新证据；后续阶段不会据此扩展事实。';
+    }
+    const overviews = {
+      planning: '识别问题类型、可用工具与本轮预算，选择最小可验证路径。',
+      knowledge_only_client_scope: '该问题限定为纯知识检索，不调用尚未实现的无界端战斗模拟。',
+      validating: '逐项核对报告结构、指标值、单位、证据 ID 与数据路径。',
+      report_repair_requested: '报告结构未通过校验；执行一次有界修复，不新增事实或证据。',
+      report_citations_normalized: '补全可确定的指标引用关系，保持模拟器原值不变。',
+      report_claims_sanitized: '移除未通过数值或引用校验的表述，只发布可验证部分。',
+      provider_empty_retry: '供应商返回空正文；保留已有工具证据，并进行一次无工具重试。',
+      provider_empty_evidence_preserved: '模型未形成报告，但工具证据仍可复用；系统发布受限结论而非丢弃整轮。',
+      knowledge_searches_coalesced: '检测到重复检索意图；复用已有结果并停止无效查询循环。',
+      completed: '结构、数值与引用均通过校验，发布可溯源结论。',
+      partially_verified: '部分内容未通过校验；仅发布已验证结论并保留限制说明。',
+      evidence_insufficient: '现有输出无法满足证据规则；不发布未经验证的结论。',
+      budget_exhausted: '本轮已达到预设预算；保留现有证据与诊断信息后停止。',
+      provider_failed: '模型供应商调用失败；工具证据和脱敏诊断仍被保留。',
+      protocol_failed: '执行协议未满足预期结构；停止运行并保留可定位的诊断码。',
+      timed_out: '任务超过运行时限；终止本轮并保留已完成阶段。',
+      refused: '请求触发安全边界；不继续执行或生成结论。',
+      cancel_requested: '已收到停止请求，正在安全结束当前运行。',
+      cancelled: '运行已取消，已完成的阶段和证据继续保留。',
+    };
+    return overviews[kind] || '记录本阶段状态，供会话恢复、验收和失败定位。';
+  }
+
+  function createTraceStep(className, label, overview, meta, compact) {
+    const step = element('div', className);
+    const marker = element('span', compact ? 'sim-ai-progress-marker' : 'agent-trace-marker', '');
+    marker.setAttribute('aria-hidden', 'true');
+    const copy = element('span', compact ? 'sim-ai-progress-copy' : 'agent-trace-copy');
+    const body = element('span', compact ? 'sim-ai-progress-body' : 'agent-trace-body');
+    body.appendChild(element('b', '', label));
+    body.appendChild(element('span', compact ? 'sim-ai-progress-overview' : 'agent-trace-overview', overview));
+    copy.appendChild(body);
+    if (meta) copy.appendChild(element('small', '', meta));
+    step.append(marker, copy);
+    return step;
   }
 
   function appendTraceStep(trace, event) {
     if (!trace || !event) return;
-    const key = `${event.sequence || ''}:${event.kind || event.trace_kind || ''}`;
+    const kind = event.trace_kind || event.kind;
+    const key = `${event.sequence || ''}:${kind}:${event.tool_name || ''}`;
     if (trace.seen.has(key)) return;
     trace.seen.add(key);
-    const kind = event.trace_kind || event.kind;
+
+    if (kind === 'tool_finished') {
+      const queue = trace.openTools.get(event.tool_name) || [];
+      const step = queue.shift();
+      if (step) {
+        step.classList.remove('is-running');
+        step.classList.add(isTraceWarning(event) ? 'is-warning' : 'is-done');
+        const label = step.querySelector('b');
+        const overview = step.querySelector('.agent-trace-overview');
+        const meta = step.querySelector('small');
+        if (label) label.textContent = `${event.code ? '工具返回受限' : '取得证据'} · ${toolLabel(event.tool_name)}`;
+        if (overview) overview.textContent = traceStageOverview(event);
+        const nextMeta = traceStepMeta(event);
+        if (nextMeta && meta) meta.textContent = nextMeta;
+        else if (nextMeta) step.querySelector('.agent-trace-copy')?.appendChild(element('small', '', nextMeta));
+        if (trace.activeStep === step) trace.activeStep = null;
+        scrollTranscript();
+        return;
+      }
+    }
+
+    finishActiveTraceStep(trace);
     const suffix = event.tool_name ? ` · ${toolLabel(event.tool_name)}` : '';
-    const step = element('span', 'agent-trace-step', `${traceLabels[kind] || kind}${suffix}`);
-    if (event.code) step.title = event.code;
+    const label = kind === 'tool_started' ? `调用工具${suffix}` : `${traceLabels[kind] || kind}${suffix}`;
+    const step = createTraceStep('agent-trace-step', label, traceStageOverview(event), traceStepMeta(event), false);
+    step.classList.add(kind === 'tool_started' ? 'is-running' : isTraceWarning(event) ? 'is-warning' : 'is-done');
+    if (kind === 'tool_started') {
+      const queue = trace.openTools.get(event.tool_name) || [];
+      queue.push(step);
+      trace.openTools.set(event.tool_name, queue);
+      trace.activeStep = step;
+    }
+    if (event.code) step.title = `诊断码：${event.code}`;
     trace.steps.appendChild(step);
     scrollTranscript();
+  }
+
+  function diagnosticHint(result) {
+    const code = result?.error?.code || '';
+    const hints = {
+      invalid_report_json: '模型报告不完整或带有无法识别的外层格式；系统已尝试一次紧凑修复。',
+      provider_response_empty: '供应商返回了空正文；系统最多重试一次，仍失败时保留已有证据。',
+      numeric_prose_claim: '正文出现无法绑定到指标卡的数字，相关表述已被隐藏。',
+      uncited_metric: '模型给出了未绑定证据的指标，相关指标已被隐藏。',
+      metric_value_mismatch: '模型指标与模拟器原值不一致，相关指标已被隐藏。',
+      provider_http_429: '供应商限流；稍后重试或切换模型档位。',
+      provider_http_error: '供应商返回非成功 HTTP 状态；服务端已隐藏响应正文，可结合模型档位和 Run ID 排查。',
+      provider_timeout: '供应商未在任务时限内返回；工具证据不会丢失。',
+      knowledge_search_budget: '知识检索达到上限；应依据已有结果作答，而不是继续改写查询。',
+      simulation_budget: '模拟预算不足以完成请求中的实验数量。',
+      tool_call_budget: '工具调用达到单任务上限。',
+    };
+    return hints[code] || (result?.error?.message ? '服务端已返回固定脱敏错误；可结合阶段和诊断码定位。' : '本轮正常结束，没有记录失败诊断。');
+  }
+
+  function diagnosticStage(result) {
+    const trace = Array.isArray(result?.trace) ? result.trace : [];
+    const terminalStages = {
+      provider_failed: '模型供应商调用',
+      evidence_insufficient: '报告解析与证据校验',
+      protocol_failed: 'Agent 执行协议',
+      timed_out: '模型响应等待',
+      cancelled: '任务取消',
+      budget_exhausted: result?.error?.code === 'knowledge_search_budget' ? '版本知识检索' : '工具预算控制',
+    };
+    if (terminalStages[result?.status]) return terminalStages[result.status];
+    const latest = [...trace].reverse().find(event => event?.kind);
+    const kind = latest?.kind || result?.status || 'unknown';
+    if (kind === 'tool_started' || kind === 'tool_finished') return `工具执行 · ${toolLabel(latest?.tool_name)}`;
+    if (kind === 'validating' || kind.startsWith('report_')) return '报告解析与证据校验';
+    if (kind.startsWith('provider_')) return '模型响应处理';
+    if (kind === 'planning') return '问题规划';
+    return traceLabels[kind] || statusLabels[kind] || kind;
+  }
+
+  function appendDiagnostics(parent, result, compact) {
+    if (!parent || !result) return;
+    const trace = Array.isArray(result.trace) ? result.trace : [];
+    const lastTool = [...trace].reverse().find(event => event.kind === 'tool_finished'
+      && !event.code && Array.isArray(event.evidence_ids) && event.evidence_ids.length)?.tool_name;
+    const evidenceCount = new Set(trace.flatMap(event => event.evidence_ids || [])).size;
+    const repairs = trace.filter(event => event.kind === 'report_repair_requested').length;
+    const emptyRetries = trace.filter(event => event.kind === 'provider_empty_retry').length;
+    const hardFailure = ['evidence_insufficient', 'provider_failed', 'protocol_failed', 'budget_exhausted', 'timed_out'].includes(result.status);
+    const details = element('details', compact ? 'sim-ai-debug' : 'agent-debug');
+    details.open = hardFailure;
+    const summary = element('summary', '');
+    summary.appendChild(element('span', '', hardFailure ? '失败调试信息' : '运行诊断'));
+    summary.appendChild(element('small', '', result.error?.code || '无错误码'));
+    details.appendChild(summary);
+    const grid = element('div', compact ? 'sim-ai-debug-grid' : 'agent-debug-grid');
+    const rows = [
+      ['终止阶段', diagnosticStage(result)],
+      ['最后成功工具', lastTool ? toolLabel(lastTool) : '无'],
+      ['模型 / 工具轮次', `${result.accounting?.model_turns || 0} / ${result.accounting?.tool_calls || 0}`],
+      ['模拟 / 检索', `${result.accounting?.simulations || 0} / ${result.accounting?.knowledge_searches || 0}`],
+      ['证据 / 修复 / 空包重试', `${evidenceCount} / ${repairs} / ${emptyRetries}`],
+      ['Token', `${result.accounting?.input_tokens || 0} 入 · ${result.accounting?.output_tokens || 0} 出`],
+      ['耗时', `${result.accounting?.duration_ms || 0} ms`],
+      ['Prompt', result.prompt_version || '—'],
+      ['Run', result.run_id || '—'],
+    ];
+    rows.forEach(([label, value]) => {
+      const row = element('div', '');
+      row.appendChild(element('span', '', label));
+      row.appendChild(element('b', '', value));
+      grid.appendChild(row);
+    });
+    details.appendChild(grid);
+    details.appendChild(element('p', compact ? 'sim-ai-debug-hint' : 'agent-debug-hint', diagnosticHint(result)));
+    details.appendChild(element('p', compact ? 'sim-ai-debug-safe' : 'agent-debug-safe', '仅显示规范化轨迹与脱敏诊断；不记录隐藏推理、API Key 或供应商原始响应。'));
+    parent.appendChild(details);
   }
 
   function localizedNumber(value, maximumFractionDigits) {
@@ -532,7 +722,8 @@
       const reason = result?.status === 'provider_failed'
         ? providerErrorText(result?.error)
         : result?.error?.message || `任务状态：${statusLabels[result?.status] || result?.status || '未知'}`;
-      appendMessage('agent', reason);
+      const message = appendMessage('agent', reason);
+      appendDiagnostics(message, result, false);
       return;
     }
     const card = element('article', 'agent-report');
@@ -588,6 +779,7 @@
         .replaceAll('engine_string', '引擎版本'))));
       card.appendChild(block);
     }
+    appendDiagnostics(card, result, false);
     card.appendChild(element('div', 'agent-evidence', `scenario ${result.scenario_hash} · prompt ${result.prompt_version} / ${result.prompt_sha256} · evidence ${(report.evidence_ids || []).join(', ') || 'none'}`));
     els.transcript.appendChild(card);
     scrollTranscript();
@@ -630,13 +822,14 @@
     prepareDockChat();
     const wrap = element('div', 'sim-ai-progress');
     const head = element('div', 'sim-ai-progress-head');
-    head.appendChild(element('span', '', '可验证分析流程'));
+    head.appendChild(element('span', '', '可验证分析流程 · 阶段概述'));
     head.appendChild(element('span', '', runId || '准备中'));
+    const note = element('p', 'sim-ai-progress-note', '显示动作、证据与校验状态，不显示隐藏推理。');
     const steps = element('div', 'sim-ai-progress-steps');
-    wrap.append(head, steps);
+    wrap.append(head, note, steps);
     els.dockChat.appendChild(wrap);
     scrollDock();
-    return { wrap, steps, seen: new Set() };
+    return { wrap, steps, seen: new Set(), openTools: new Map(), activeStep: null };
   }
 
   function appendDockTraceStep(trace, event) {
@@ -645,9 +838,38 @@
     const key = `${event.sequence ?? ''}:${kind}:${event.tool_name || ''}`;
     if (trace.seen?.has(key)) return;
     trace.seen?.add(key);
-    const label = traceLabels[kind] || kind;
+    if (kind === 'tool_finished') {
+      const queue = trace.openTools.get(event.tool_name) || [];
+      const step = queue.shift();
+      if (step) {
+        step.classList.remove('is-running');
+        step.classList.add(isTraceWarning(event) ? 'is-warning' : 'is-done');
+        const label = step.querySelector('b');
+        const overview = step.querySelector('.sim-ai-progress-overview');
+        const meta = step.querySelector('small');
+        if (label) label.textContent = `${event.code ? '工具返回受限' : '取得证据'} · ${toolLabel(event.tool_name)}`;
+        if (overview) overview.textContent = traceStageOverview(event);
+        const nextMeta = traceStepMeta(event);
+        if (nextMeta && meta) meta.textContent = nextMeta;
+        else if (nextMeta) step.querySelector('.sim-ai-progress-copy')?.appendChild(element('small', '', nextMeta));
+        if (trace.activeStep === step) trace.activeStep = null;
+        scrollDock();
+        return;
+      }
+    }
+    finishActiveTraceStep(trace);
     const suffix = event.tool_name ? ` · ${toolLabel(event.tool_name)}` : '';
-    trace.steps.appendChild(element('span', 'sim-ai-progress-step', `${label}${suffix}`));
+    const label = kind === 'tool_started' ? `调用工具${suffix}` : `${traceLabels[kind] || kind}${suffix}`;
+    const step = createTraceStep('sim-ai-progress-step', label, traceStageOverview(event), traceStepMeta(event), true);
+    step.classList.add(kind === 'tool_started' ? 'is-running' : isTraceWarning(event) ? 'is-warning' : 'is-done');
+    if (kind === 'tool_started') {
+      const queue = trace.openTools.get(event.tool_name) || [];
+      queue.push(step);
+      trace.openTools.set(event.tool_name, queue);
+      trace.activeStep = step;
+    }
+    if (event.code) step.title = `诊断码：${event.code}`;
+    trace.steps.appendChild(step);
     scrollDock();
   }
 
@@ -707,6 +929,7 @@
         .replaceAll('engine_string', '引擎版本'))));
       card.appendChild(block);
     }
+    appendDiagnostics(card, result, true);
     els.dockChat.appendChild(card);
     scrollDock();
   }
