@@ -16,6 +16,8 @@ pub const AGENT_PROMPT_VERSION_V7: &str = "agent-system/v7";
 const AGENT_SYSTEM_PROMPT_V7: &str = include_str!("../../prompts/agent_system_v7.md");
 pub const AGENT_PROMPT_VERSION_V8: &str = "agent-system/v8";
 const AGENT_SYSTEM_PROMPT_V8: &str = include_str!("../../prompts/agent_system_v8.md");
+pub const AGENT_PROMPT_VERSION_V9: &str = "agent-system/v9";
+const AGENT_SYSTEM_PROMPT_V9: &str = include_str!("../../prompts/agent_system_v9.md");
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PromptSpec {
@@ -96,14 +98,23 @@ pub fn agent_prompt_v8() -> PromptSpec {
     }
 }
 
+pub fn agent_prompt_v9() -> PromptSpec {
+    let sha256 = format!("{:x}", Sha256::digest(AGENT_SYSTEM_PROMPT_V9.as_bytes()));
+    PromptSpec {
+        version: AGENT_PROMPT_VERSION_V9,
+        sha256,
+        instructions: AGENT_SYSTEM_PROMPT_V9,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn prompt_is_versioned_and_content_addressed() {
-        let prompt = agent_prompt_v8();
-        assert_eq!(prompt.version, "agent-system/v8");
+        let prompt = agent_prompt_v9();
+        assert_eq!(prompt.version, "agent-system/v9");
         assert_eq!(prompt.sha256.len(), 64);
         assert!(prompt.instructions.contains("get_current_scenario"));
         assert!(prompt.instructions.contains("already called"));
@@ -127,5 +138,7 @@ mod tests {
         assert!(prompt.instructions.contains("Observation"));
         assert!(prompt.instructions.contains("结论 → 主要瓶颈"));
         assert!(prompt.instructions.contains("typed candidate field"));
+        assert!(prompt.instructions.contains("hard response budget"));
+        assert!(prompt.instructions.contains("1 to 3 findings"));
     }
 }

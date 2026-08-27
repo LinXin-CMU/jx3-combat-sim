@@ -182,7 +182,7 @@ pub fn parse_and_validate_report(
     raw: &str,
     evidence: &EvidenceStore,
 ) -> Result<ValidatedReportContentV1, ReportValidationError> {
-    let mut report: AgentReportContentV1 = serde_json::from_str(raw).map_err(|_| {
+    let mut report = parse_report_json(raw).map_err(|_| {
         error(
             "invalid_report_json",
             "final answer must be valid AgentReportContentV1 JSON",
@@ -205,7 +205,7 @@ pub fn parse_and_salvage_report(
     raw: &str,
     evidence: &EvidenceStore,
 ) -> Result<ValidatedReportContentV1, ReportValidationError> {
-    let mut report: AgentReportContentV1 = serde_json::from_str(raw).map_err(|_| {
+    let mut report = parse_report_json(raw).map_err(|_| {
         error(
             "invalid_report_json",
             "final answer must be valid AgentReportContentV1 JSON",
@@ -354,6 +354,43 @@ pub fn parse_and_salvage_report(
         normalized_metric_citations,
         sanitized_claims: sanitized_claims.max(1),
     })
+}
+
+/// Providers that advertise JSON mode may still wrap the object in a Markdown
+/// fence or a short natural-language preface. Unwrap exactly one structurally
+/// valid report object, then leave every schema, evidence, and metric check to
+/// the existing strict validator.
+fn parse_report_json(raw: &str) -> Result<AgentReportContentV1, serde_json::Error> {
+    let trimmed = raw.trim().trim_start_matches('\u{feff}').trim();
+    if let Ok(report) = serde_json::from_str(trimmed) {
+        return Ok(report);
+    }
+
+    // Try object boundaries rather than stripping arbitrary prose. Deserializing
+    // directly into the deny_unknown_fields report type prevents a nested or
+    // unrelated JSON object from being accepted accidentally.
+    for (index, _) in trimmed.match_indices('{').take(64) {
+        let mut deserializer = serde_json::Deserializer::from_str(&trimmed[index..]);
+        if let Ok(report) = AgentReportContentV1::deserialize(&mut deserializer) {
+            return Ok(report);
+        }
+    }
+
+    // Some compatibility gateways JSON-encode the assistant content once more.
+    if let Ok(decoded) = serde_json::from_str::<String>(trimmed) {
+        let decoded = decoded.trim();
+        if let Ok(report) = serde_json::from_str(decoded) {
+            return Ok(report);
+        }
+        for (index, _) in decoded.match_indices('{').take(64) {
+            let mut deserializer = serde_json::Deserializer::from_str(&decoded[index..]);
+            if let Ok(report) = AgentReportContentV1::deserialize(&mut deserializer) {
+                return Ok(report);
+            }
+        }
+    }
+
+    serde_json::from_str::<AgentReportContentV1>(trimmed)
 }
 
 fn truncate_vec<T>(values: &mut Vec<T>, limit: usize) -> usize {
@@ -1123,6 +1160,36 @@ mod tests {
         assert_eq!(
             parsed.content.findings[0].evidence_ids,
             vec!["a".repeat(64)]
+        );
+    }
+
+    #[test]
+    fn markdown_fenced_report_is_unwrapped_before_strict_validation() {
+        let raw = format!(
+            "下面是报告：\n```json\n{}\n```\n",
+            serde_json::to_string(&report()).unwrap()
+        );
+        let parsed = parse_and_validate_report(&raw, &evidence()).unwrap();
+
+        assert_eq!(parsed.content.schema_version, AGENT_REPORT_CONTENT_SCHEMA_V1);
+        assert_eq!(parsed.content.findings.len(), 1);
+    }
+
+    #[test]
+    fn double_encoded_report_is_unwrapped_before_strict_validation() {
+        let encoded = serde_json::to_string(&serde_json::to_string(&report()).unwrap()).unwrap();
+        let parsed = parse_and_validate_report(&encoded, &evidence()).unwrap();
+
+        assert_eq!(parsed.content.schema_version, AGENT_REPORT_CONTENT_SCHEMA_V1);
+        assert_eq!(parsed.content.findings.len(), 1);
+    }
+
+    #[test]
+    fn unrelated_wrapped_json_is_not_accepted_as_a_report() {
+        let raw = r#"analysis {\"message\":\"not a report\"} done"#;
+        assert_eq!(
+            parse_and_validate_report(raw, &evidence()).unwrap_err().code,
+            "invalid_report_json"
         );
     }
 
