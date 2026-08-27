@@ -438,6 +438,21 @@ pub async fn run_agent_observed(
             );
         }
 
+        trace.push(
+            "model_started",
+            None,
+            Vec::new(),
+            Some(
+                if is_repair {
+                    "report_repair"
+                } else if final_report_only {
+                    "final_report"
+                } else {
+                    "tool_selection"
+                }
+                .to_string(),
+            ),
+        );
         accounting.model_turns += 1;
         let remaining =
             Duration::from_millis(limits.wall_time_ms).saturating_sub(started.elapsed());
@@ -564,6 +579,8 @@ pub async fn run_agent_observed(
                 &registry,
             );
         }
+
+        trace.push("model_finished", None, Vec::new(), None);
 
         if !response.tool_calls.is_empty() {
             let requested_knowledge_calls = response
@@ -1480,6 +1497,22 @@ mod tests {
         assert_eq!(result.accounting.model_turns, 2);
         assert_eq!(result.accounting.tool_calls, 2);
         assert_eq!(result.accounting.simulations, 1);
+        assert_eq!(
+            result
+                .trace
+                .iter()
+                .filter(|event| event.kind == "model_started")
+                .count(),
+            2
+        );
+        assert_eq!(
+            result
+                .trace
+                .iter()
+                .filter(|event| event.kind == "model_finished")
+                .count(),
+            2
+        );
         let report = result.report.unwrap();
         assert_eq!(report.evidence_ids.len(), 1);
         assert_eq!(
@@ -2014,6 +2047,14 @@ mod tests {
         )
         .await;
         assert_eq!(result.status, AgentRunStatus::ProviderFailed);
+        assert!(result
+            .trace
+            .iter()
+            .any(|event| event.kind == "model_started"));
+        assert!(!result
+            .trace
+            .iter()
+            .any(|event| event.kind == "model_finished"));
         assert_eq!(result.error.unwrap().code, "provider_http_429");
     }
 

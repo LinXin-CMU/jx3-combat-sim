@@ -131,11 +131,16 @@ body.agent-fullheight #page-agent.active {
 .agent-trace-step:not(:last-child)::before { position: absolute; top: 13px; bottom: -4px; left: 10px; width: 1px; background: var(--agent-line); content: ''; }
 .agent-trace-marker { position: relative; z-index: 1; width: 9px; height: 9px; flex: 0 0 auto; margin-top: 4px; border: 1px solid var(--gold-dim); border-radius: 50%; background: var(--agent-panel); }
 .agent-trace-step.is-done .agent-trace-marker { border-color: var(--green); background: var(--green); box-shadow: 0 0 0 3px rgba(var(--green-rgb),.08); }
-.agent-trace-step.is-running .agent-trace-marker { border-color: var(--gold); background: var(--gold); animation: sim-ai-context-pulse 1.35s ease-in-out infinite; }
+.agent-trace-step.is-running { border-radius: 4px; background: linear-gradient(90deg,rgba(var(--gold-rgb),.03),rgba(var(--gold-rgb),.16),rgba(var(--gold-rgb),.03)); background-size: 220% 100%; animation: agent-trace-current 1.55s ease-in-out infinite; }
+.agent-trace-step.is-running .agent-trace-marker { border-color: var(--gold); background: var(--gold); animation: agent-trace-marker-pulse 1.35s ease-in-out infinite; }
 .agent-trace-step.is-warning .agent-trace-marker { border-color: var(--warning); background: var(--warning); }
 .agent-trace-copy { display: flex; min-width: 0; flex: 1; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .agent-trace-body { display: grid; min-width: 0; gap: 2px; }
 .agent-trace-copy b { color: var(--agent-ink); font-size: 11px; font-weight: 600; }
+.agent-trace-step.is-running .agent-trace-copy b,
+.sim-ai-progress-step.is-running .sim-ai-progress-copy b { color: var(--gold); }
+.agent-trace-step.is-running .agent-trace-body b::after,
+.sim-ai-progress-step.is-running .sim-ai-progress-body b::after { display: inline-block; margin-left: 6px; padding: 1px 5px; border: 1px solid rgba(var(--gold-rgb),.42); border-radius: 999px; color: var(--gold); content: '当前'; font-size: 9px; font-weight: 500; line-height: 1.2; vertical-align: 1px; }
 .agent-trace-overview { color: var(--agent-muted); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
 .agent-trace-copy small { max-width: 220px; flex: 0 0 auto; color: var(--agent-muted); font-size: 10px; overflow-wrap: anywhere; text-align: right; }
 .agent-trace-step.is-warning .agent-trace-copy b { color: var(--warning); }
@@ -461,7 +466,8 @@ body.agent-fullheight #page-agent.active {
 .sim-ai-progress-step:not(:last-child)::before { position: absolute; top: 11px; bottom: -3px; left: 7px; width: 1px; background: var(--agent-line); content: ''; }
 .sim-ai-progress-marker { position: relative; z-index: 1; width: 8px; height: 8px; flex: 0 0 auto; margin-top: 4px; border: 1px solid var(--gold-dim); border-radius: 50%; background: var(--agent-panel-2); }
 .sim-ai-progress-step.is-done .sim-ai-progress-marker { border-color: var(--green); background: var(--green); }
-.sim-ai-progress-step.is-running .sim-ai-progress-marker { border-color: var(--gold); background: var(--gold); animation: sim-ai-context-pulse 1.35s ease-in-out infinite; }
+.sim-ai-progress-step.is-running { border-radius: 4px; background: linear-gradient(90deg,rgba(var(--gold-rgb),.03),rgba(var(--gold-rgb),.16),rgba(var(--gold-rgb),.03)); background-size: 220% 100%; animation: agent-trace-current 1.55s ease-in-out infinite; }
+.sim-ai-progress-step.is-running .sim-ai-progress-marker { border-color: var(--gold); background: var(--gold); animation: agent-trace-marker-pulse 1.35s ease-in-out infinite; }
 .sim-ai-progress-step.is-warning .sim-ai-progress-marker { border-color: var(--warning); background: var(--warning); }
 .sim-ai-progress-copy { display: flex; min-width: 0; flex: 1; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .sim-ai-progress-body { display: grid; min-width: 0; gap: 1px; }
@@ -552,6 +558,17 @@ body.agent-fullheight #page-agent.active {
   50% { opacity: 1; box-shadow: 0 0 10px rgba(var(--green-rgb),.58); }
 }
 
+@keyframes agent-trace-current {
+  0% { background-position: 100% 0; box-shadow: inset 2px 0 0 rgba(var(--gold-rgb),.25); }
+  50% { box-shadow: inset 2px 0 0 rgba(var(--gold-rgb),.75); }
+  100% { background-position: -100% 0; box-shadow: inset 2px 0 0 rgba(var(--gold-rgb),.25); }
+}
+
+@keyframes agent-trace-marker-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(var(--gold-rgb),.08); transform: scale(.9); }
+  50% { box-shadow: 0 0 0 5px rgba(var(--gold-rgb),.2); transform: scale(1.12); }
+}
+
 @media (max-width: 900px) {
   .sim-ai-fab { right: 12px; bottom: 12px; min-width: 42px; width: 42px; padding: 0 8px; }
   .sim-ai-fab-label { display: none; }
@@ -576,6 +593,7 @@ body.agent-fullheight #page-agent.active {
   .sim-ai-chat > .sim-ai-result,
   .sim-ai-chat > .ai-thinking,
   .sim-ai-progress-step,
+  .agent-trace-step.is-running,
   .sim-ai-result-metric,
   .sim-ai-dock.is-loading .sim-ai-mark,
   .sim-ai-dock.is-loading .sim-ai-context.ready .sim-ai-context-dot { animation: none; }
@@ -590,6 +608,8 @@ body.agent-fullheight #page-agent.active {
   .sim-ai-chat > .ai-thinking { animation: sim-ai-reduced-fade .16s ease both; }
   .sim-ai-progress-step,
   .sim-ai-result-metric { animation: sim-ai-reduced-fade .12s ease both; }
+  .agent-trace-step.is-running,
+  .sim-ai-progress-step.is-running { background: var(--gold-tint); animation: none; }
   .sim-ai-dock.is-loading .sim-ai-dock-head::after { animation-duration: 2.4s; }
   .ai-thinking-dots i { animation-duration: 1.8s; }
 }

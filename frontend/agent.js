@@ -56,6 +56,8 @@
 
   const traceLabels = {
     planning: '拆解问题',
+    model_started: '模型处理中',
+    model_finished: '模型响应完成',
     tool_started: '调用工具',
     tool_finished: '取得证据',
     validating: '校验证据',
@@ -182,6 +184,10 @@
   function thinkingText(event) {
     const kind = event?.trace_kind || event?.kind;
     if (kind === 'planning') return '正在拆解问题并选择验证路径…';
+    if (kind === 'model_started' && event?.code === 'report_repair') return '模型正在依据校验反馈修复报告…';
+    if (kind === 'model_started' && event?.code === 'final_report') return '模型正在依据已有证据生成结论…';
+    if (kind === 'model_started') return '模型正在规划下一项可验证动作…';
+    if (kind === 'model_finished') return '模型响应已返回，正在解析下一阶段…';
     if (kind === 'tool_started') return `正在${toolLabel(event.tool_name)}…`;
     if (kind === 'tool_finished') return '已取得工具证据，正在继续分析…';
     if (kind === 'validating') return '正在校验数值、单位与证据引用…';
@@ -391,11 +397,19 @@
     wrap.appendChild(note);
     wrap.appendChild(steps);
     els.transcript.appendChild(wrap);
-    return { wrap, steps, seen: new Set(), openTools: new Map(), activeStep: null };
+    return { wrap, steps, seen: new Set(), openTools: new Map(), openModel: null, activeStep: null };
   }
 
   function traceStepMeta(event) {
+    const kind = event?.trace_kind || event?.kind;
     const evidenceCount = Array.isArray(event?.evidence_ids) ? event.evidence_ids.length : 0;
+    if (kind === 'model_started') {
+      return {
+        tool_selection: '规划下一步',
+        final_report: '生成结论',
+        report_repair: '修复报告',
+      }[event?.code] || '';
+    }
     if (event?.code && isTraceWarning(event)) return `诊断码 · ${event.code}`;
     if (evidenceCount) return `${evidenceCount} 份证据`;
     if (event?.code) return `状态码 · ${event.code}`;
@@ -415,6 +429,7 @@
     if (!trace?.activeStep) return;
     trace.activeStep.classList.remove('is-running');
     trace.activeStep.classList.add('is-done');
+    trace.activeStep.removeAttribute('aria-current');
     trace.activeStep = null;
   }
 
@@ -429,6 +444,12 @@
       analyze_timeline: '聚合技能、资源、冷却与增益事件，定位可观察的时间轴现象。',
     };
     if (kind === 'tool_started') return toolStarted[event.tool_name] || '调用一个只读工具，为下一阶段取得可验证证据。';
+    if (kind === 'model_started') {
+      if (event?.code === 'report_repair') return '正在依据校验反馈修复结构化报告，不调用工具或新增事实。';
+      if (event?.code === 'final_report') return '正在依据已登记证据生成结构化结论，不再扩展工具范围。';
+      return '正在理解问题与已有证据，选择下一项最小、只读、可验证动作。';
+    }
+    if (kind === 'model_finished') return '模型响应已经返回；下一阶段只解析工具请求或校验结构化报告。';
     if (kind === 'tool_finished') {
       if (event?.code) return `工具已结束，但返回诊断码 ${event.code}；后续不会把受限结果包装成可靠结论。`;
       return evidenceCount
@@ -485,6 +506,7 @@
       const step = queue.shift();
       if (step) {
         step.classList.remove('is-running');
+        step.removeAttribute('aria-current');
         step.classList.add(isTraceWarning(event) ? 'is-warning' : 'is-done');
         const label = step.querySelector('b');
         const overview = step.querySelector('.agent-trace-overview');
@@ -500,15 +522,42 @@
       }
     }
 
+    if (kind === 'model_finished' && trace.openModel) {
+      const step = trace.openModel;
+      step.classList.remove('is-running');
+      step.removeAttribute('aria-current');
+      step.classList.add('is-done');
+      const label = step.querySelector('b');
+      const overview = step.querySelector('.agent-trace-overview');
+      const meta = step.querySelector('small');
+      if (label) label.textContent = traceLabels.model_finished;
+      if (overview) overview.textContent = traceStageOverview(event);
+      if (meta) meta.remove();
+      trace.openModel = null;
+      if (trace.activeStep === step) trace.activeStep = null;
+      scrollTranscript();
+      return;
+    }
+
     finishActiveTraceStep(trace);
     const suffix = event.tool_name ? ` · ${toolLabel(event.tool_name)}` : '';
     const label = kind === 'tool_started' ? `调用工具${suffix}` : `${traceLabels[kind] || kind}${suffix}`;
     const step = createTraceStep('agent-trace-step', label, traceStageOverview(event), traceStepMeta(event), false);
-    step.classList.add(kind === 'tool_started' ? 'is-running' : isTraceWarning(event) ? 'is-warning' : 'is-done');
+    const terminal = ['completed', 'partially_verified', 'refused', 'cancelled', 'evidence_insufficient',
+      'budget_exhausted', 'provider_failed', 'protocol_failed', 'timed_out'].includes(kind);
+    const active = !terminal && !['tool_finished', 'model_finished'].includes(kind);
+    step.classList.add(terminal ? (isTraceWarning(event) ? 'is-warning' : 'is-done') : active ? 'is-running' : 'is-done');
+    if (active) step.setAttribute('aria-current', 'step');
     if (kind === 'tool_started') {
       const queue = trace.openTools.get(event.tool_name) || [];
       queue.push(step);
       trace.openTools.set(event.tool_name, queue);
+      trace.activeStep = step;
+    }
+    if (kind === 'model_started') {
+      trace.openModel = step;
+      trace.activeStep = step;
+    } else if (active && kind !== 'tool_started') {
       trace.activeStep = step;
     }
     if (event.code) step.title = `诊断码：${event.code}`;
@@ -829,7 +878,7 @@
     wrap.append(head, note, steps);
     els.dockChat.appendChild(wrap);
     scrollDock();
-    return { wrap, steps, seen: new Set(), openTools: new Map(), activeStep: null };
+    return { wrap, steps, seen: new Set(), openTools: new Map(), openModel: null, activeStep: null };
   }
 
   function appendDockTraceStep(trace, event) {
@@ -843,6 +892,7 @@
       const step = queue.shift();
       if (step) {
         step.classList.remove('is-running');
+        step.removeAttribute('aria-current');
         step.classList.add(isTraceWarning(event) ? 'is-warning' : 'is-done');
         const label = step.querySelector('b');
         const overview = step.querySelector('.sim-ai-progress-overview');
@@ -857,15 +907,41 @@
         return;
       }
     }
+    if (kind === 'model_finished' && trace.openModel) {
+      const step = trace.openModel;
+      step.classList.remove('is-running');
+      step.removeAttribute('aria-current');
+      step.classList.add('is-done');
+      const label = step.querySelector('b');
+      const overview = step.querySelector('.sim-ai-progress-overview');
+      const meta = step.querySelector('small');
+      if (label) label.textContent = traceLabels.model_finished;
+      if (overview) overview.textContent = traceStageOverview(event);
+      if (meta) meta.remove();
+      trace.openModel = null;
+      if (trace.activeStep === step) trace.activeStep = null;
+      scrollDock();
+      return;
+    }
     finishActiveTraceStep(trace);
     const suffix = event.tool_name ? ` · ${toolLabel(event.tool_name)}` : '';
     const label = kind === 'tool_started' ? `调用工具${suffix}` : `${traceLabels[kind] || kind}${suffix}`;
     const step = createTraceStep('sim-ai-progress-step', label, traceStageOverview(event), traceStepMeta(event), true);
-    step.classList.add(kind === 'tool_started' ? 'is-running' : isTraceWarning(event) ? 'is-warning' : 'is-done');
+    const terminal = ['completed', 'partially_verified', 'refused', 'cancelled', 'evidence_insufficient',
+      'budget_exhausted', 'provider_failed', 'protocol_failed', 'timed_out'].includes(kind);
+    const active = !terminal && !['tool_finished', 'model_finished'].includes(kind);
+    step.classList.add(terminal ? (isTraceWarning(event) ? 'is-warning' : 'is-done') : active ? 'is-running' : 'is-done');
+    if (active) step.setAttribute('aria-current', 'step');
     if (kind === 'tool_started') {
       const queue = trace.openTools.get(event.tool_name) || [];
       queue.push(step);
       trace.openTools.set(event.tool_name, queue);
+      trace.activeStep = step;
+    }
+    if (kind === 'model_started') {
+      trace.openModel = step;
+      trace.activeStep = step;
+    } else if (active && kind !== 'tool_started') {
       trace.activeStep = step;
     }
     if (event.code) step.title = `诊断码：${event.code}`;
