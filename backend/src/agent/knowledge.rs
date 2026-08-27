@@ -95,6 +95,61 @@ pub enum KnowledgeVersionScope {
     ReferenceLookup,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KnowledgeClientScope {
+    Flagship,
+    Wujie,
+    Any,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KnowledgeMountScope {
+    Fenshanjin,
+    Tieguyi,
+}
+
+/// Product-level retrieval boundary. The calculator always has a selected
+/// flagship mount, so an otherwise ambiguous question inherits that context.
+/// Wujie is opt-in and never leaks into a flagship answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KnowledgeAudience {
+    pub client: KnowledgeClientScope,
+    pub mount: Option<KnowledgeMountScope>,
+}
+
+impl KnowledgeAudience {
+    pub fn from_question(
+        question: &str,
+        fallback_mount: Option<KnowledgeMountScope>,
+    ) -> Self {
+        let normalized = question.to_lowercase();
+        let mentions_wujie = normalized.contains("无界")
+            || normalized.contains("分山劲·悟")
+            || normalized.contains("分山劲・悟")
+            || normalized.contains("wujie");
+        let mentions_flagship = normalized.contains("旗舰")
+            || normalized.contains("端游")
+            || normalized.contains("旗舰端");
+        let mentions_fenshan = normalized.contains("分山劲") || normalized.contains("分山");
+        let mentions_tiegu = normalized.contains("铁骨衣") || normalized.contains("铁骨");
+
+        Self {
+            client: match (mentions_wujie, mentions_flagship) {
+                (true, true) => KnowledgeClientScope::Any,
+                (true, false) => KnowledgeClientScope::Wujie,
+                _ => KnowledgeClientScope::Flagship,
+            },
+            mount: match (mentions_fenshan, mentions_tiegu) {
+                (true, false) => Some(KnowledgeMountScope::Fenshanjin),
+                (false, true) => Some(KnowledgeMountScope::Tieguyi),
+                _ => fallback_mount,
+            },
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KnowledgeVersionContext {
     pub game_version: GameVersion,
@@ -188,6 +243,7 @@ pub struct KnowledgeSearchResponse {
     pub corpus_hash: String,
     pub current_season: String,
     pub requested_scope: KnowledgeVersionScope,
+    pub audience: KnowledgeAudience,
     pub retrieval: KnowledgeRetrievalInfo,
     pub results: Vec<KnowledgeSearchResult>,
 }
@@ -491,6 +547,23 @@ impl KnowledgeIndex {
         context: &KnowledgeVersionContext,
         query: KnowledgeSearchQuery,
     ) -> Result<KnowledgeSearchResponse, KnowledgeIndexError> {
+        let audience = if matches!(&query.version_scope, KnowledgeVersionScope::ReferenceLookup) {
+            KnowledgeAudience {
+                client: KnowledgeClientScope::Any,
+                mount: None,
+            }
+        } else {
+            KnowledgeAudience::from_question(&query.query, None)
+        };
+        self.search_with_audience(context, query, audience)
+    }
+
+    pub fn search_with_audience(
+        &self,
+        context: &KnowledgeVersionContext,
+        query: KnowledgeSearchQuery,
+        audience: KnowledgeAudience,
+    ) -> Result<KnowledgeSearchResponse, KnowledgeIndexError> {
         validate_query(&query)?;
         if let Some(category) = query.category.as_ref() {
             if !self.categories.contains(category) {
@@ -519,6 +592,11 @@ impl KnowledgeIndex {
         let mut eligible = Vec::new();
         let mut lexical_ranked = Vec::new();
         for (chunk_index, chunk) in self.chunks.iter().enumerate() {
+            if !matches!(&query.version_scope, KnowledgeVersionScope::ReferenceLookup)
+                && !audience_accepts_chunk(audience, chunk)
+            {
+                continue;
+            }
             let Some(version_match) = version_match(
                 context,
                 &query.version_scope,
@@ -704,6 +782,7 @@ impl KnowledgeIndex {
             corpus_hash: self.corpus_hash.clone(),
             current_season: context.current_season.to_string(),
             requested_scope: query.version_scope,
+            audience,
             retrieval: self.retrieval_info_with_fallback(query_fallback),
             results,
         })
@@ -793,6 +872,45 @@ impl KnowledgeIndex {
             })
             .sum()
     }
+}
+
+fn audience_accepts_chunk(audience: KnowledgeAudience, chunk: &KnowledgeChunk) -> bool {
+    let (chunk_client, chunk_mount) = classify_chunk_audience(chunk);
+    let client_matches = match audience.client {
+        KnowledgeClientScope::Flagship => chunk_client != KnowledgeClientScope::Wujie,
+        KnowledgeClientScope::Wujie => chunk_client == KnowledgeClientScope::Wujie,
+        KnowledgeClientScope::Any => true,
+    };
+    let mount_matches = match (audience.mount, chunk_mount) {
+        (Some(requested), Some(actual)) => requested == actual,
+        _ => true,
+    };
+    client_matches && mount_matches
+}
+
+fn classify_chunk_audience(
+    chunk: &KnowledgeChunk,
+) -> (KnowledgeClientScope, Option<KnowledgeMountScope>) {
+    let title = chunk.title.to_lowercase();
+    let is_wujie = title.contains("无界")
+        || title.contains("分山劲·悟")
+        || title.contains("分山劲・悟")
+        || title.contains("wujie");
+    let mentions_fenshan = title.contains("分山劲") || title.contains("分山");
+    let mentions_tiegu = title.contains("铁骨衣") || title.contains("铁骨");
+    let mount = match (mentions_fenshan, mentions_tiegu) {
+        (true, false) => Some(KnowledgeMountScope::Fenshanjin),
+        (false, true) => Some(KnowledgeMountScope::Tieguyi),
+        _ => None,
+    };
+    (
+        if is_wujie {
+            KnowledgeClientScope::Wujie
+        } else {
+            KnowledgeClientScope::Flagship
+        },
+        mount,
+    )
 }
 
 fn dense_document_text(chunk: &KnowledgeChunk) -> String {
@@ -1231,6 +1349,36 @@ mod tests {
                 ),
                 fixture_entry(
                     &root,
+                    "暗影千机（2026）/白皮书/分山劲白皮书.md",
+                    "暗影千机_ 分山劲白皮书",
+                    "暗影千机（2026）",
+                    "白皮书",
+                    "yuque_document",
+                    "",
+                    "# 旗舰分山循环\n\n旗舰端分山劲通过稳定盾飞和劫刀节奏减少空转。",
+                ),
+                fixture_entry(
+                    &root,
+                    "暗影千机（2026）/白皮书/分山劲悟白皮书.md",
+                    "暗影千机_ 分山劲·悟白皮书",
+                    "暗影千机（2026）",
+                    "白皮书",
+                    "yuque_document",
+                    "",
+                    "# 无界分山循环\n\n无界端分山劲·悟通过自己的技能循环减少空转。",
+                ),
+                fixture_entry(
+                    &root,
+                    "暗影千机（2026）/白皮书/铁骨衣白皮书.md",
+                    "暗影千机_ 铁骨衣白皮书",
+                    "暗影千机（2026）",
+                    "白皮书",
+                    "yuque_document",
+                    "",
+                    "# 旗舰铁骨循环\n\n旗舰端铁骨衣使用防御循环处理技能空转。",
+                ),
+                fixture_entry(
+                    &root,
                     "山海源流（2025）/基础/旧版循环.md",
                     "旧版循环（2025）",
                     "山海源流（2025）",
@@ -1355,6 +1503,60 @@ mod tests {
             .results
             .iter()
             .all(|result| { result.version_match == KnowledgeVersionMatch::CurrentExact }));
+    }
+
+    #[test]
+    fn ambiguous_questions_default_to_flagship_and_selected_mount() {
+        let fixture = Fixture::create();
+        let index = KnowledgeIndex::load(&fixture.root).unwrap();
+        let audience = KnowledgeAudience::from_question(
+            "怎样减少空转",
+            Some(KnowledgeMountScope::Fenshanjin),
+        );
+        let response = index
+            .search_with_audience(
+                &KnowledgeVersionContext::from_game_version(GameVersion::AnYingQianJi),
+                query(KnowledgeVersionScope::CurrentOnly, "怎样减少空转"),
+                audience,
+            )
+            .unwrap();
+
+        assert_eq!(response.audience.client, KnowledgeClientScope::Flagship);
+        assert_eq!(response.audience.mount, Some(KnowledgeMountScope::Fenshanjin));
+        assert!(response.results.iter().any(|result| result.title.contains("分山劲白皮书")));
+        assert!(response
+            .results
+            .iter()
+            .all(|result| !result.title.contains("分山劲·悟") && !result.title.contains("铁骨衣")));
+    }
+
+    #[test]
+    fn explicit_wujie_question_only_returns_wujie_material() {
+        let fixture = Fixture::create();
+        let index = KnowledgeIndex::load(&fixture.root).unwrap();
+        let response = index
+            .search(
+                &KnowledgeVersionContext::from_game_version(GameVersion::AnYingQianJi),
+                query(KnowledgeVersionScope::CurrentOnly, "无界分山劲·悟怎样减少空转"),
+            )
+            .unwrap();
+
+        assert_eq!(response.audience.client, KnowledgeClientScope::Wujie);
+        assert!(!response.results.is_empty());
+        assert!(response
+            .results
+            .iter()
+            .all(|result| result.title.contains("分山劲·悟")));
+    }
+
+    #[test]
+    fn explicit_flagship_mount_overrides_selected_mount_for_knowledge() {
+        let audience = KnowledgeAudience::from_question(
+            "旗舰端铁骨衣循环怎么处理",
+            Some(KnowledgeMountScope::Fenshanjin),
+        );
+        assert_eq!(audience.client, KnowledgeClientScope::Flagship);
+        assert_eq!(audience.mount, Some(KnowledgeMountScope::Tieguyi));
     }
 
     #[test]

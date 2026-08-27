@@ -28,9 +28,10 @@ pub use compare::{
 };
 pub use evidence::{EvidenceEnvelopeV1, ToolProvenance, EVIDENCE_SCHEMA_V1};
 pub use knowledge::{
-    KnowledgeIndex, KnowledgeIndexError, KnowledgeQuality, KnowledgeRetrievalInfo,
-    KnowledgeSearchQuery, KnowledgeSearchResponse, KnowledgeSearchResult, KnowledgeVersionContext,
-    KnowledgeVersionMatch, KnowledgeVersionScope,
+    KnowledgeAudience, KnowledgeClientScope, KnowledgeIndex, KnowledgeIndexError,
+    KnowledgeMountScope, KnowledgeQuality, KnowledgeRetrievalInfo, KnowledgeSearchQuery,
+    KnowledgeSearchResponse, KnowledgeSearchResult, KnowledgeVersionContext, KnowledgeVersionMatch,
+    KnowledgeVersionScope,
 };
 pub use runtime::AgentRuntime;
 pub use schema::{ScenarioError, ScenarioSnapshotV1, SCENARIO_SCHEMA_V1};

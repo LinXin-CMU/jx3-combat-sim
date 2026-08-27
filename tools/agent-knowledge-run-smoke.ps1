@@ -73,7 +73,7 @@ for ($i = 0; $i -lt 100; $i++) {
 Assert-True ($null -ne $status -and -not $status.running) 'Knowledge run did not terminate.'
 Assert-True ($status.status -eq 'completed') 'Knowledge run did not complete.'
 $result = $status.result
-Assert-True ($result.prompt_version -eq 'agent-system/v9') 'Knowledge run used an unexpected prompt.'
+Assert-True ($result.prompt_version -eq 'agent-system/v10') 'Knowledge run used an unexpected prompt.'
 Assert-True ($result.accounting.knowledge_searches -eq 1) 'Knowledge search count is incorrect.'
 Assert-True ($result.accounting.simulations -eq 0) 'Knowledge-only run unexpectedly simulated.'
 $sources = @($result.report.sources)

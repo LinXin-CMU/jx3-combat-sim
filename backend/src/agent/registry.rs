@@ -6,10 +6,11 @@ use super::provider::ToolDefinition;
 use super::report::EvidenceStore;
 use super::{
     analyze_timeline, compare_scenarios, get_current_scenario, simulate_scenario, AgentRuntime,
-    CandidatePatchV1, EvidenceEnvelopeV1, KnowledgeIndex, KnowledgeIndexError,
-    KnowledgeSearchQuery, KnowledgeVersionContext, KnowledgeVersionScope, PatchValueV1,
-    ScenarioPatchV1, ScenarioSnapshotV1, ToolBudget, ToolError,
+    CandidatePatchV1, EvidenceEnvelopeV1, KnowledgeAudience, KnowledgeIndex, KnowledgeIndexError,
+    KnowledgeMountScope, KnowledgeSearchQuery, KnowledgeVersionContext, KnowledgeVersionScope,
+    PatchValueV1, ScenarioPatchV1, ScenarioSnapshotV1, ToolBudget, ToolError,
 };
+use crate::Mount;
 
 pub const AGENT_TOOL_RESULT_SCHEMA_V1: &str = "agent-tool-result/v1";
 pub const MAX_AGENT_CANDIDATES: usize = 3;
@@ -48,6 +49,7 @@ pub struct AgentToolRegistry<'a> {
     knowledge: Option<&'a KnowledgeIndex>,
     budget: ToolBudget,
     knowledge_searches: u32,
+    knowledge_audience: KnowledgeAudience,
     scenario_read: bool,
     evidence: EvidenceStore,
 }
@@ -67,15 +69,28 @@ impl<'a> AgentToolRegistry<'a> {
         max_simulations: u32,
         knowledge: Option<&'a KnowledgeIndex>,
     ) -> Self {
+        let mount = match runtime.mount() {
+            Mount::FenShanJin => KnowledgeMountScope::Fenshanjin,
+            Mount::TieGuYi => KnowledgeMountScope::Tieguyi,
+        };
         Self {
             scenario,
             runtime,
             knowledge,
             budget: ToolBudget::new(max_simulations),
             knowledge_searches: 0,
+            knowledge_audience: KnowledgeAudience::from_question("", Some(mount)),
             scenario_read: false,
             evidence: EvidenceStore::new(),
         }
+    }
+
+    pub fn set_knowledge_question(&mut self, question: &str) {
+        let mount = match self.runtime.mount() {
+            Mount::FenShanJin => KnowledgeMountScope::Fenshanjin,
+            Mount::TieGuYi => KnowledgeMountScope::Tieguyi,
+        };
+        self.knowledge_audience = KnowledgeAudience::from_question(question, Some(mount));
     }
 
     pub fn definitions() -> Vec<ToolDefinition> {
@@ -287,7 +302,13 @@ impl<'a> AgentToolRegistry<'a> {
                     serde_json::to_value(&query).expect("knowledge query must remain serializable");
                 let context =
                     KnowledgeVersionContext::from_game_version(self.runtime.game_version());
-                match knowledge.search(&context, query) {
+                let result = if matches!(&query.version_scope, KnowledgeVersionScope::ReferenceLookup)
+                {
+                    knowledge.search(&context, query)
+                } else {
+                    knowledge.search_with_audience(&context, query, self.knowledge_audience)
+                };
+                match result {
                     Ok(result) => {
                         // A search response can contain several documents. Give every result its
                         // own evidence identity so the model can cite the exact supporting chunk

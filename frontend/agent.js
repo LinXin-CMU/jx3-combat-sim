@@ -1411,6 +1411,25 @@
       '',
       report?.content?.summary || latestResult.error?.message || 'No report',
     ];
+    if (report?.content?.findings?.length) {
+      lines.push('', '## 分析结论');
+      report.content.findings.forEach(finding => {
+        lines.push('', `### ${finding.title || '分析'}`, finding.explanation || '');
+        (finding.metrics || []).forEach(metric => {
+          lines.push(`- ${metricLabel(metric)}：${metricValue(metric)}`);
+        });
+      });
+    }
+    if (report?.content?.recommendations?.length) {
+      lines.push('', '## 下一步建议');
+      report.content.recommendations.forEach(recommendation => {
+        lines.push(`- **${recommendation.title || '建议'}**：${recommendation.rationale || ''}`);
+      });
+    }
+    if (report?.content?.limitations?.length) {
+      lines.push('', '## 证据边界');
+      report.content.limitations.forEach(limitation => lines.push(`- ${limitation}`));
+    }
     if (report?.sources?.length) {
       lines.push('', '## 参考资料');
       report.sources.forEach(source => {

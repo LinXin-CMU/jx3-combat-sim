@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::Notify;
 
 use super::evidence::validate_trace_id;
-use super::prompt::agent_prompt_v9;
+use super::prompt::agent_prompt_v10;
 use super::provider::{
     FinishReason, LlmProvider, ModelMessage, ModelRequest, ProviderToolCall,
     StructuredOutputDefinition, TokenUsage,
@@ -218,7 +218,7 @@ pub async fn run_agent_observed(
     event_sink: Option<AgentTraceSink>,
 ) -> AgentRunResultV1 {
     let started = Instant::now();
-    let prompt = agent_prompt_v9();
+    let prompt = agent_prompt_v10();
     let mut accounting = AgentRunAccountingV1::default();
     let mut trace = TraceCollector::new(event_sink);
 
@@ -245,6 +245,7 @@ pub async fn run_agent_observed(
         limits.max_simulations,
         runtime.knowledge(),
     );
+    registry.set_knowledge_question(&input.question);
     let definitions = if let Some(knowledge) = runtime.knowledge() {
         let seasons = knowledge.seasons().map(str::to_string).collect::<Vec<_>>();
         let categories = knowledge
@@ -1535,7 +1536,7 @@ mod tests {
         .await;
 
         assert_eq!(result.status, AgentRunStatus::Completed);
-        assert_eq!(result.prompt_version, "agent-system/v9");
+        assert_eq!(result.prompt_version, "agent-system/v10");
         assert_eq!(result.accounting.knowledge_searches, 1);
         assert_eq!(result.accounting.simulations, 0);
         let report = result.report.unwrap();
@@ -1614,7 +1615,7 @@ mod tests {
         .await;
 
         assert_eq!(result.status, AgentRunStatus::Completed);
-        assert_eq!(result.prompt_version, "agent-system/v9");
+        assert_eq!(result.prompt_version, "agent-system/v10");
         assert_eq!(result.accounting.knowledge_searches, 1);
         assert_eq!(result.accounting.simulations, 0);
         let report = result.report.unwrap();
