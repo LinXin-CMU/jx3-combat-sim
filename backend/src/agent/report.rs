@@ -247,7 +247,13 @@ pub fn parse_and_salvage_report(
         }
         sanitized_claims += sanitize_text_field(&mut finding.title, "已验证结论");
         sanitized_claims +=
-            sanitize_unsupported_numeric_prose(&mut finding.title, &finding.metrics, "已验证结论");
+            sanitize_unsupported_numeric_prose(
+                &mut finding.title,
+                &finding.metrics,
+                &finding.evidence_ids,
+                evidence,
+                "已验证结论",
+            );
         sanitized_claims += sanitize_text_field(
             &mut finding.explanation,
             "该结论仅保留通过本次证据校验的部分。",
@@ -255,6 +261,8 @@ pub fn parse_and_salvage_report(
         sanitized_claims += sanitize_unsupported_numeric_prose(
             &mut finding.explanation,
             &finding.metrics,
+            &finding.evidence_ids,
+            evidence,
             "以下指标已通过本次模拟证据校验。",
         );
         retained_findings.push(finding);
@@ -267,11 +275,14 @@ pub fn parse_and_salvage_report(
         .flat_map(|finding| finding.metrics.iter())
         .cloned()
         .collect::<Vec<_>>();
+    let report_evidence_ids = cited_evidence_ids(&report);
     sanitized_claims +=
         sanitize_text_field(&mut report.summary, "本轮仅保留通过本次证据校验的内容。");
     sanitized_claims += sanitize_unsupported_numeric_prose(
         &mut report.summary,
         &report_metrics,
+        &report_evidence_ids,
+        evidence,
         "当前基线的可信指标与主要结论见下方。",
     );
 
@@ -291,6 +302,8 @@ pub fn parse_and_salvage_report(
         sanitized_claims += sanitize_unsupported_numeric_prose(
             &mut recommendation.title,
             &metric_values,
+            &recommendation.evidence_ids,
+            evidence,
             "下一步验证建议",
         );
         sanitized_claims += sanitize_text_field(
@@ -300,17 +313,23 @@ pub fn parse_and_salvage_report(
         sanitized_claims += sanitize_unsupported_numeric_prose(
             &mut recommendation.rationale,
             &metric_values,
+            &recommendation.evidence_ids,
+            evidence,
             "建议通过新的确定性实验继续验证。",
         );
         retained_recommendations.push(recommendation);
     }
     report.recommendations = retained_recommendations;
 
+    let report_evidence_ids = cited_evidence_ids(&report);
+
     for limitation in &mut report.limitations {
         sanitized_claims += sanitize_text_field(limitation, "存在尚未验证的边界。");
         sanitized_claims += sanitize_unsupported_numeric_prose(
             limitation,
             &report_metrics,
+            &report_evidence_ids,
+            evidence,
             "存在一项尚未验证的边界。",
         );
     }
@@ -319,6 +338,8 @@ pub fn parse_and_salvage_report(
         sanitized_claims += sanitize_unsupported_numeric_prose(
             reason,
             &report_metrics,
+            &report_evidence_ids,
+            evidence,
             "当前请求无法形成可验证结论。",
         );
     }
@@ -571,16 +592,42 @@ pub fn validate_report(
         .iter()
         .flat_map(|finding| finding.metrics.iter())
         .collect::<Vec<_>>();
-    validate_grounded_prose(&report.summary, report_metrics.iter().copied())?;
+    let report_evidence_ids = cited_evidence_ids(report);
+    validate_grounded_prose(
+        &report.summary,
+        report_metrics.iter().copied(),
+        &report_evidence_ids,
+        evidence,
+    )?;
     if let Some(reason) = &report.refusal_reason {
-        validate_grounded_prose(reason, report_metrics.iter().copied())?;
+        validate_grounded_prose(
+            reason,
+            report_metrics.iter().copied(),
+            &report_evidence_ids,
+            evidence,
+        )?;
     }
     for limitation in &report.limitations {
-        validate_grounded_prose(limitation, report_metrics.iter().copied())?;
+        validate_grounded_prose(
+            limitation,
+            report_metrics.iter().copied(),
+            &report_evidence_ids,
+            evidence,
+        )?;
     }
     for finding in &report.findings {
-        validate_grounded_prose(&finding.title, finding.metrics.iter())?;
-        validate_grounded_prose(&finding.explanation, finding.metrics.iter())?;
+        validate_grounded_prose(
+            &finding.title,
+            finding.metrics.iter(),
+            &finding.evidence_ids,
+            evidence,
+        )?;
+        validate_grounded_prose(
+            &finding.explanation,
+            finding.metrics.iter(),
+            &finding.evidence_ids,
+            evidence,
+        )?;
     }
 
     for recommendation in &report.recommendations {
@@ -597,8 +644,18 @@ pub fn validate_report(
             .iter()
             .copied()
             .filter(|metric| recommendation.evidence_ids.contains(&metric.evidence_id));
-        validate_grounded_prose(&recommendation.title, recommendation_metrics.clone())?;
-        validate_grounded_prose(&recommendation.rationale, recommendation_metrics)?;
+        validate_grounded_prose(
+            &recommendation.title,
+            recommendation_metrics.clone(),
+            &recommendation.evidence_ids,
+            evidence,
+        )?;
+        validate_grounded_prose(
+            &recommendation.rationale,
+            recommendation_metrics,
+            &recommendation.evidence_ids,
+            evidence,
+        )?;
     }
     Ok(())
 }
@@ -793,6 +850,8 @@ struct NumericLiteral {
 fn validate_grounded_prose<'a>(
     value: &str,
     metrics: impl IntoIterator<Item = &'a GroundedMetricV1>,
+    evidence_ids: &[String],
+    evidence: &EvidenceStore,
 ) -> Result<(), ReportValidationError> {
     validate_short_text(value)?;
     let metrics = metrics.into_iter().collect::<Vec<_>>();
@@ -800,10 +859,12 @@ fn validate_grounded_prose<'a>(
         .iter()
         .map(|metric| metric.value)
         .collect::<Vec<_>>();
+    let knowledge_literals = cited_knowledge_numeric_literals(evidence_ids, evidence);
     if numeric_literals(value).iter().any(|literal| {
         !literal.ordinary_count
             && !matches_metric(*literal, &metric_values)
             && !matches_metric_label_literal(value, *literal, &metrics)
+            && !matches_knowledge_literal(*literal, &knowledge_literals)
     }) {
         return Err(error(
             "numeric_prose_claim",
@@ -917,6 +978,8 @@ fn numeric_literals(value: &str) -> Vec<NumericLiteral> {
 fn sanitize_unsupported_numeric_prose(
     value: &mut String,
     metrics: &[GroundedMetricV1],
+    evidence_ids: &[String],
+    evidence: &EvidenceStore,
     fallback: &str,
 ) -> usize {
     let metric_values = metrics
@@ -924,12 +987,14 @@ fn sanitize_unsupported_numeric_prose(
         .map(|metric| metric.value)
         .collect::<Vec<_>>();
     let metric_refs = metrics.iter().collect::<Vec<_>>();
+    let knowledge_literals = cited_knowledge_numeric_literals(evidence_ids, evidence);
     let unsupported = numeric_literals(value)
         .into_iter()
         .filter(|literal| {
             !literal.ordinary_count
                 && !matches_metric(*literal, &metric_values)
                 && !matches_metric_label_literal(value, *literal, &metric_refs)
+                && !matches_knowledge_literal(*literal, &knowledge_literals)
         })
         .collect::<Vec<_>>();
     if unsupported.is_empty() {
@@ -937,6 +1002,52 @@ fn sanitize_unsupported_numeric_prose(
     }
     *value = fallback.to_string();
     unsupported.len()
+}
+
+fn cited_knowledge_numeric_literals(
+    evidence_ids: &[String],
+    evidence: &EvidenceStore,
+) -> Vec<NumericLiteral> {
+    let mut literals = Vec::new();
+    for evidence_id in evidence_ids {
+        let Some(envelope) = evidence.get(evidence_id) else {
+            continue;
+        };
+        if envelope.get("tool_name").and_then(Value::as_str) != Some("search_knowledge_base") {
+            continue;
+        }
+        let Some(results) = envelope
+            .pointer("/result/results")
+            .and_then(Value::as_array)
+        else {
+            continue;
+        };
+        for result in results {
+            if !result
+                .get("fact_eligible")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            for field in ["title", "heading", "snippet", "season"] {
+                if let Some(text) = result.get(field).and_then(Value::as_str) {
+                    literals.extend(numeric_literals(text));
+                }
+            }
+        }
+    }
+    literals
+}
+
+fn matches_knowledge_literal(literal: NumericLiteral, sources: &[NumericLiteral]) -> bool {
+    sources.iter().any(|source| {
+        if literal.percent != source.percent {
+            return false;
+        }
+        let tolerance = literal.value.abs().max(source.value.abs()).max(1.0) * 1e-9;
+        (literal.value - source.value).abs() <= tolerance
+    })
 }
 
 fn matches_metric_label_literal(
@@ -1008,6 +1119,43 @@ mod tests {
                 "result": {"dps": 123.5, "ratio": 0.3}
             }),
         )])
+    }
+
+    fn knowledge_evidence() -> EvidenceStore {
+        BTreeMap::from([
+            (
+                "b".repeat(64),
+                json!({
+                    "evidence_id": "b".repeat(64),
+                    "tool_name": "search_knowledge_base",
+                    "result": {
+                        "results": [{
+                            "title": "暗影千机 2026 宏说明",
+                            "heading": "延迟阈值",
+                            "snippet": "宏阈值可从 0.15 调到 0.20；80ms 延迟环境需要自行实测。",
+                            "season": "暗影千机（2026）",
+                            "fact_eligible": true
+                        }]
+                    }
+                }),
+            ),
+            (
+                "c".repeat(64),
+                json!({
+                    "evidence_id": "c".repeat(64),
+                    "tool_name": "search_knowledge_base",
+                    "result": {
+                        "results": [{
+                            "title": "另一篇未引用资料",
+                            "heading": "未引用阈值",
+                            "snippet": "另一种设置使用 0.25，伤害占比为 30%。",
+                            "season": "暗影千机（2026）",
+                            "fact_eligible": true
+                        }]
+                    }
+                }),
+            ),
+        ])
     }
 
     fn report() -> AgentReportContentV1 {
@@ -1229,6 +1377,54 @@ mod tests {
         named_account.summary = "资料中的视频作者名为 dereck365。".to_string();
         named_account.findings[0].title = "账号 dereck365".to_string();
         validate_report(&named_account, &evidence()).unwrap();
+    }
+
+    #[test]
+    fn cited_knowledge_numbers_are_allowed_without_becoming_simulation_metrics() {
+        let mut value = report();
+        value.summary = "当前赛季资料建议在 80ms 环境中自行实测宏阈值。".to_string();
+        value.findings[0].title = "2026 赛季宏阈值说明".to_string();
+        value.findings[0].explanation =
+            "原始资料给出的示例范围是 0.15 到 0.20；这里只复述攻略，不表示模拟收益。"
+                .to_string();
+        value.findings[0].evidence_ids = vec!["b".repeat(64)];
+        value.findings[0].metrics.clear();
+        value.limitations = vec!["这是 2026 赛季知识资料，未运行战斗模拟。".to_string()];
+
+        validate_report(&value, &knowledge_evidence()).unwrap();
+    }
+
+    #[test]
+    fn knowledge_numbers_must_appear_in_the_exact_cited_evidence() {
+        let mut value = report();
+        value.findings[0].evidence_ids = vec!["b".repeat(64)];
+        value.findings[0].metrics.clear();
+        value.summary = "建议把阈值设为 0.25。".to_string();
+        assert_eq!(
+            validate_report(&value, &knowledge_evidence())
+                .unwrap_err()
+                .code,
+            "numeric_prose_claim"
+        );
+
+        value.summary = "资料记录的伤害占比为 30。".to_string();
+        value.findings[0].evidence_ids = vec!["c".repeat(64)];
+        assert_eq!(
+            validate_report(&value, &knowledge_evidence())
+                .unwrap_err()
+                .code,
+            "numeric_prose_claim"
+        );
+
+        value.summary = "资料示例阈值为 0.15。".to_string();
+        value.findings[0].evidence_ids = vec!["b".repeat(64)];
+        let mut ineligible = knowledge_evidence();
+        ineligible.get_mut(&"b".repeat(64)).unwrap()["result"]["results"][0]
+            ["fact_eligible"] = json!(false);
+        assert_eq!(
+            validate_report(&value, &ineligible).unwrap_err().code,
+            "numeric_prose_claim"
+        );
     }
 
     #[test]

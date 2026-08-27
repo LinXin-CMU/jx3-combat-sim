@@ -494,18 +494,22 @@ struct KnowledgeArguments {
 
 impl KnowledgeArguments {
     fn into_query(self) -> Result<KnowledgeSearchQuery, KnowledgeIndexError> {
+        let season = self.season.and_then(|season| {
+            let season = season.trim().to_string();
+            (!season.is_empty()).then_some(season)
+        });
         let version_scope = match self.version_scope.as_str() {
-            "current_only" if self.season.is_none() => KnowledgeVersionScope::CurrentOnly,
+            // Providers sometimes repeat the current season even though the scope already
+            // determines it. Treat that field as redundant instead of aborting a valid search;
+            // the index still enforces every real version boundary from the query and scope.
+            "current_only" => KnowledgeVersionScope::CurrentOnly,
             "specific_season" => KnowledgeVersionScope::SpecificSeason {
-                season: self
-                    .season
-                    .filter(|season| !season.trim().is_empty())
-                    .ok_or(KnowledgeIndexError::InvalidQuery(
-                        "specific season is required",
-                    ))?,
+                season: season.ok_or(KnowledgeIndexError::InvalidQuery(
+                    "specific season is required",
+                ))?,
             },
-            "cross_version" if self.season.is_none() => KnowledgeVersionScope::CrossVersion,
-            "reference_lookup" if self.season.is_none() => KnowledgeVersionScope::ReferenceLookup,
+            "cross_version" => KnowledgeVersionScope::CrossVersion,
+            "reference_lookup" => KnowledgeVersionScope::ReferenceLookup,
             _ => {
                 return Err(KnowledgeIndexError::InvalidQuery(
                     "version scope and season do not match",
@@ -848,16 +852,26 @@ mod tests {
 
     #[test]
     fn knowledge_argument_scope_is_validated_locally() {
-        let invalid = KnowledgeArguments {
+        let redundant_season = KnowledgeArguments {
             query: "盾飞".to_string(),
             version_scope: "current_only".to_string(),
             season: Some("山海源流（2025）".to_string()),
             category: None,
-        };
+        }
+        .into_query()
+        .unwrap();
         assert!(matches!(
-            invalid.into_query().unwrap_err(),
-            KnowledgeIndexError::InvalidQuery(_)
+            redundant_season.version_scope,
+            KnowledgeVersionScope::CurrentOnly
         ));
+
+        let invalid = KnowledgeArguments {
+            query: "盾飞".to_string(),
+            version_scope: "unbounded".to_string(),
+            season: None,
+            category: None,
+        };
+        assert!(matches!(invalid.into_query(), Err(KnowledgeIndexError::InvalidQuery(_))));
 
         let valid = KnowledgeArguments {
             query: "山海源流盾飞".to_string(),

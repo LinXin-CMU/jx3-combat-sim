@@ -22,6 +22,11 @@ pub const AGENT_PROMPT_VERSION_V10: &str = "agent-system/v10";
 const AGENT_SYSTEM_PROMPT_V10: &str = include_str!("../../prompts/agent_system_v10.md");
 pub const AGENT_PROMPT_VERSION_V11: &str = "agent-system/v11";
 const AGENT_SYSTEM_PROMPT_V11: &str = include_str!("../../prompts/agent_system_v11.md");
+pub const AGENT_PROMPT_VERSION_V12: &str = "agent-system/v12";
+const AGENT_SYSTEM_PROMPT_V12: &str = concat!(
+    include_str!("../../prompts/agent_system_v11.md"),
+    include_str!("../../prompts/agent_system_v12_addendum.md")
+);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PromptSpec {
@@ -129,14 +134,23 @@ pub fn agent_prompt_v11() -> PromptSpec {
     }
 }
 
+pub fn agent_prompt_v12() -> PromptSpec {
+    let sha256 = format!("{:x}", Sha256::digest(AGENT_SYSTEM_PROMPT_V12.as_bytes()));
+    PromptSpec {
+        version: AGENT_PROMPT_VERSION_V12,
+        sha256,
+        instructions: AGENT_SYSTEM_PROMPT_V12,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn prompt_is_versioned_and_content_addressed() {
-        let prompt = agent_prompt_v11();
-        assert_eq!(prompt.version, "agent-system/v11");
+        let prompt = agent_prompt_v12();
+        assert_eq!(prompt.version, "agent-system/v12");
         assert_eq!(prompt.sha256.len(), 64);
         assert!(prompt.instructions.contains("get_current_scenario"));
         assert!(prompt.instructions.contains("already called"));
@@ -165,6 +179,8 @@ mod tests {
             .contains("Unless the user explicitly says otherwise"));
         assert!(prompt.instructions.contains("selected adaptively"));
         assert!(prompt.instructions.contains("selection` summary"));
+        assert!(prompt.instructions.contains("exact value appears in the cited result"));
+        assert!(prompt.instructions.contains("Never borrow a number from an uncited result"));
         assert!(prompt.instructions.contains("Observation"));
         assert!(prompt.instructions.contains("结论 → 主要瓶颈"));
         assert!(prompt.instructions.contains("typed candidate field"));
