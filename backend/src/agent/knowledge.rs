@@ -8,6 +8,10 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
+use super::domain::{
+    derive_domain_claims, domain_index_hash, domain_relations, DomainChunkContext, DomainClaimV1,
+    DomainRelationV1,
+};
 use super::knowledge_dense::{DenseKnowledgeIndex, DENSE_MODEL_ID};
 use crate::GameVersion;
 
@@ -216,6 +220,12 @@ pub struct KnowledgeSearchResult {
     pub exact_phrase_match: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reference_entities: Vec<KnowledgeReferenceEntity>,
+    /// Curated, source-bound claims derived from this exact chunk. Claims never
+    /// grant access to another document and retain the original source hashes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub domain_claims: Vec<DomainClaimV1>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub domain_relations: Vec<DomainRelationV1>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -270,6 +280,7 @@ pub struct KnowledgeReferenceEntity {
 pub struct KnowledgeSearchResponse {
     pub schema_version: String,
     pub corpus_hash: String,
+    pub domain_index_hash: String,
     pub current_season: String,
     pub requested_scope: KnowledgeVersionScope,
     pub audience: KnowledgeAudience,
@@ -323,12 +334,14 @@ struct KnowledgeChunk {
     chunk_hash: String,
     term_frequency: HashMap<String, usize>,
     token_count: usize,
+    domain_claims: Vec<DomainClaimV1>,
 }
 
 #[derive(Debug, Clone)]
 pub struct KnowledgeIndex {
     schema_version: &'static str,
     corpus_hash: String,
+    domain_index_hash: String,
     chunks: Vec<KnowledgeChunk>,
     document_frequency: HashMap<String, usize>,
     average_document_length: f64,
@@ -366,7 +379,16 @@ impl KnowledgeIndex {
                     .iter()
                     .map(dense_document_text)
                     .collect::<Vec<_>>();
-                match DenseKnowledgeIndex::load_or_build(&index.corpus_hash, &texts, &cache_root) {
+                // Contextual prefixes and curated relations affect embedding identity even
+                // though the immutable Markdown corpus hash remains unchanged.
+                let dense_identity = sha256(
+                    format!(
+                        "{}\0{}\0domain-context/v1",
+                        index.corpus_hash, index.domain_index_hash
+                    )
+                    .as_bytes(),
+                );
+                match DenseKnowledgeIndex::load_or_build(&dense_identity, &texts, &cache_root) {
                     Ok(dense) => index.dense = Some(Arc::new(dense)),
                     Err(error) => {
                         eprintln!("[agent][knowledge] Embedded 初始化失败（{error}），已降级 BM25");
@@ -508,9 +530,27 @@ impl KnowledgeIndex {
                     chunk_hash,
                     term_frequency,
                     token_count,
+                    domain_claims: Vec::new(),
                 });
             }
         }
+
+        for chunk in &mut chunks {
+            chunk.domain_claims = derive_domain_claims(DomainChunkContext {
+                document_id: &chunk.document_id,
+                title: &chunk.title,
+                season: &chunk.season,
+                heading: &chunk.heading,
+                text: &chunk.text,
+                source_url: &chunk.source_url,
+                yuque_url: &chunk.yuque_url,
+                source_updated_at: &chunk.source_updated_at,
+                document_hash: &chunk.document_hash,
+                chunk_hash: &chunk.chunk_hash,
+            });
+        }
+        let derived_domain_hash =
+            domain_index_hash(chunks.iter().flat_map(|chunk| chunk.domain_claims.iter()));
 
         let mut document_frequency = HashMap::new();
         for chunk in &chunks {
@@ -527,6 +567,7 @@ impl KnowledgeIndex {
         Ok(Self {
             schema_version: KNOWLEDGE_INDEX_SCHEMA_V1,
             corpus_hash: format!("{:x}", corpus_hasher.finalize()),
+            domain_index_hash: derived_domain_hash,
             chunks,
             document_frequency,
             average_document_length,
@@ -821,6 +862,8 @@ impl KnowledgeIndex {
                     dense_similarity: dense_scores.get(&chunk_index).copied().map(round_score),
                     exact_phrase_match,
                     reference_entities,
+                    domain_relations: domain_relations(&chunk.domain_claims),
+                    domain_claims: chunk.domain_claims.clone(),
                 }
             })
             .collect();
@@ -828,6 +871,7 @@ impl KnowledgeIndex {
         Ok(KnowledgeSearchResponse {
             schema_version: KNOWLEDGE_SEARCH_SCHEMA_V1.to_string(),
             corpus_hash: self.corpus_hash.clone(),
+            domain_index_hash: self.domain_index_hash.clone(),
             current_season: context.current_season.to_string(),
             requested_scope: query.version_scope,
             audience,
@@ -1163,9 +1207,29 @@ fn select_adaptive_documents(
 }
 
 fn dense_document_text(chunk: &KnowledgeChunk) -> String {
+    let relations = chunk
+        .domain_claims
+        .iter()
+        .map(|claim| {
+            format!(
+                "{} {} {}",
+                claim.subject.name, claim.relation, claim.object.name
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("；");
+    let boundaries = chunk
+        .domain_claims
+        .iter()
+        .flat_map(|claim| claim.verification.boundary_codes.iter())
+        .cloned()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>()
+        .join("；");
     format!(
-        "标题：{}\n赛季：{}\n分类：{}\n章节：{}\n{}",
-        chunk.title, chunk.season, chunk.category, chunk.heading, chunk.text
+        "标题：{}\n赛季：{}\n分类：{}\n章节：{}\n领域关系：{}\n验证边界：{}\n{}",
+        chunk.title, chunk.season, chunk.category, chunk.heading, relations, boundaries, chunk.text
     )
 }
 
@@ -1569,6 +1633,7 @@ fn round_score(score: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent::{knowledge_prefetch, select_analysis_plan, AgentRuntime};
     use serde::Deserialize;
     use serde_json::json;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -2260,6 +2325,122 @@ mod tests {
             .reference_entities
             .iter()
             .any(|entity| { entity.relation == "video_author" && entity.name == "dereck365" }));
+    }
+
+    #[test]
+    fn configured_vault_emits_source_bound_domain_claims() {
+        let Some(root) = env::var_os(KNOWLEDGE_ROOT_ENV) else {
+            return;
+        };
+        let index = KnowledgeIndex::load(Path::new(&root)).unwrap();
+        let indexed_claim_ids = index
+            .chunks
+            .iter()
+            .flat_map(|chunk| {
+                chunk
+                    .domain_claims
+                    .iter()
+                    .map(|claim| claim.claim_id.as_str())
+            })
+            .collect::<BTreeSet<_>>();
+        println!(
+            "DOMAIN_CLAIMS {}",
+            indexed_claim_ids
+                .iter()
+                .copied()
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        assert!(indexed_claim_ids.contains("fs-cw-002"));
+        assert!(indexed_claim_ids.contains("fs-cw-002-patch"));
+        let response = index
+            .search_with_audience(
+                &KnowledgeVersionContext::from_game_version(GameVersion::AnYingQianJi),
+                KnowledgeSearchQuery {
+                    query: "天下宏愿 裂伤 持续伤害 最多叠加3层".to_string(),
+                    version_scope: KnowledgeVersionScope::CurrentOnly,
+                    category: Some("白皮书".to_string()),
+                    top_k: MAX_KNOWLEDGE_RESULTS,
+                },
+                KnowledgeAudience::from_question(
+                    "旗舰端分山劲天下宏愿",
+                    Some(KnowledgeMountScope::Fenshanjin),
+                ),
+            )
+            .unwrap();
+
+        assert_eq!(response.domain_index_hash.len(), 64);
+        let (result, claim) = response
+            .results
+            .iter()
+            .find_map(|result| {
+                result
+                    .domain_claims
+                    .iter()
+                    .find(|claim| claim.claim_id == "fs-cw-002")
+                    .map(|claim| (result, claim))
+            })
+            .expect("current orange-weapon claim should be retrieved from the matching chunk");
+        assert_eq!(claim.source.chunk_hash, result.chunk_hash);
+        assert_eq!(claim.source.document_hash, result.document_hash);
+        assert!(result
+            .domain_relations
+            .iter()
+            .any(|relation| relation.claim_id == claim.claim_id));
+    }
+
+    #[test]
+    fn configured_vault_domain_prefetches_recall_current_fact_evidence() {
+        let Some(root) = env::var_os(KNOWLEDGE_ROOT_ENV) else {
+            return;
+        };
+        let index = KnowledgeIndex::load(Path::new(&root)).unwrap();
+        let runtime = AgentRuntime::fixture();
+        let scenario = runtime.fixture_scenario();
+        for question in [
+            "分析当前循环输出基线。",
+            "为什么这里空转？先定位断档再分析原因。",
+            "水特效一键宏用206还是14156加速？",
+            "橙武天下宏愿为什么少伤害，和业火怎么对轴？",
+            "帮我分析当前一键宏的判定和手动循环相比牺牲了什么。",
+            "英雄阆风悬城老四的业火应该怎么交？",
+            "无界分山劲·悟循环怎么打？",
+            "盾压重置率怎么算，这个公式是官方的吗？",
+        ] {
+            let plan = select_analysis_plan(question, &scenario);
+            let prefetch = knowledge_prefetch(&plan, question).expect("domain prefetch");
+            let response = index
+                .search_with_audience(
+                    &KnowledgeVersionContext::from_game_version(GameVersion::AnYingQianJi),
+                    KnowledgeSearchQuery {
+                        query: prefetch.query,
+                        version_scope: KnowledgeVersionScope::CurrentOnly,
+                        category: prefetch.category,
+                        top_k: MAX_KNOWLEDGE_RESULTS,
+                    },
+                    KnowledgeAudience::from_question(
+                        question,
+                        Some(KnowledgeMountScope::Fenshanjin),
+                    ),
+                )
+                .unwrap();
+            assert!(
+                response.results.iter().any(|result| result.fact_eligible),
+                "domain prefetch returned no current fact evidence for {question}"
+            );
+            let recalled_text = response
+                .results
+                .iter()
+                .map(|result| format!("{} {} {}", result.heading, result.title, result.snippet))
+                .collect::<Vec<_>>()
+                .join("\n");
+            if question.contains("老四") {
+                assert!(recalled_text.contains("提前倒数10秒"));
+            }
+            if question.contains("无界") {
+                assert!(recalled_text.contains("手打血劫") || recalled_text.contains("劫刀×9"));
+            }
+        }
     }
 
     #[test]

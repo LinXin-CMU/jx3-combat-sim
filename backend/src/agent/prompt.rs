@@ -27,6 +27,12 @@ const AGENT_SYSTEM_PROMPT_V12: &str = concat!(
     include_str!("../../prompts/agent_system_v11.md"),
     include_str!("../../prompts/agent_system_v12_addendum.md")
 );
+pub const AGENT_PROMPT_VERSION_V13: &str = "agent-system/v13";
+const AGENT_SYSTEM_PROMPT_V13: &str = concat!(
+    include_str!("../../prompts/agent_system_v11.md"),
+    include_str!("../../prompts/agent_system_v12_addendum.md"),
+    include_str!("../../prompts/agent_system_v13_addendum.md")
+);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PromptSpec {
@@ -143,14 +149,23 @@ pub fn agent_prompt_v12() -> PromptSpec {
     }
 }
 
+pub fn agent_prompt_v13() -> PromptSpec {
+    let sha256 = format!("{:x}", Sha256::digest(AGENT_SYSTEM_PROMPT_V13.as_bytes()));
+    PromptSpec {
+        version: AGENT_PROMPT_VERSION_V13,
+        sha256,
+        instructions: AGENT_SYSTEM_PROMPT_V13,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn prompt_is_versioned_and_content_addressed() {
-        let prompt = agent_prompt_v12();
-        assert_eq!(prompt.version, "agent-system/v12");
+        let prompt = agent_prompt_v13();
+        assert_eq!(prompt.version, "agent-system/v13");
         assert_eq!(prompt.sha256.len(), 64);
         assert!(prompt.instructions.contains("get_current_scenario"));
         assert!(prompt.instructions.contains("already called"));
@@ -179,12 +194,23 @@ mod tests {
             .contains("Unless the user explicitly says otherwise"));
         assert!(prompt.instructions.contains("selected adaptively"));
         assert!(prompt.instructions.contains("selection` summary"));
-        assert!(prompt.instructions.contains("exact value appears in the cited result"));
-        assert!(prompt.instructions.contains("Never borrow a number from an uncited result"));
+        assert!(prompt
+            .instructions
+            .contains("exact value appears in the cited result"));
+        assert!(prompt
+            .instructions
+            .contains("Never borrow a number from an uncited result"));
         assert!(prompt.instructions.contains("Observation"));
         assert!(prompt.instructions.contains("结论 → 主要瓶颈"));
         assert!(prompt.instructions.contains("typed candidate field"));
         assert!(prompt.instructions.contains("hard response budget"));
         assert!(prompt.instructions.contains("1 to 3 findings"));
+        assert!(prompt.instructions.contains("analysis_plan"));
+        assert!(prompt.instructions.contains("evidence_pack"));
+        assert!(prompt.instructions.contains("domain_claims"));
+        assert!(prompt
+            .instructions
+            .contains("orange_weapon_dot_not_implemented"));
+        assert!(prompt.instructions.contains("high-quality output"));
     }
 }

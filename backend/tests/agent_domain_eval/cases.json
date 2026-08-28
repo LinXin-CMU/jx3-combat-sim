@@ -1,0 +1,85 @@
+{
+  "schema_version": "agent-domain-eval-cases/v1",
+  "cases": [
+    {
+      "id": "domain_01_baseline",
+      "question": "分析当前循环输出基线。",
+      "expected_playbook": "current_rotation_baseline",
+      "required_dimensions": ["scope", "scenario", "baseline_metrics", "timeline", "versioned_knowledge"],
+      "expected_tools_any": ["simulate_scenario", "analyze_timeline"],
+      "forbidden_tools": [],
+      "required_terms_any": ["基线", "输出", "伤害"],
+      "forbid_simulation": false
+    },
+    {
+      "id": "domain_02_stall",
+      "question": "为什么这里空转？先定位断档再分析原因。",
+      "expected_playbook": "rotation_stall_diagnosis",
+      "required_dimensions": ["scope", "scenario", "timeline", "versioned_knowledge"],
+      "expected_tools_any": ["analyze_timeline"],
+      "forbidden_tools": [],
+      "required_terms_any": ["空档", "等待", "时间轴"],
+      "forbid_simulation": false
+    },
+    {
+      "id": "domain_03_haste",
+      "question": "水特效一键宏用206还是14156加速？",
+      "expected_playbook": "haste_band_decision",
+      "required_dimensions": ["scope", "scenario", "versioned_knowledge"],
+      "expected_tools_any": ["search_knowledge_base"],
+      "forbidden_tools": ["simulate_scenario", "compare_scenarios", "analyze_timeline"],
+      "required_terms_any": ["206", "14156", "一键宏"],
+      "forbid_simulation": false
+    },
+    {
+      "id": "domain_04_orange_weapon",
+      "question": "橙武天下宏愿为什么少伤害，和业火怎么对轴？",
+      "expected_playbook": "orange_weapon_timing",
+      "required_dimensions": ["scope", "scenario", "versioned_knowledge", "implementation_boundary"],
+      "expected_tools_any": ["search_knowledge_base"],
+      "forbidden_tools": ["simulate_scenario", "compare_scenarios", "analyze_timeline"],
+      "required_terms_any": ["裂伤", "未实现", "不完整"],
+      "forbid_simulation": false
+    },
+    {
+      "id": "domain_05_macro",
+      "question": "帮我分析当前一键宏的判定和手动循环相比牺牲了什么。",
+      "expected_playbook": "macro_and_manual_analysis",
+      "required_dimensions": ["scope", "scenario", "versioned_knowledge", "macro_context"],
+      "expected_tools_any": ["search_knowledge_base"],
+      "forbidden_tools": [],
+      "required_terms_any": ["宏", "手动", "延迟"],
+      "forbid_simulation": false
+    },
+    {
+      "id": "domain_06_encounter",
+      "question": "英雄阆风悬城老四的业火应该怎么交？",
+      "expected_playbook": "encounter_advice",
+      "required_dimensions": ["scope", "versioned_knowledge", "encounter_context"],
+      "expected_tools_any": ["search_knowledge_base"],
+      "forbidden_tools": ["simulate_scenario", "compare_scenarios", "analyze_timeline"],
+      "required_terms_any": ["阶段", "副本", "首领"],
+      "forbid_simulation": false
+    },
+    {
+      "id": "domain_07_wujie",
+      "question": "无界分山劲·悟循环怎么打？",
+      "expected_playbook": "general_grounded_analysis",
+      "required_dimensions": ["scope", "scenario", "versioned_knowledge"],
+      "expected_tools_any": ["search_knowledge_base"],
+      "forbidden_tools": ["simulate_scenario", "compare_scenarios", "analyze_timeline"],
+      "required_terms_any": ["无界", "分山劲·悟", "计算器未实现"],
+      "forbid_simulation": true
+    },
+    {
+      "id": "domain_08_formula",
+      "question": "盾压重置率怎么算，这个公式是官方的吗？",
+      "expected_playbook": "mechanism_explanation",
+      "required_dimensions": ["scope", "versioned_knowledge"],
+      "expected_tools_any": ["search_knowledge_base"],
+      "forbidden_tools": [],
+      "required_terms_any": ["推导", "官方", "样本"],
+      "forbid_simulation": false
+    }
+  ]
+}

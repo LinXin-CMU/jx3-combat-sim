@@ -5,6 +5,7 @@
 //! formulas or expose arbitrary filesystem/process access.
 
 pub mod compare;
+pub mod domain;
 pub mod evidence;
 pub mod hash;
 pub mod http;
@@ -25,6 +26,12 @@ pub mod tools;
 pub use compare::{
     compare_scenarios, CandidatePatchV1, ComparisonCandidate, ComparisonExecution,
     ComparisonMetrics, FieldChange, PatchValueV1, ScenarioComparison, ScenarioPatchV1,
+};
+pub use domain::{
+    build_evidence_pack, derive_domain_claims, domain_index_hash, domain_relations,
+    evidence_pack_model_context, knowledge_prefetch, plan_model_context, select_analysis_plan,
+    AnalysisPlanV1, AnalysisPlaybookV1, AnalysisTaskType, DomainChunkContext, DomainClaimV1,
+    DomainRelationV1, EvidencePackV1, EvidenceSufficiency, KnowledgePrefetchV1,
 };
 pub use evidence::{EvidenceEnvelopeV1, ToolProvenance, EVIDENCE_SCHEMA_V1};
 pub use knowledge::{

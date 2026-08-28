@@ -69,6 +69,14 @@ pub struct AgentSessionEventV1 {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub code: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub stage_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub overview: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub playbook_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<AgentRunResultV1>,
 }
 
@@ -89,6 +97,10 @@ impl AgentSessionEventV1 {
             tool_name: None,
             evidence_ids: Vec::new(),
             code: None,
+            stage_id: None,
+            label: None,
+            overview: None,
+            playbook_id: None,
             result: None,
         }
     }
@@ -123,6 +135,10 @@ impl AgentSessionEventV1 {
         event.tool_name = trace.tool_name.clone();
         event.evidence_ids = trace.evidence_ids.clone();
         event.code = trace.code.clone();
+        event.stage_id = trace.stage_id.clone();
+        event.label = trace.label.clone();
+        event.overview = trace.overview.clone();
+        event.playbook_id = trace.playbook_id.clone();
         event
     }
 

@@ -56,6 +56,8 @@
 
   const traceLabels = {
     planning: '拆解问题',
+    analysis_plan_selected: '选择专业分析路径',
+    evidence_coverage_checked: '检查证据覆盖',
     model_started: '模型处理中',
     model_finished: '模型响应完成',
     tool_started: '调用工具',
@@ -183,6 +185,8 @@
 
   function thinkingText(event) {
     const kind = event?.trace_kind || event?.kind;
+    if (event?.overview && ['planning', 'analysis_plan_selected', 'evidence_coverage_checked',
+      'tool_started', 'model_started'].includes(kind)) return event.overview;
     if (kind === 'planning') return '正在拆解问题并选择验证路径…';
     if (kind === 'model_started' && event?.code === 'report_repair') return '模型正在依据校验反馈修复报告…';
     if (kind === 'model_started' && event?.code === 'final_report') return '模型正在依据已有证据生成结论…';
@@ -403,6 +407,10 @@
   function traceStepMeta(event) {
     const kind = event?.trace_kind || event?.kind;
     const evidenceCount = Array.isArray(event?.evidence_ids) ? event.evidence_ids.length : 0;
+    if (kind === 'analysis_plan_selected') return '任务路由已锁定';
+    if (kind === 'evidence_coverage_checked') {
+      return `证据覆盖 · ${{ sufficient: '充分', partial: '部分', insufficient: '不足' }[event?.code] || '检查完成'}`;
+    }
     if (kind === 'model_started') {
       return {
         tool_selection: '规划下一步',
@@ -434,6 +442,7 @@
   }
 
   function traceStageOverview(event) {
+    if (event?.overview) return event.overview;
     const kind = event?.trace_kind || event?.kind;
     const evidenceCount = Array.isArray(event?.evidence_ids) ? event.evidence_ids.length : 0;
     const toolStarted = {
@@ -511,7 +520,7 @@
         const label = step.querySelector('b');
         const overview = step.querySelector('.agent-trace-overview');
         const meta = step.querySelector('small');
-        if (label) label.textContent = `${event.code ? '工具返回受限' : '取得证据'} · ${toolLabel(event.tool_name)}`;
+        if (label) label.textContent = event.label || `${event.code ? '工具返回受限' : '取得证据'} · ${toolLabel(event.tool_name)}`;
         if (overview) overview.textContent = traceStageOverview(event);
         const nextMeta = traceStepMeta(event);
         if (nextMeta && meta) meta.textContent = nextMeta;
@@ -530,7 +539,7 @@
       const label = step.querySelector('b');
       const overview = step.querySelector('.agent-trace-overview');
       const meta = step.querySelector('small');
-      if (label) label.textContent = traceLabels.model_finished;
+      if (label) label.textContent = event.label || traceLabels.model_finished;
       if (overview) overview.textContent = traceStageOverview(event);
       if (meta) meta.remove();
       trace.openModel = null;
@@ -541,7 +550,7 @@
 
     finishActiveTraceStep(trace);
     const suffix = event.tool_name ? ` · ${toolLabel(event.tool_name)}` : '';
-    const label = kind === 'tool_started' ? `调用工具${suffix}` : `${traceLabels[kind] || kind}${suffix}`;
+    const label = event.label || (kind === 'tool_started' ? `调用工具${suffix}` : `${traceLabels[kind] || kind}${suffix}`);
     const step = createTraceStep('agent-trace-step', label, traceStageOverview(event), traceStepMeta(event), false);
     const terminal = ['completed', 'partially_verified', 'refused', 'cancelled', 'evidence_insufficient',
       'budget_exhausted', 'provider_failed', 'protocol_failed', 'timed_out'].includes(kind);
@@ -897,7 +906,7 @@
         const label = step.querySelector('b');
         const overview = step.querySelector('.sim-ai-progress-overview');
         const meta = step.querySelector('small');
-        if (label) label.textContent = `${event.code ? '工具返回受限' : '取得证据'} · ${toolLabel(event.tool_name)}`;
+        if (label) label.textContent = event.label || `${event.code ? '工具返回受限' : '取得证据'} · ${toolLabel(event.tool_name)}`;
         if (overview) overview.textContent = traceStageOverview(event);
         const nextMeta = traceStepMeta(event);
         if (nextMeta && meta) meta.textContent = nextMeta;
@@ -915,7 +924,7 @@
       const label = step.querySelector('b');
       const overview = step.querySelector('.sim-ai-progress-overview');
       const meta = step.querySelector('small');
-      if (label) label.textContent = traceLabels.model_finished;
+      if (label) label.textContent = event.label || traceLabels.model_finished;
       if (overview) overview.textContent = traceStageOverview(event);
       if (meta) meta.remove();
       trace.openModel = null;
@@ -925,7 +934,7 @@
     }
     finishActiveTraceStep(trace);
     const suffix = event.tool_name ? ` · ${toolLabel(event.tool_name)}` : '';
-    const label = kind === 'tool_started' ? `调用工具${suffix}` : `${traceLabels[kind] || kind}${suffix}`;
+    const label = event.label || (kind === 'tool_started' ? `调用工具${suffix}` : `${traceLabels[kind] || kind}${suffix}`);
     const step = createTraceStep('sim-ai-progress-step', label, traceStageOverview(event), traceStepMeta(event), true);
     const terminal = ['completed', 'partially_verified', 'refused', 'cancelled', 'evidence_insufficient',
       'budget_exhausted', 'provider_failed', 'protocol_failed', 'timed_out'].includes(kind);

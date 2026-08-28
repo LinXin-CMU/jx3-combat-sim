@@ -6,8 +6,12 @@ use std::sync::{
 use std::time::{Duration, Instant};
 use tokio::sync::Notify;
 
+use super::domain::{
+    build_evidence_pack, evidence_pack_model_context, knowledge_prefetch, plan_model_context,
+    select_analysis_plan, trace_annotation, AnalysisPlanV1,
+};
 use super::evidence::validate_trace_id;
-use super::prompt::agent_prompt_v12;
+use super::prompt::agent_prompt_v13;
 use super::provider::{
     FinishReason, LlmProvider, ModelMessage, ModelRequest, ProviderToolCall,
     StructuredOutputDefinition, TokenUsage,
@@ -90,6 +94,14 @@ pub struct AgentTraceEventV1 {
     pub evidence_ids: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stage_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub overview: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub playbook_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -162,13 +174,15 @@ impl AgentCancellation {
 struct TraceCollector {
     events: Vec<AgentTraceEventV1>,
     sink: Option<AgentTraceSink>,
+    plan: AnalysisPlanV1,
 }
 
 impl TraceCollector {
-    fn new(sink: Option<AgentTraceSink>) -> Self {
+    fn new(sink: Option<AgentTraceSink>, plan: AnalysisPlanV1) -> Self {
         Self {
             events: Vec::new(),
             sink,
+            plan,
         }
     }
 
@@ -179,12 +193,18 @@ impl TraceCollector {
         evidence_ids: Vec<String>,
         code: Option<String>,
     ) {
+        let annotation =
+            trace_annotation(&self.plan, kind, tool_name.as_deref(), evidence_ids.len());
         let event = AgentTraceEventV1 {
             sequence: self.events.len() as u32 + 1,
             kind: kind.to_string(),
             tool_name,
             evidence_ids,
             code,
+            stage_id: Some(annotation.stage_id),
+            label: Some(annotation.label),
+            overview: Some(annotation.overview),
+            playbook_id: Some(self.plan.playbook.playbook_id.clone()),
         };
         if let Some(sink) = &self.sink {
             sink(event.clone());
@@ -216,9 +236,10 @@ pub async fn run_agent_observed(
     event_sink: Option<AgentTraceSink>,
 ) -> AgentRunResultV1 {
     let started = Instant::now();
-    let prompt = agent_prompt_v12();
+    let prompt = agent_prompt_v13();
+    let analysis_plan = select_analysis_plan(&input.question, &input.scenario);
     let mut accounting = AgentRunAccountingV1::default();
-    let mut trace = TraceCollector::new(event_sink);
+    let mut trace = TraceCollector::new(event_sink, analysis_plan.clone());
 
     if validate_input(&input, &limits).is_err() {
         return terminal(
@@ -255,11 +276,26 @@ pub async fn run_agent_observed(
         AgentToolRegistry::definitions()
     };
     let knowledge_only_client_scope = requires_knowledge_only_client_scope(&input.question);
-    let tools = definitions
+    let mut tools = definitions
         .into_iter()
         .filter(|tool| tool.name != "get_current_scenario")
         .filter(|tool| !knowledge_only_client_scope || tool.name == "search_knowledge_base")
+        .filter(|tool| {
+            analysis_plan
+                .playbook
+                .preferred_tools
+                .iter()
+                .any(|preferred| preferred == &tool.name)
+        })
         .collect::<Vec<_>>();
+    tools.sort_by_key(|tool| {
+        analysis_plan
+            .playbook
+            .preferred_tools
+            .iter()
+            .position(|preferred| preferred == &tool.name)
+            .unwrap_or(usize::MAX)
+    });
     let mut messages = Vec::new();
     if let Some(context) = &input.session_context {
         messages.push(ModelMessage::User {
@@ -271,11 +307,21 @@ pub async fn run_agent_observed(
     messages.push(ModelMessage::User {
         content: input.question.clone(),
     });
+    messages.push(ModelMessage::User {
+        content: plan_model_context(&analysis_plan),
+    });
     let mut repairs = 0;
     let mut empty_response_retries = 0;
     let mut repair_message = None;
     let mut final_report_only = false;
+    let mut domain_experiment_completed = false;
     trace.push("planning", None, Vec::new(), None);
+    trace.push(
+        "analysis_plan_selected",
+        None,
+        Vec::new(),
+        Some(analysis_plan.playbook.playbook_id.clone()),
+    );
     if knowledge_only_client_scope {
         trace.push(
             "knowledge_only_client_scope",
@@ -348,6 +394,61 @@ pub async fn run_agent_observed(
     messages.push(ModelMessage::ToolResult {
         call_id: PREFETCH_CALL_ID.to_string(),
         output: prefetched.output,
+    });
+
+    const KNOWLEDGE_PREFETCH_CALL_ID: &str = "server-prefetch-knowledge";
+    const KNOWLEDGE_PREFETCH_TOOL: &str = "search_knowledge_base";
+    if runtime.knowledge().is_some() && accounting.tool_calls < limits.max_tool_calls {
+        if let Some(query) = knowledge_prefetch(&analysis_plan, &input.question) {
+            trace.push(
+                "tool_started",
+                Some(KNOWLEDGE_PREFETCH_TOOL.to_string()),
+                Vec::new(),
+                Some("server_domain_prefetch".to_string()),
+            );
+            let arguments = serde_json::to_value(&query).unwrap_or_else(|_| serde_json::json!({}));
+            let prefetched_knowledge =
+                registry.dispatch(&input.run_id, KNOWLEDGE_PREFETCH_TOOL, arguments.clone());
+            accounting.tool_calls += 1;
+            trace.push(
+                "tool_finished",
+                Some(KNOWLEDGE_PREFETCH_TOOL.to_string()),
+                prefetched_knowledge.evidence_ids.clone(),
+                prefetched_knowledge
+                    .output
+                    .pointer("/error/code")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string),
+            );
+            messages.push(ModelMessage::Assistant {
+                content: None,
+                tool_calls: vec![ProviderToolCall {
+                    call_id: KNOWLEDGE_PREFETCH_CALL_ID.to_string(),
+                    name: KNOWLEDGE_PREFETCH_TOOL.to_string(),
+                    arguments,
+                }],
+            });
+            messages.push(ModelMessage::ToolResult {
+                call_id: KNOWLEDGE_PREFETCH_CALL_ID.to_string(),
+                output: prefetched_knowledge.output,
+            });
+        }
+    }
+    let initial_evidence_pack = build_evidence_pack(&analysis_plan, registry.evidence());
+    trace.push(
+        "evidence_coverage_checked",
+        None,
+        initial_evidence_pack.evidence_ids.clone(),
+        Some(
+            initial_evidence_pack
+                .coverage
+                .sufficiency
+                .as_str()
+                .to_string(),
+        ),
+    );
+    messages.push(ModelMessage::User {
+        content: evidence_pack_model_context(&initial_evidence_pack),
     });
 
     loop {
@@ -495,9 +596,11 @@ pub async fn run_agent_observed(
                         );
                         continue;
                     }
-                    if let Some(content) =
-                        evidence_preserving_provider_fallback(registry.evidence())
-                    {
+                    if let Some(content) = evidence_preserving_provider_fallback(
+                        &analysis_plan,
+                        registry.evidence(),
+                        "模型响应为空，未形成完整解释。",
+                    ) {
                         trace.push(
                             "provider_empty_evidence_preserved",
                             None,
@@ -622,6 +725,7 @@ pub async fn run_agent_observed(
                 .tool_calls
                 .iter()
                 .any(|call| is_domain_experiment(&call.name));
+            domain_experiment_completed |= domain_experiment_requested;
             messages.push(ModelMessage::Assistant {
                 content: response.assistant_text,
                 tool_calls: response.tool_calls.clone(),
@@ -717,11 +821,33 @@ pub async fn run_agent_observed(
                     Some("redundant_searches_suppressed".to_string()),
                 );
             }
-            // Knowledge retrieval may precede one deterministic experiment.
-            // Once a domain tool runs, the next turn is report-only so JSON
-            // mode remains compatible with providers that cannot combine tools
-            // and structured output.
-            final_report_only = domain_experiment_requested;
+            let evidence_pack = build_evidence_pack(&analysis_plan, registry.evidence());
+            trace.push(
+                "evidence_coverage_checked",
+                None,
+                evidence_pack.evidence_ids.clone(),
+                Some(evidence_pack.coverage.sufficiency.as_str().to_string()),
+            );
+            messages.push(ModelMessage::User {
+                content: evidence_pack_model_context(&evidence_pack),
+            });
+            // A domain experiment normally closes the tool phase. The only elastic
+            // exception is a still-missing version/implementation dimension that one
+            // bounded knowledge lookup can fill; this prevents a model that chose the
+            // experiment first from publishing a shallow or version-blind diagnosis.
+            let needs_knowledge_followup = runtime.knowledge().is_some()
+                && evidence_pack
+                    .coverage
+                    .missing_dimensions
+                    .iter()
+                    .any(|dimension| {
+                        matches!(
+                            dimension.as_str(),
+                            "versioned_knowledge" | "implementation_boundary"
+                        )
+                    })
+                && registry.used_knowledge_searches() < MAX_KNOWLEDGE_SEARCHES;
+            final_report_only = domain_experiment_completed && !needs_knowledge_followup;
             if registry.used_knowledge_searches() >= MAX_KNOWLEDGE_SEARCHES
                 || knowledge_calls_coalesced > 0
                 || reference_lookup_processed
@@ -807,6 +933,30 @@ pub async fn run_agent_observed(
                     );
                 }
                 Err(_) => {
+                    if let Some(content) = evidence_preserving_provider_fallback(
+                        &analysis_plan,
+                        registry.evidence(),
+                        "模型报告结构连续两次未通过校验，未发布其中的玩法结论。",
+                    ) {
+                        trace.push(
+                            "report_structure_evidence_preserved",
+                            None,
+                            cited_evidence_ids(&content),
+                            Some(error.code.to_string()),
+                        );
+                        return terminal_with_report(
+                            provider,
+                            &input,
+                            &prompt,
+                            AgentRunStatus::PartiallyVerified,
+                            accounting,
+                            content,
+                            Some(fixed_error(error.code, error.message)),
+                            trace,
+                            started,
+                            &registry,
+                        );
+                    }
                     let content = refusal_content(
                         "现有输出无法解析为可校验报告。",
                         "结构损坏的输出不会作为结论展示。",
@@ -1038,7 +1188,9 @@ fn refusal_content(summary: &str, limitation: &str) -> AgentReportContentV1 {
 }
 
 fn evidence_preserving_provider_fallback(
+    plan: &AnalysisPlanV1,
     evidence: &super::report::EvidenceStore,
+    limitation: &str,
 ) -> Option<AgentReportContentV1> {
     let evidence_ids = evidence
         .iter()
@@ -1053,20 +1205,105 @@ fn evidence_preserving_provider_fallback(
     if evidence_ids.is_empty() {
         return None;
     }
-    Some(AgentReportContentV1 {
-        schema_version: AGENT_REPORT_CONTENT_SCHEMA_V1.to_string(),
-        summary: "模型未返回可校验报告；本轮已取得的只读证据仍予保留。".to_string(),
-        findings: vec![AgentFindingV1 {
-            title: "已取得的可验证证据".to_string(),
-            explanation: "这里只保留工具生成的证据与来源，不据此代替模型补写玩法或数值结论。"
-                .to_string(),
+    let mut knowledge_findings = Vec::new();
+    let mut seen_excerpts = Vec::<String>::new();
+    for (evidence_id, envelope) in evidence {
+        if envelope.get("tool_name").and_then(serde_json::Value::as_str)
+            != Some("search_knowledge_base")
+        {
+            continue;
+        }
+        let Some(item) = envelope
+            .pointer("/result/results/0")
+            .and_then(serde_json::Value::as_object)
+        else {
+            continue;
+        };
+        if item
+            .get("fact_eligible")
+            .and_then(serde_json::Value::as_bool)
+            != Some(true)
+        {
+            continue;
+        }
+        let claim = item
+            .get("domain_claims")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|claims| claims.first())
+            .and_then(|claim| claim.get("statement"))
+            .and_then(serde_json::Value::as_str);
+        let snippet = item.get("snippet").and_then(serde_json::Value::as_str);
+        let excerpt = concise_evidence_excerpt(claim.or(snippet).unwrap_or_default(), 220);
+        if excerpt.is_empty() || seen_excerpts.iter().any(|seen| seen == &excerpt) {
+            continue;
+        }
+        seen_excerpts.push(excerpt.clone());
+        let heading = item
+            .get("heading")
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.trim().is_empty());
+        let title = item
+            .get("title")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("知识库证据");
+        knowledge_findings.push(AgentFindingV1 {
+            title: concise_evidence_excerpt(heading.unwrap_or(title), 48),
+            explanation: format!("知识库原文摘录：{excerpt}"),
+            evidence_ids: vec![evidence_id.clone()],
+            metrics: Vec::new(),
+        });
+        if knowledge_findings.len() >= 3 {
+            break;
+        }
+    }
+    let has_readable_knowledge = !knowledge_findings.is_empty();
+    let findings = if has_readable_knowledge {
+        knowledge_findings
+    } else {
+        vec![AgentFindingV1 {
+            title: format!("已保留{}证据", plan.playbook.label),
+            explanation:
+                "下列证据和来源由只读工具生成；本轮不使用结构损坏的模型文本补写玩法或数值结论。"
+                    .to_string(),
             evidence_ids,
             metrics: Vec::new(),
-        }],
+        }]
+    };
+    Some(AgentReportContentV1 {
+        schema_version: AGENT_REPORT_CONTENT_SCHEMA_V1.to_string(),
+        summary: if has_readable_knowledge {
+            format!(
+                "模型解释未通过发布校验；以下直接展示“{}”命中的可溯源知识，不补写未经验证的结论。",
+                plan.playbook.label
+            )
+        } else {
+            format!(
+                "“{}”已取得可验证证据，但模型解释未通过发布校验；证据已保留，可在当前会话继续追问。",
+                plan.playbook.label
+            )
+        },
+        findings,
         recommendations: Vec::new(),
-        limitations: vec!["模型输出为空，需重新发起分析才能获得完整解释。".to_string()],
+        limitations: vec![limitation.to_string()],
         refusal_reason: None,
     })
+}
+
+fn concise_evidence_excerpt(value: &str, max_chars: usize) -> String {
+    let normalized = value
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && *line != "---")
+        .collect::<Vec<_>>()
+        .join(" ")
+        .replace(['#', '`', '*'], "");
+    let mut chars = normalized.chars();
+    let excerpt = chars.by_ref().take(max_chars).collect::<String>();
+    if chars.next().is_some() {
+        format!("{}……", excerpt.trim())
+    } else {
+        excerpt.trim().to_string()
+    }
 }
 
 fn fixed_error(code: impl Into<String>, message: impl Into<String>) -> AgentRunErrorV1 {
@@ -1529,7 +1766,7 @@ mod tests {
         .await;
 
         assert_eq!(result.status, AgentRunStatus::Completed);
-        assert_eq!(result.prompt_version, "agent-system/v12");
+        assert_eq!(result.prompt_version, "agent-system/v13");
         assert_eq!(result.accounting.knowledge_searches, 1);
         assert_eq!(result.accounting.simulations, 0);
         let report = result.report.unwrap();
@@ -1608,7 +1845,7 @@ mod tests {
         .await;
 
         assert_eq!(result.status, AgentRunStatus::Completed);
-        assert_eq!(result.prompt_version, "agent-system/v12");
+        assert_eq!(result.prompt_version, "agent-system/v13");
         assert_eq!(result.accounting.knowledge_searches, 1);
         assert_eq!(result.accounting.simulations, 0);
         let report = result.report.unwrap();
@@ -1814,7 +2051,7 @@ mod tests {
         .await;
         assert_eq!(result.status, AgentRunStatus::Refused);
         let requests = provider.requests();
-        assert_eq!(requests[0].messages.len(), 4);
+        assert_eq!(requests[0].messages.len(), 6);
         assert!(matches!(
             &requests[0].messages[0],
             ModelMessage::User { content }
@@ -1827,13 +2064,25 @@ mod tests {
         ));
         assert!(matches!(
             &requests[0].messages[2],
+            ModelMessage::User { content }
+                if content.contains("<analysis_plan")
+                    && content.contains("general_grounded_analysis")
+        ));
+        assert!(matches!(
+            &requests[0].messages[3],
             ModelMessage::Assistant { tool_calls, .. }
                 if tool_calls.len() == 1 && tool_calls[0].name == "get_current_scenario"
         ));
         assert!(matches!(
-            &requests[0].messages[3],
+            &requests[0].messages[4],
             ModelMessage::ToolResult { call_id, .. }
                 if call_id == "server-prefetch-scenario"
+        ));
+        assert!(matches!(
+            &requests[0].messages[5],
+            ModelMessage::User { content }
+                if content.contains("<evidence_pack")
+                    && content.contains("general_grounded_analysis")
         ));
         assert!(requests[0]
             .tools
@@ -1868,7 +2117,10 @@ mod tests {
         let result = run_agent(
             &provider,
             &runtime,
-            input(&runtime, "run-budget"),
+            AgentRunInput {
+                question: "帮我比较当前一键宏和手动循环".to_string(),
+                ..input(&runtime, "run-budget")
+            },
             limits,
             AgentCancellation::default(),
         )
@@ -1879,7 +2131,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn two_knowledge_searches_force_a_report_instead_of_a_third_tool_call() {
+    async fn domain_prefetch_plus_one_refinement_force_a_report() {
         let (root, knowledge) = knowledge_fixture();
         let runtime = AgentRuntime::fixture().with_knowledge_fixture(knowledge);
         let provider = ScriptedProvider::new(vec![
@@ -1888,16 +2140,6 @@ mod tests {
                 "search_knowledge_base",
                 json!({
                     "query": "不存在的机制甲",
-                    "version_scope": "current_only",
-                    "season": null,
-                    "category": null
-                }),
-            )),
-            Ok(tool_call(
-                "call-knowledge-second",
-                "search_knowledge_base",
-                json!({
-                    "query": "不存在的机制乙",
                     "version_scope": "current_only",
                     "season": null,
                     "category": null
@@ -1928,18 +2170,14 @@ mod tests {
 
         assert_eq!(result.status, AgentRunStatus::Refused);
         assert_eq!(result.accounting.knowledge_searches, 2);
-        assert_eq!(result.accounting.model_turns, 3);
+        assert_eq!(result.accounting.model_turns, 2);
         let requests = provider.requests();
-        assert_eq!(requests.len(), 3);
+        assert_eq!(requests.len(), 2);
         assert!(requests[0]
             .tools
             .iter()
             .any(|tool| tool.name == "search_knowledge_base"));
-        assert!(requests[1]
-            .tools
-            .iter()
-            .any(|tool| tool.name == "search_knowledge_base"));
-        assert!(requests[2].tools.is_empty());
+        assert!(requests[1].tools.is_empty());
 
         let _ = fs::remove_dir_all(root);
     }
@@ -2018,7 +2256,7 @@ mod tests {
                 .iter()
                 .filter(|message| matches!(message, ModelMessage::ToolResult { .. }))
                 .count(),
-            5
+            6
         );
 
         let _ = fs::remove_dir_all(root);
@@ -2247,6 +2485,71 @@ mod tests {
             .trace
             .iter()
             .any(|event| event.kind == "report_repair_requested"));
+    }
+
+    #[tokio::test]
+    async fn repeated_invalid_json_preserves_tool_evidence_instead_of_dead_ending() {
+        let runtime = AgentRuntime::fixture();
+        let provider = ScriptedProvider::new(vec![
+            Ok(tool_call("call-sim", "simulate_scenario", json!({}))),
+            Ok(ModelResponse {
+                assistant_text: Some("not-json".to_string()),
+                tool_calls: Vec::new(),
+                finish_reason: FinishReason::Stop,
+                usage: TokenUsage::default(),
+            }),
+            Ok(ModelResponse {
+                assistant_text: Some("still-not-json".to_string()),
+                tool_calls: Vec::new(),
+                finish_reason: FinishReason::Stop,
+                usage: TokenUsage::default(),
+            }),
+        ]);
+        let result = run_agent(
+            &provider,
+            &runtime,
+            input(&runtime, "run-invalid-json-evidence-fallback"),
+            AgentRunLimits::default(),
+            AgentCancellation::default(),
+        )
+        .await;
+
+        assert_eq!(result.status, AgentRunStatus::PartiallyVerified);
+        let report = result.report.expect("evidence-preserving report");
+        assert!(!report.evidence_ids.is_empty());
+        assert!(report.content.summary.contains("证据已保留"));
+        assert!(result
+            .trace
+            .iter()
+            .any(|event| event.kind == "report_structure_evidence_preserved"));
+    }
+
+    #[test]
+    fn evidence_fallback_surfaces_readable_knowledge_excerpt() {
+        let runtime = AgentRuntime::fixture();
+        let plan = select_analysis_plan("英雄阆风悬城老四的业火怎么交？", &runtime.fixture_scenario());
+        let mut evidence = super::super::report::EvidenceStore::new();
+        evidence.insert(
+            "ev-knowledge".to_string(),
+            json!({
+                "tool_name": "search_knowledge_base",
+                "result": {
+                    "results": [{
+                        "title": "英雄及挑战阆风悬城实战技巧",
+                        "heading": "老四业火轴",
+                        "snippet": "提前倒数10秒开启业火，并在第二次斩刀前完成窗口。",
+                        "fact_eligible": true,
+                        "domain_claims": []
+                    }]
+                }
+            }),
+        );
+
+        let report = evidence_preserving_provider_fallback(&plan, &evidence, "格式错误")
+            .expect("knowledge fallback");
+        assert!(report.summary.contains("直接展示"));
+        assert!(report.findings[0].explanation.contains("提前倒数10秒"));
+        assert_eq!(report.findings[0].evidence_ids, vec!["ev-knowledge"]);
     }
 
     fn knowledge_fixture() -> (PathBuf, super::super::KnowledgeIndex) {

@@ -2,6 +2,8 @@ param(
   [int]$Port = 3021,
   [double]$MaxCostUsd = 0.20,
   [string]$VaultRoot = '',
+  [string]$CasesPath = '',
+  [string[]]$CaseId = @(),
   [switch]$KeepTemp
 )
 
@@ -10,14 +12,17 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $backendRoot = Join-Path $repoRoot 'backend'
 $exe = (Resolve-Path -LiteralPath (Join-Path $backendRoot 'target\release\jx3-combat-sim.exe')).Path
 $config = (Resolve-Path -LiteralPath (Join-Path $repoRoot 'agent.providers.toml')).Path
-$casesPath = Join-Path $backendRoot 'tests\agent_k5b_eval\cases.json'
+if ([string]::IsNullOrWhiteSpace($CasesPath)) {
+  $CasesPath = Join-Path $backendRoot 'tests\agent_k5b_eval\cases.json'
+}
+$casesPath = (Resolve-Path -LiteralPath $CasesPath).Path
 $base = "http://127.0.0.1:$Port"
 $tempBase = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
 $testRoot = [IO.Path]::GetFullPath((Join-Path $tempBase ("jx3-agent-k5b-{0}-{1}" -f $PID, [Guid]::NewGuid().ToString('N'))))
 $server = $null
 
-if ($MaxCostUsd -le 0 -or $MaxCostUsd -gt 0.20) {
-  throw 'MaxCostUsd must be within (0, 0.20].'
+if ($MaxCostUsd -le 0 -or $MaxCostUsd -gt 0.70) {
+  throw 'MaxCostUsd must be within (0, 0.70].'
 }
 if (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue) {
   throw "Port $Port is already in use."
@@ -172,7 +177,62 @@ function Get-LayerScores {
   }
 }
 
+function Get-DomainLayerScores {
+  param([object]$Case, [object]$Result, [string[]]$Tools)
+  $report = $Result.report
+  $sources = if ($null -ne $report) { @($report.sources) } else { @() }
+  $evidence = if ($null -ne $report) { @($report.evidence_ids | Where-Object { $_ }) } else { @() }
+  $text = Get-ReportText $report
+  $playbook = @($Result.trace | Where-Object { $_.playbook_id } | Select-Object -First 1 -ExpandProperty playbook_id)
+  $expectedAny = @($Case.expected_tools_any | Where-Object { $_ })
+  $forbidden = @($Case.forbidden_tools | Where-Object { $_ })
+  $requiredTermsAny = @($Case.required_terms_any | Where-Object { $_ })
+  $requiresKnowledge = @($Case.required_dimensions) -contains 'versioned_knowledge'
+  $routeMatch = $playbook.Count -eq 1 -and $playbook[0] -eq $Case.expected_playbook
+  $expectedToolMatch = $expectedAny.Count -eq 0 -or @($Tools | Where-Object { $_ -in $expectedAny }).Count -gt 0
+  $forbiddenToolMatch = @($Tools | Where-Object { $_ -in $forbidden }).Count -eq 0
+  $termMatch = $requiredTermsAny.Count -eq 0 -or @($requiredTermsAny | Where-Object { $text.Contains([string]$_) }).Count -gt 0
+
+  $planning = 0
+  if ($routeMatch) { $planning += 60 }
+  if ($expectedToolMatch) { $planning += 25 }
+  if ($forbiddenToolMatch) { $planning += 15 }
+
+  $version = $null
+  if ($requiresKnowledge) {
+    $version = 0
+    if ($sources.Count -gt 0) { $version += 40 }
+    if ($sources.Count -gt 0 -and @($sources | Where-Object { $_.season -ne '暗影千机（2026）' }).Count -eq 0) { $version += 30 }
+    if ($sources.Count -gt 0 -and @($sources | Where-Object { $_.version_match -ne 'current_exact' }).Count -eq 0) { $version += 30 }
+  }
+
+  $evidenceScore = 0
+  if ($evidence.Count -gt 0) { $evidenceScore += 35 }
+  if (-not $requiresKnowledge -or $sources.Count -gt 0) { $evidenceScore += 25 }
+  if ($Result.status -in @('completed', 'partially_verified')) { $evidenceScore += 20 }
+  if ($termMatch) { $evidenceScore += 20 }
+
+  [pscustomobject]@{
+    planning = $planning
+    version = $version
+    evidence = $evidenceScore
+    tool_boundary = $forbiddenToolMatch
+    source_count = $sources.Count
+    metric_count = if ($null -ne $report) { @($report.content.findings | ForEach-Object { $_.metrics } | Where-Object { $null -ne $_ }).Count } else { 0 }
+    evidence_count = $evidence.Count
+    playbook = if ($playbook.Count) { $playbook[0] } else { '' }
+    route_match = $routeMatch
+    expected_tool_match = $expectedToolMatch
+    forbidden_tool_match = $forbiddenToolMatch
+    required_term_match = $termMatch
+  }
+}
+
 $fixture = Get-Content -LiteralPath $casesPath -Raw -Encoding UTF8 | ConvertFrom-Json
+if ($CaseId.Count -gt 0) {
+  $fixture.cases = @($fixture.cases | Where-Object { $_.id -in $CaseId })
+  if ($fixture.cases.Count -eq 0) { throw 'No requested case id exists in the fixture.' }
+}
 $shieldStrike = [string][char]0x76FE + [string][char]0x51FB
 $shieldPress = [string][char]0x76FE + [string][char]0x538B
 $simulation = @{
@@ -229,7 +289,8 @@ try {
       $cost = (([double]$accounting.input_tokens * $profile.input_price) + ([double]$accounting.output_tokens * $profile.output_price)) / 1000000
       $knownCost += $cost
       $tools = @($result.trace | Where-Object { $_.kind -eq 'tool_finished' -and $_.tool_name } | Select-Object -ExpandProperty tool_name)
-      $layers = Get-LayerScores $case $result $tools
+      $isDomainCase = $case.PSObject.Properties.Name -contains 'expected_playbook'
+      $layers = if ($isDomainCase) { Get-DomainLayerScores $case $result $tools } else { Get-LayerScores $case $result $tools }
       $expression = Get-ExpressionProxy $result
       $applicableScores = @($layers.planning, $layers.evidence, $expression.score)
       if ($null -ne $layers.version) { $applicableScores += $layers.version }
@@ -238,6 +299,12 @@ try {
         profile = $profile.id
         id = $case.id
         mode = $case.mode
+        expected_playbook = $case.expected_playbook
+        playbook = $layers.playbook
+        route_match = $layers.route_match
+        expected_tool_match = $layers.expected_tool_match
+        forbidden_tool_match = $layers.forbidden_tool_match
+        required_term_match = $layers.required_term_match
         run_id = $created.run_id
         prompt_version = $result.prompt_version
         status = $status.status

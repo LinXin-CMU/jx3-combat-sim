@@ -77,6 +77,14 @@ pub struct AgentRunStreamEventV1 {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub code: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub stage_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub overview: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub playbook_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<AgentRunResultV1>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub persistence_error: bool,
@@ -173,6 +181,10 @@ impl AgentRunRecord {
             tool_name: event.tool_name,
             evidence_ids: event.evidence_ids,
             code: event.code,
+            stage_id: event.stage_id,
+            label: event.label,
+            overview: event.overview,
+            playbook_id: event.playbook_id,
             result: None,
             persistence_error: false,
         });
@@ -187,6 +199,10 @@ impl AgentRunRecord {
             tool_name: None,
             evidence_ids: Vec::new(),
             code: None,
+            stage_id: None,
+            label: None,
+            overview: None,
+            playbook_id: None,
             result: None,
             persistence_error: false,
         });
@@ -211,6 +227,10 @@ impl AgentRunRecord {
                     tool_name: event.tool_name.clone(),
                     evidence_ids: event.evidence_ids.clone(),
                     code: event.code.clone(),
+                    stage_id: event.stage_id.clone(),
+                    label: event.label.clone(),
+                    overview: event.overview.clone(),
+                    playbook_id: event.playbook_id.clone(),
                 },
             ),
         };
@@ -249,6 +269,10 @@ impl AgentRunRecord {
                 .map(|report| report.evidence_ids.clone())
                 .unwrap_or_default(),
             code: result.error.as_ref().map(|error| error.code.clone()),
+            stage_id: None,
+            label: None,
+            overview: None,
+            playbook_id: None,
             result: Some(result),
             persistence_error: false,
         });
