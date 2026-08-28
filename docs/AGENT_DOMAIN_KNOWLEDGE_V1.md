@@ -281,7 +281,7 @@ search_knowledge_base
 ## 12. V1 实现与验证结果
 
 - `DomainClaimV1`、关系边、`AnalysisPlanV1`、`AnalysisPlaybookV1` 与 `EvidencePackV1` 均已落入 Rust 强类型结构；
-- 当前赛季首批 11 条 Claim 绑定原文 URL、文档哈希与分块哈希，并随 corpus identity 一起进入可重建 embedded 缓存；
+- 当前赛季首批 12 条 Claim 绑定原文 URL、文档哈希与分块哈希，并随 corpus identity 一起进入可重建 embedded 缓存；其中 `fs-charge-001` 记录作者于 2026-08-28 修正后的赴敌距离公式；
 - 8 类任务使用不同阶段：基线、空转、加速、橙武、宏、副本、机制和来源查找；未说明客户端时默认旗舰端，明确无界时只开放知识检索；
 - 工具不是按固定次数机械调用：服务端先做领域检索，模型最多补查一个缺失维度；模拟、时间轴和 A/B 只有在任务与场景具备证据前提时才开放；
 - 连续坏 JSON 或空响应不再抹掉已有证据；系统会发布通过校验的部分，或确定性展示可溯源知识摘录；

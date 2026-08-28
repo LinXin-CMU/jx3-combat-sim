@@ -6,7 +6,9 @@ param(
   [ValidateSet('embedded', 'bm25')]
   [string]$KnowledgeRetrieval = 'embedded',
   [string]$EmbeddingEndpoint = 'https://huggingface.co',
-  [string]$ApiKeyEnv = 'JX3_DEEPSEEK_API_KEY'
+  [string]$ApiKeyEnv = 'JX3_DEEPSEEK_API_KEY',
+  [ValidateRange(5, 600)]
+  [int]$StartupTimeoutSec = 240
 )
 
 $ErrorActionPreference = 'Stop'
@@ -79,7 +81,7 @@ try {
 }
 
 $healthy = $false
-for ($attempt = 0; $attempt -lt 150; $attempt++) {
+for ($attempt = 0; $attempt -lt ($StartupTimeoutSec * 10); $attempt++) {
   if ($server.HasExited) {
     throw "Agent backend exited during startup with code $($server.ExitCode)."
   }

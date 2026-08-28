@@ -314,6 +314,16 @@ struct MigrationEntry {
     yuque_uuid: String,
     #[serde(default)]
     mirror_status: String,
+    #[serde(default)]
+    version_policy: KnowledgeVersionPolicy,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum KnowledgeVersionPolicy {
+    #[default]
+    TitleBound,
+    RollingCurrent,
 }
 
 #[derive(Debug, Clone)]
@@ -483,7 +493,8 @@ impl KnowledgeIndex {
             } else {
                 entry.source_updated_at.clone()
             };
-            let version_warning = title_season_warning(&entry.title, &entry.season);
+            let version_warning =
+                title_season_warning(&entry.title, &entry.season, entry.version_policy);
             seasons.insert(entry.season.clone());
             categories.insert(entry.category.clone());
             corpus_hasher.update(entry.output.as_bytes());
@@ -493,6 +504,11 @@ impl KnowledgeIndex {
             corpus_hasher.update(entry.season.as_bytes());
             corpus_hasher.update([0]);
             corpus_hasher.update(entry.category.as_bytes());
+            corpus_hasher.update([0]);
+            corpus_hasher.update(match entry.version_policy {
+                KnowledgeVersionPolicy::TitleBound => b"title_bound".as_slice(),
+                KnowledgeVersionPolicy::RollingCurrent => b"rolling_current".as_slice(),
+            });
             corpus_hasher.update([0]);
 
             for (heading, text) in split_markdown_chunks(&searchable) {
@@ -1567,7 +1583,14 @@ fn has_cross_version_intent(query: &str) -> bool {
     .any(|keyword| query.contains(keyword))
 }
 
-fn title_season_warning(title: &str, season: &str) -> Option<String> {
+fn title_season_warning(
+    title: &str,
+    season: &str,
+    version_policy: KnowledgeVersionPolicy,
+) -> Option<String> {
+    if version_policy == KnowledgeVersionPolicy::RollingCurrent {
+        return None;
+    }
     let title_years = years_in(title);
     let season_years = years_in(season);
     if title_years.is_empty()
@@ -2185,6 +2208,22 @@ mod tests {
     }
 
     #[test]
+    fn rolling_current_policy_allows_an_explicitly_maintained_evergreen_document() {
+        assert!(title_season_warning(
+            "苍云进阶机制（2025）",
+            "暗影千机（2026）",
+            KnowledgeVersionPolicy::TitleBound,
+        )
+        .is_some());
+        assert!(title_season_warning(
+            "苍云进阶机制（2025）",
+            "暗影千机（2026）",
+            KnowledgeVersionPolicy::RollingCurrent,
+        )
+        .is_none());
+    }
+
+    #[test]
     fn current_fact_eligible_results_rank_before_title_year_conflicts() {
         let fixture = Fixture::create();
         let path = fixture.root.join("暗影千机（2026）/通用/旧标题.md");
@@ -2353,6 +2392,7 @@ mod tests {
         );
         assert!(indexed_claim_ids.contains("fs-cw-002"));
         assert!(indexed_claim_ids.contains("fs-cw-002-patch"));
+        assert!(indexed_claim_ids.contains("fs-charge-001"));
         let response = index
             .search_with_audience(
                 &KnowledgeVersionContext::from_game_version(GameVersion::AnYingQianJi),

@@ -393,6 +393,25 @@ const CLAIM_SEEDS: &[ClaimSeed] = &[
         boundary_codes: &["client_frame_timing_not_fully_modeled"],
     },
     ClaimSeed {
+        id: "fs-charge-001",
+        title_contains: "苍云进阶机制",
+        anchors: &["实际不触发突进的距离", "MAX", "突进保护距离"],
+        subject_kind: "movement_mechanic",
+        subject: "实际不触发突进距离",
+        relation: "derived_from",
+        object_kind: "distance_rule",
+        object: "MAX（突进保护距离，4尺）",
+        statement: "实际不触发突进的距离取突进保护距离与4尺中的较大值。",
+        claim_type: DomainClaimType::MeasuredMechanic,
+        authority: DomainAuthority::CurrentMechanismTest,
+        conditions: &["旗舰端", "适用于突进技能"],
+        conflict_status: DomainConflictStatus::Clear,
+        simulator_support: SimulatorSupport::KnowledgeOnly,
+        observable_fields: &[],
+        applicable_tools: &[],
+        boundary_codes: &["target_distance_compensation_not_modeled"],
+    },
+    ClaimSeed {
         id: "fs-latency-001",
         title_contains: "低延迟",
         anchors: &["按键", "网络", "FPS"],
@@ -1556,6 +1575,26 @@ mod tests {
             claims[0].conflict_status,
             DomainConflictStatus::ImplementationMismatch
         );
+    }
+
+    #[test]
+    fn corrected_charge_distance_formula_is_a_clear_source_bound_claim() {
+        let claims = derive_domain_claims(DomainChunkContext {
+            document_id: "advanced",
+            title: "苍云进阶机制（2025）",
+            season: "暗影千机（2026）",
+            heading: "赴敌",
+            text: "实际不触发突进的距离以这两个距离的最大值为准：实际不触发突进的距离 = MAX（突进保护距离，4尺）。",
+            source_url: "https://www.yuque.com/sgyxy/cangyun/advanced",
+            yuque_url: "https://www.yuque.com/sgyxy/cangyun/advanced",
+            source_updated_at: "2026-08-28T06:51:23Z",
+            document_hash: "document",
+            chunk_hash: "chunk",
+        });
+        assert_eq!(claims.len(), 1);
+        assert_eq!(claims[0].claim_id, "fs-charge-001");
+        assert_eq!(claims[0].conflict_status, DomainConflictStatus::Clear);
+        assert_eq!(claims[0].source.chunk_hash, "chunk");
     }
 
     #[test]
