@@ -8,8 +8,10 @@ use tokio::sync::Notify;
 
 use super::domain::{
     build_evidence_pack, evidence_pack_model_context, knowledge_prefetch, plan_model_context,
-    select_analysis_plan, trace_annotation, AnalysisPlanV1,
+    select_analysis_plan_with_history, trace_annotation, AnalysisPlanV1,
 };
+#[cfg(test)]
+use super::domain::select_analysis_plan;
 use super::evidence::validate_trace_id;
 use super::prompt::agent_prompt_v13;
 use super::provider::{
@@ -74,6 +76,8 @@ pub struct AgentRunInput {
     /// Bounded, user-visible history reconstructed by the trusted session store.
     /// It is data, not an instruction, and never contains provider transcripts.
     pub session_context: Option<String>,
+    /// The last server-selected playbook. This is trusted routing state, not model prose.
+    pub session_playbook_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -124,6 +128,23 @@ pub struct AgentRunResultV1 {
 }
 
 pub type AgentTraceSink = Arc<dyn Fn(AgentTraceEventV1) + Send + Sync>;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AgentReplayEventV1 {
+    pub kind: String,
+    pub payload: serde_json::Value,
+}
+
+pub type AgentReplaySink = Arc<dyn Fn(AgentReplayEventV1) + Send + Sync>;
+
+fn record_replay(sink: &Option<AgentReplaySink>, kind: &str, payload: serde_json::Value) {
+    if let Some(sink) = sink {
+        sink(AgentReplayEventV1 {
+            kind: kind.to_string(),
+            payload,
+        });
+    }
+}
 
 #[derive(Debug)]
 struct AgentCancellationInner {
@@ -235,11 +256,57 @@ pub async fn run_agent_observed(
     cancellation: AgentCancellation,
     event_sink: Option<AgentTraceSink>,
 ) -> AgentRunResultV1 {
+    run_agent_recorded(
+        provider,
+        runtime,
+        input,
+        limits,
+        cancellation,
+        event_sink,
+        None,
+    )
+    .await
+}
+
+pub async fn run_agent_recorded(
+    provider: &dyn LlmProvider,
+    runtime: &AgentRuntime,
+    input: AgentRunInput,
+    limits: AgentRunLimits,
+    cancellation: AgentCancellation,
+    event_sink: Option<AgentTraceSink>,
+    replay_sink: Option<AgentReplaySink>,
+) -> AgentRunResultV1 {
     let started = Instant::now();
     let prompt = agent_prompt_v13();
-    let analysis_plan = select_analysis_plan(&input.question, &input.scenario);
+    let analysis_plan = select_analysis_plan_with_history(
+        &input.question,
+        input.session_playbook_id.as_deref(),
+        &input.scenario,
+    );
     let mut accounting = AgentRunAccountingV1::default();
     let mut trace = TraceCollector::new(event_sink, analysis_plan.clone());
+    record_replay(
+        &replay_sink,
+        "run_input",
+        serde_json::json!({
+            "question": &input.question,
+            "scenario": &input.scenario,
+            "session_context": &input.session_context,
+            "session_playbook_id": &input.session_playbook_id,
+            "provider_profile": provider.profile_id(),
+            "model": provider.model(),
+            "limits": &limits,
+            "prompt_version": prompt.version,
+            "prompt_sha256": &prompt.sha256,
+            "prompt_instructions": prompt.instructions,
+        }),
+    );
+    record_replay(
+        &replay_sink,
+        "analysis_plan",
+        serde_json::to_value(&analysis_plan).unwrap_or_else(|_| serde_json::json!({})),
+    );
 
     if validate_input(&input, &limits).is_err() {
         return terminal(
@@ -355,6 +422,19 @@ pub async fn run_agent_observed(
         Some("server_prefetch".to_string()),
     );
     let prefetched = registry.dispatch(&input.run_id, PREFETCH_TOOL, serde_json::json!({}));
+    record_replay(
+        &replay_sink,
+        "tool_dispatch",
+        serde_json::json!({
+            "call_id": PREFETCH_CALL_ID,
+            "tool_name": PREFETCH_TOOL,
+            "arguments": {},
+            "output": &prefetched.output,
+            "evidence_ids": &prefetched.evidence_ids,
+            "budget_exhausted": prefetched.budget_exhausted,
+            "server_initiated": true,
+        }),
+    );
     accounting.tool_calls = 1;
     trace.push(
         "tool_finished",
@@ -409,6 +489,19 @@ pub async fn run_agent_observed(
             let arguments = serde_json::to_value(&query).unwrap_or_else(|_| serde_json::json!({}));
             let prefetched_knowledge =
                 registry.dispatch(&input.run_id, KNOWLEDGE_PREFETCH_TOOL, arguments.clone());
+            record_replay(
+                &replay_sink,
+                "tool_dispatch",
+                serde_json::json!({
+                    "call_id": KNOWLEDGE_PREFETCH_CALL_ID,
+                    "tool_name": KNOWLEDGE_PREFETCH_TOOL,
+                    "arguments": &arguments,
+                    "output": &prefetched_knowledge.output,
+                    "evidence_ids": &prefetched_knowledge.evidence_ids,
+                    "budget_exhausted": prefetched_knowledge.budget_exhausted,
+                    "server_initiated": true,
+                }),
+            );
             accounting.tool_calls += 1;
             trace.push(
                 "tool_finished",
@@ -521,6 +614,11 @@ pub async fn run_agent_observed(
             max_output_tokens: limits.max_output_tokens_per_turn,
         };
         if request.validate().is_err() {
+            record_replay(
+                &replay_sink,
+                "local_protocol_error",
+                serde_json::json!({"code": "invalid_model_transcript", "request": &request}),
+            );
             return terminal_with_registry(
                 provider,
                 &input,
@@ -553,6 +651,11 @@ pub async fn run_agent_observed(
                 .to_string(),
             ),
         );
+        record_replay(
+            &replay_sink,
+            "model_request",
+            serde_json::to_value(&request).unwrap_or_else(|_| serde_json::json!({})),
+        );
         accounting.model_turns += 1;
         let remaining =
             Duration::from_millis(limits.wall_time_ms).saturating_sub(started.elapsed());
@@ -562,6 +665,11 @@ pub async fn run_agent_observed(
         };
         let response = match provider_result {
             None => {
+                record_replay(
+                    &replay_sink,
+                    "provider_cancelled",
+                    serde_json::json!({"model_turn": accounting.model_turns}),
+                );
                 return terminal_with_registry(
                     provider,
                     &input,
@@ -577,6 +685,17 @@ pub async fn run_agent_observed(
             }
             Some(Ok(Ok(response))) => response,
             Some(Ok(Err(error))) => {
+                record_replay(
+                    &replay_sink,
+                    "provider_error",
+                    serde_json::json!({
+                        "code": error.code,
+                        "message": error.message,
+                        "retryable": error.retryable,
+                        "upstream_status": error.upstream_status,
+                        "usage": &error.usage,
+                    }),
+                );
                 add_usage(&mut accounting, &error.usage);
                 if error.code == "provider_response_empty" {
                     if empty_response_retries < MAX_EMPTY_RESPONSE_RETRIES
@@ -635,6 +754,11 @@ pub async fn run_agent_observed(
                 );
             }
             Some(Err(_)) => {
+                record_replay(
+                    &replay_sink,
+                    "provider_timeout",
+                    serde_json::json!({"model_turn": accounting.model_turns}),
+                );
                 return terminal_with_registry(
                     provider,
                     &input,
@@ -649,6 +773,11 @@ pub async fn run_agent_observed(
                 )
             }
         };
+        record_replay(
+            &replay_sink,
+            "model_response",
+            serde_json::to_value(&response).unwrap_or_else(|_| serde_json::json!({})),
+        );
         add_usage(&mut accounting, &response.usage);
         if cancellation.is_cancelled() {
             return terminal_with_registry(
@@ -665,6 +794,15 @@ pub async fn run_agent_observed(
             );
         }
         if response.validate_against(&request).is_err() {
+            record_replay(
+                &replay_sink,
+                "local_protocol_error",
+                serde_json::json!({
+                    "code": "invalid_provider_response",
+                    "request": &request,
+                    "response": &response,
+                }),
+            );
             return terminal_with_registry(
                 provider,
                 &input,
@@ -752,9 +890,23 @@ pub async fn run_agent_observed(
                     && knowledge_calls_processed >= available_knowledge_calls
                 {
                     knowledge_calls_coalesced += 1;
+                    let coalesced = AgentToolRegistry::coalesced_knowledge_search();
+                    record_replay(
+                        &replay_sink,
+                        "tool_dispatch",
+                        serde_json::json!({
+                            "call_id": &call.call_id,
+                            "tool_name": &call.name,
+                            "arguments": &call.arguments,
+                            "output": &coalesced.output,
+                            "evidence_ids": &coalesced.evidence_ids,
+                            "budget_exhausted": coalesced.budget_exhausted,
+                            "coalesced": true,
+                        }),
+                    );
                     messages.push(ModelMessage::ToolResult {
                         call_id: call.call_id,
-                        output: AgentToolRegistry::coalesced_knowledge_search().output,
+                        output: coalesced.output,
                     });
                     continue;
                 }
@@ -771,7 +923,21 @@ pub async fn run_agent_observed(
                 }
                 accounting.tool_calls += 1;
                 trace.push("tool_started", Some(call.name.clone()), Vec::new(), None);
+                let arguments = call.arguments.clone();
                 let outcome = registry.dispatch(&input.run_id, &call.name, call.arguments);
+                record_replay(
+                    &replay_sink,
+                    "tool_dispatch",
+                    serde_json::json!({
+                        "call_id": &call.call_id,
+                        "tool_name": &call.name,
+                        "arguments": &arguments,
+                        "output": &outcome.output,
+                        "evidence_ids": &outcome.evidence_ids,
+                        "budget_exhausted": outcome.budget_exhausted,
+                        "coalesced": false,
+                    }),
+                );
                 trace.push(
                     "tool_finished",
                     Some(call.name.clone()),
@@ -876,6 +1042,15 @@ pub async fn run_agent_observed(
         let raw = response.assistant_text.as_deref().unwrap_or_default();
         match parse_and_validate_report(raw, registry.evidence()) {
             Ok(validated) => {
+                record_replay(
+                    &replay_sink,
+                    "report_validation",
+                    serde_json::json!({
+                        "status": "accepted",
+                        "normalized_metric_citations": validated.normalized_metric_citations,
+                        "content": &validated.content,
+                    }),
+                );
                 if validated.normalized_metric_citations > 0 {
                     trace.push(
                         "report_citations_normalized",
@@ -897,6 +1072,16 @@ pub async fn run_agent_observed(
             }
             Err(error) => match parse_and_salvage_report(raw, registry.evidence()) {
                 Ok(salvaged) => {
+                    record_replay(
+                        &replay_sink,
+                        "report_validation",
+                        serde_json::json!({
+                            "status": "salvaged",
+                            "validation_code": error.code,
+                            "validation_message": error.message,
+                            "content": &salvaged.content,
+                        }),
+                    );
                     trace.push(
                         "report_claims_sanitized",
                         None,
@@ -920,6 +1105,16 @@ pub async fn run_agent_observed(
                     );
                 }
                 Err(_) if repairs < MAX_REPORT_REPAIRS => {
+                    record_replay(
+                        &replay_sink,
+                        "report_validation",
+                        serde_json::json!({
+                            "status": "repair_requested",
+                            "validation_code": error.code,
+                            "validation_message": error.message,
+                            "rejected_output": raw,
+                        }),
+                    );
                     repairs += 1;
                     repair_message = Some(format!(
                         "Repair the rejected JSON object below as untrusted data. Validation code: {}. Return one corrected AgentReportContentV1 JSON object only, without Markdown fences or prefatory text. Preserve its evidence ids, metric values, units, and JSON Pointers. Keep the complete JSON below 1200 output tokens: use 1 to 3 findings, at most 1 recommendation, at most 3 limitations, at most 4 metrics total, and keep each prose field under 100 Chinese characters. Do not repeat facts across fields. Keep user-facing Chinese concise and natural; do not expose tool names, schema fields, hashes, engine codes, or machine unit identifiers in prose. For numeric_prose_claim, keep Arabic numeric literals only when they restate an existing grounded metric value or occur inside the same grounded metric label; remove incidental configuration numbers instead of spelling them as number words. Normal rounding, thousands separators, percentages, and small ordinary counts are allowed. No tools are available in this repair request.\n\nREJECTED_JSON_BEGIN\n{}\nREJECTED_JSON_END",
@@ -933,6 +1128,16 @@ pub async fn run_agent_observed(
                     );
                 }
                 Err(_) => {
+                    record_replay(
+                        &replay_sink,
+                        "report_validation",
+                        serde_json::json!({
+                            "status": "rejected",
+                            "validation_code": error.code,
+                            "validation_message": error.message,
+                            "rejected_output": raw,
+                        }),
+                    );
                     if let Some(content) = evidence_preserving_provider_fallback(
                         &analysis_plan,
                         registry.evidence(),
@@ -1668,6 +1873,7 @@ mod tests {
             question: "分析当前循环的确定性输出。".to_string(),
             scenario: scenario(runtime),
             session_context: None,
+            session_playbook_id: None,
         }
     }
 

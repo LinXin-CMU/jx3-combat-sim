@@ -19,6 +19,7 @@ use std::{
 
 use crate::SharedState;
 
+use super::hash::canonical_sha256;
 use super::orchestrator::{AgentRunResultV1, AgentRunStatus, AgentTraceEventV1};
 
 pub const AGENT_SESSION_META_SCHEMA_V1: &str = "agent-session-meta/v1";
@@ -26,6 +27,7 @@ pub const AGENT_SESSION_EVENT_SCHEMA_V1: &str = "agent-session-event/v1";
 pub const AGENT_SESSION_LIST_SCHEMA_V1: &str = "agent-session-list/v1";
 pub const AGENT_SESSION_DETAIL_SCHEMA_V1: &str = "agent-session-detail/v1";
 pub const AGENT_SESSION_ERROR_SCHEMA_V1: &str = "agent-session-error/v1";
+pub const AGENT_REPLAY_EVENT_SCHEMA_V1: &str = "agent-replay-event/v1";
 const MAX_SESSION_ID_BYTES: usize = 64;
 const MAX_TITLE_CHARS: usize = 80;
 const MAX_SESSIONS_RETURNED: usize = 200;
@@ -201,6 +203,19 @@ pub struct AgentSessionDetailV1 {
 pub struct AgentSessionRunBinding {
     pub session_id: String,
     pub prior_context: Option<String>,
+    pub prior_playbook_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+struct AgentReplayEventV1 {
+    schema_version: String,
+    sequence: u32,
+    timestamp_ms: u64,
+    run_id: String,
+    kind: String,
+    payload_sha256: String,
+    payload: Value,
 }
 
 #[derive(Debug, Serialize)]
@@ -269,7 +284,8 @@ impl AgentSessionStore {
             .write_gate
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let (session_id, parent_run_id, prior_context) = match requested_session_id {
+        let (session_id, parent_run_id, prior_context, prior_playbook_id) =
+            match requested_session_id {
             Some(session_id) => {
                 validate_session_id(session_id)?;
                 let detail = self.load_session_unlocked(session_id)?;
@@ -280,15 +296,21 @@ impl AgentSessionStore {
                     ));
                 }
                 let prior_context = build_prior_context(&detail.events);
+                let prior_playbook_id = detail
+                    .events
+                    .iter()
+                    .rev()
+                    .find_map(|event| event.playbook_id.clone());
                 (
                     session_id.to_string(),
                     detail.summary.last_run_id,
                     prior_context,
+                    prior_playbook_id,
                 )
             }
             None => {
                 let session_id = self.create_session_unlocked(question)?;
-                (session_id, None, None)
+                (session_id, None, None, None)
             }
         };
         self.append_event_unlocked(
@@ -308,7 +330,51 @@ impl AgentSessionStore {
         Ok(AgentSessionRunBinding {
             session_id,
             prior_context,
+            prior_playbook_id,
         })
+    }
+
+    /// Append a server-private replay event. These records are deliberately stored
+    /// outside the public `events` directory and are never returned by session HTTP APIs.
+    /// String values still pass through the credential redactor at the persistence boundary.
+    pub fn append_replay_event(
+        &self,
+        session_id: &str,
+        run_id: &str,
+        kind: &str,
+        mut payload: Value,
+    ) -> Result<(), SessionStoreError> {
+        self.ensure_available()?;
+        validate_session_id(session_id)?;
+        validate_session_id(run_id)?;
+        if !is_valid_identifier(kind) {
+            return Err(error(
+                "agent_replay_event_invalid",
+                "replay event kind is invalid",
+            ));
+        }
+        redact_json_strings(&mut payload);
+        let payload_sha256 = canonical_sha256(&payload).map_err(|_| store_unavailable())?;
+        let _guard = self
+            .write_gate
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let events_dir = self.replay_events_dir_unlocked(session_id, run_id)?;
+        let sequence = next_event_sequence(&events_dir)?;
+        let event = AgentReplayEventV1 {
+            schema_version: AGENT_REPLAY_EVENT_SCHEMA_V1.to_string(),
+            sequence,
+            timestamp_ms: now_ms(),
+            run_id: run_id.to_string(),
+            kind: kind.to_string(),
+            payload_sha256,
+            payload,
+        };
+        write_new_json(
+            &events_dir.join(format!("{sequence:06}.json")),
+            &event,
+            &self.counter,
+        )
     }
 
     pub fn append_event(
@@ -454,6 +520,26 @@ impl AgentSessionStore {
         })?;
         if !metadata.is_dir() || metadata.file_type().is_symlink() {
             return Err(session_not_found());
+        }
+        Ok(path)
+    }
+
+    fn replay_events_dir_unlocked(
+        &self,
+        session_id: &str,
+        run_id: &str,
+    ) -> Result<PathBuf, SessionStoreError> {
+        let mut path = self.session_dir(session_id)?;
+        for component in ["_private", "replay", "v1", run_id, "events"] {
+            path.push(component);
+            match fs::symlink_metadata(&path) {
+                Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
+                Ok(_) => return Err(store_unavailable()),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    fs::create_dir(&path).map_err(|_| store_unavailable())?;
+                }
+                Err(_) => return Err(store_unavailable()),
+            }
         }
         Ok(path)
     }
@@ -1048,6 +1134,11 @@ mod tests {
             )
             .unwrap();
         assert!(first.prior_context.is_none());
+        let mut plan_event = AgentSessionEventV1::empty("run_trace");
+        plan_event.run_id = Some("run-context-one".to_string());
+        plan_event.trace_kind = Some("analysis_plan_selected".to_string());
+        plan_event.playbook_id = Some("current_rotation_baseline".to_string());
+        store.append_event(&first.session_id, plan_event).unwrap();
         store
             .append_event(
                 &first.session_id,
@@ -1070,6 +1161,76 @@ mod tests {
         assert!(context.contains("基线结论可见"));
         assert!(!context.contains("run_trace"));
         assert!(context.len() <= 16 * 1024);
+        assert_eq!(
+            second.prior_playbook_id.as_deref(),
+            Some("current_rotation_baseline")
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn private_replay_is_append_only_redacted_and_absent_from_public_session_api_shape() {
+        let root = temp_root("private-replay");
+        let store = AgentSessionStore::open(root.clone()).unwrap();
+        let session_id = store
+            .create_or_resume_run(
+                None,
+                "run-replay",
+                "分析当前循环",
+                "scenario-replay",
+                "offline",
+                "fixture-v1",
+            )
+            .unwrap()
+            .session_id;
+        store
+            .append_replay_event(
+                &session_id,
+                "run-replay",
+                "model_request",
+                serde_json::json!({
+                    "messages": [{"role": "user", "content": "保留完整请求"}],
+                    "authorization": "api_key=abcdefghijk"
+                }),
+            )
+            .unwrap();
+        store
+            .append_replay_event(
+                &session_id,
+                "run-replay",
+                "tool_dispatch",
+                serde_json::json!({"tool_name": "simulate_scenario", "output": {"dps": 1.0}}),
+            )
+            .unwrap();
+
+        let public = store.load_session(&session_id).unwrap();
+        assert_eq!(public.events.len(), 2);
+        let public_json = serde_json::to_string(&public).unwrap();
+        assert!(!public_json.contains("model_request"));
+        assert!(!public_json.contains("simulate_scenario"));
+
+        let replay_dir = store
+            .root
+            .join(&session_id)
+            .join("_private")
+            .join("replay")
+            .join("v1")
+            .join("run-replay")
+            .join("events");
+        let first = fs::read_to_string(replay_dir.join("000001.json")).unwrap();
+        let second = fs::read_to_string(replay_dir.join("000002.json")).unwrap();
+        let first_event: AgentReplayEventV1 = serde_json::from_str(&first).unwrap();
+        assert_eq!(
+            first_event.payload_sha256,
+            canonical_sha256(&first_event.payload).unwrap()
+        );
+        assert!(first.contains("model_request"));
+        assert!(first.contains("保留完整请求"));
+        assert!(!first.contains("abcdefghijk"));
+        assert!(first.contains("REDACTED"));
+        assert!(second.contains("tool_dispatch"));
+        assert!(second.contains("simulate_scenario"));
+        assert!(!replay_dir.join("000003.json").exists());
         let _ = fs::remove_dir_all(root);
     }
 

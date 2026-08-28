@@ -30,8 +30,9 @@ pub use compare::{
 pub use domain::{
     build_evidence_pack, derive_domain_claims, domain_index_hash, domain_relations,
     evidence_pack_model_context, knowledge_prefetch, plan_model_context, select_analysis_plan,
-    AnalysisPlanV1, AnalysisPlaybookV1, AnalysisTaskType, DomainChunkContext, DomainClaimV1,
-    DomainRelationV1, EvidencePackV1, EvidenceSufficiency, KnowledgePrefetchV1,
+    select_analysis_plan_with_history, AnalysisPlanV1, AnalysisPlaybookV1, AnalysisTaskType,
+    DomainChunkContext, DomainClaimV1, DomainRelationV1, EvidencePackV1, EvidenceSufficiency,
+    KnowledgePrefetchV1,
 };
 pub use evidence::{EvidenceEnvelopeV1, ToolProvenance, EVIDENCE_SCHEMA_V1};
 pub use knowledge::{

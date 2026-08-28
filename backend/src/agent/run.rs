@@ -23,8 +23,8 @@ use crate::{SharedState, SimulateRequest};
 
 use super::{
     orchestrator::{
-        run_agent_observed, AgentCancellation, AgentRunInput, AgentRunLimits, AgentRunResultV1,
-        AgentRunStatus, AgentTraceEventV1, AgentTraceSink,
+        run_agent_recorded, AgentCancellation, AgentReplayEventV1, AgentReplaySink, AgentRunInput,
+        AgentRunLimits, AgentRunResultV1, AgentRunStatus, AgentTraceEventV1, AgentTraceSink,
     },
     provider::LlmProvider,
     session::{contains_likely_secret, AgentSessionEventV1, AgentSessionStore},
@@ -208,6 +208,21 @@ impl AgentRunRecord {
         });
     }
 
+    fn publish_replay(&self, event: AgentReplayEventV1) {
+        if self
+            .sessions
+            .append_replay_event(
+                &self.session_id,
+                &self.run_id,
+                &event.kind,
+                event.payload,
+            )
+            .is_err()
+        {
+            self.persistence_error.store(true, Ordering::SeqCst);
+        }
+    }
+
     fn publish(&self, mut event: AgentRunStreamEventV1) {
         let mut events = self
             .events
@@ -257,6 +272,10 @@ impl AgentRunRecord {
             }
             lifecycle.result = Some(result.clone());
         }
+        self.publish_replay(AgentReplayEventV1 {
+            kind: "run_result".to_string(),
+            payload: serde_json::to_value(&result).unwrap_or_else(|_| serde_json::json!({})),
+        });
         self.publish(AgentRunStreamEventV1 {
             schema_version: AGENT_RUN_STREAM_EVENT_SCHEMA_V1.to_string(),
             run_id: self.run_id.clone(),
@@ -413,6 +432,7 @@ impl AgentRunManager {
                     message: error.message,
                 })?;
             input.session_context = binding.prior_context;
+            input.session_playbook_id = binding.prior_playbook_id;
             let record = AgentRunRecord::new(
                 input.run_id.clone(),
                 binding.session_id,
@@ -429,13 +449,17 @@ impl AgentRunManager {
             tokio::spawn(async move {
                 let sink_record = task_record.clone();
                 let sink: AgentTraceSink = Arc::new(move |event| sink_record.publish_trace(event));
-                let result = run_agent_observed(
+                let replay_record = task_record.clone();
+                let replay_sink: AgentReplaySink =
+                    Arc::new(move |event| replay_record.publish_replay(event));
+                let result = run_agent_recorded(
                     provider.as_ref(),
                     &runtime,
                     input,
                     limits,
                     task_record.cancellation.clone(),
                     Some(sink),
+                    Some(replay_sink),
                 )
                 .await;
                 let run_id = result.run_id.clone();
@@ -535,6 +559,7 @@ pub async fn create_run_handler(
         question: request.question,
         scenario: scenario.clone(),
         session_context: None,
+        session_playbook_id: None,
     };
     match state
         .agent_runs
@@ -743,6 +768,7 @@ mod tests {
             question: "分析当前循环。".to_string(),
             scenario,
             session_context: None,
+            session_playbook_id: None,
         };
         let record = manager
             .start(
@@ -768,6 +794,35 @@ mod tests {
         assert!(!record.status().persistence_error);
         let session = manager.sessions.load_session(&record.session_id).unwrap();
         assert_eq!(session.summary.status, "completed");
+        let public_json = serde_json::to_string(&session).unwrap();
+        assert!(!public_json.contains("model_request"));
+        assert!(!public_json.contains("prompt_instructions"));
+        let replay_dir = root
+            .join("agent_sessions")
+            .join("v1")
+            .join(&record.session_id)
+            .join("_private")
+            .join("replay")
+            .join("v1")
+            .join(&run_id)
+            .join("events");
+        let replay = std::fs::read_dir(replay_dir)
+            .unwrap()
+            .flatten()
+            .map(|entry| std::fs::read_to_string(entry.path()).unwrap())
+            .collect::<Vec<_>>()
+            .join("\n");
+        for kind in [
+            "run_input",
+            "analysis_plan",
+            "tool_dispatch",
+            "model_request",
+            "model_response",
+            "report_validation",
+            "run_result",
+        ] {
+            assert!(replay.contains(kind), "missing replay event: {kind}");
+        }
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -800,6 +855,7 @@ mod tests {
             question: "等待取消。".to_string(),
             scenario: runtime.fixture_scenario(),
             session_context: None,
+            session_playbook_id: None,
         };
         let record = manager
             .start(
@@ -818,6 +874,7 @@ mod tests {
             question: "不应启动。".to_string(),
             scenario: second_runtime.fixture_scenario(),
             session_context: None,
+            session_playbook_id: None,
         };
         let error = match manager
             .start(

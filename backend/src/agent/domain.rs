@@ -633,6 +633,42 @@ pub fn select_analysis_plan(question: &str, scenario: &ScenarioSnapshotV1) -> An
     plan
 }
 
+/// Resolve a short follow-up against the last server-selected playbook without
+/// trusting model prose as routing input. A self-contained current question always wins.
+pub fn select_analysis_plan_with_history(
+    question: &str,
+    prior_playbook_id: Option<&str>,
+    scenario: &ScenarioSnapshotV1,
+) -> AnalysisPlanV1 {
+    let mut plan = select_analysis_plan(question, scenario);
+    if plan.task_type != AnalysisTaskType::GeneralAnalysis {
+        return plan;
+    }
+    let Some(task_type) = prior_playbook_id.and_then(task_type_for_playbook) else {
+        return plan;
+    };
+    plan.task_type = task_type;
+    plan.playbook = playbook(task_type, plan.resolved_scope.client);
+    plan.routing_signals
+        .push("inherited_session_playbook".to_string());
+    plan
+}
+
+fn task_type_for_playbook(playbook_id: &str) -> Option<AnalysisTaskType> {
+    Some(match playbook_id {
+        "current_rotation_baseline" => AnalysisTaskType::BaselineAnalysis,
+        "rotation_stall_diagnosis" => AnalysisTaskType::RotationStallDiagnosis,
+        "haste_band_decision" => AnalysisTaskType::HasteDecision,
+        "orange_weapon_timing" => AnalysisTaskType::OrangeWeaponTiming,
+        "macro_and_manual_analysis" => AnalysisTaskType::MacroAnalysis,
+        "encounter_advice" => AnalysisTaskType::EncounterAdvice,
+        "mechanism_explanation" => AnalysisTaskType::MechanismExplanation,
+        "reference_lookup" => AnalysisTaskType::ReferenceLookup,
+        "general_grounded_analysis" => AnalysisTaskType::GeneralAnalysis,
+        _ => return None,
+    })
+}
+
 fn demote_required_dimension(playbook: &mut AnalysisPlaybookV1, dimension: &str) {
     playbook
         .required_dimensions
@@ -768,7 +804,15 @@ fn classify_task(question: &str) -> (AnalysisTaskType, Vec<String>) {
         ),
         (
             AnalysisTaskType::BaselineAnalysis,
-            &["输出基线", "当前循环", "基线", "伤害构成", "输出分析"],
+            &[
+                "输出基线",
+                "当前循环",
+                "基线",
+                "伤害构成",
+                "输出分析",
+                "调优",
+                "优化",
+            ],
         ),
         (
             AnalysisTaskType::MechanismExplanation,
@@ -1473,6 +1517,7 @@ mod tests {
         let cases = [
             ("分析当前循环输出基线", "current_rotation_baseline"),
             ("为什么这里空转？", "rotation_stall_diagnosis"),
+            ("这个循环应该如何调优？", "current_rotation_baseline"),
             ("206 和 14156 怎么选？", "haste_band_decision"),
             ("橙武为什么少伤害？", "orange_weapon_timing"),
             ("帮我优化一键宏", "macro_and_manual_analysis"),
@@ -1487,6 +1532,31 @@ mod tests {
                 expected
             );
         }
+    }
+
+    #[test]
+    fn short_follow_up_inherits_the_last_server_selected_playbook() {
+        let runtime = AgentRuntime::fixture();
+        let scenario = runtime.fixture_scenario();
+        let inherited = select_analysis_plan_with_history(
+            "继续",
+            Some("current_rotation_baseline"),
+            &scenario,
+        );
+        assert_eq!(
+            inherited.playbook.playbook_id,
+            "current_rotation_baseline"
+        );
+        assert!(inherited
+            .routing_signals
+            .contains(&"inherited_session_playbook".to_string()));
+
+        let explicit = select_analysis_plan_with_history(
+            "绝刀公式怎么算？",
+            Some("current_rotation_baseline"),
+            &scenario,
+        );
+        assert_eq!(explicit.playbook.playbook_id, "mechanism_explanation");
     }
 
     #[test]
