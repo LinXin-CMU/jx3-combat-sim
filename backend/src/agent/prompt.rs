@@ -40,6 +40,14 @@ const AGENT_SYSTEM_PROMPT_V14: &str = concat!(
     include_str!("../../prompts/agent_system_v13_addendum.md"),
     include_str!("../../prompts/agent_system_v14_addendum.md")
 );
+pub const AGENT_PROMPT_VERSION_V15: &str = "agent-system/v15";
+const AGENT_SYSTEM_PROMPT_V15: &str = concat!(
+    include_str!("../../prompts/agent_system_v11.md"),
+    include_str!("../../prompts/agent_system_v12_addendum.md"),
+    include_str!("../../prompts/agent_system_v13_addendum.md"),
+    include_str!("../../prompts/agent_system_v14_addendum.md"),
+    include_str!("../../prompts/agent_system_v15_addendum.md")
+);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PromptSpec {
@@ -174,14 +182,23 @@ pub fn agent_prompt_v14() -> PromptSpec {
     }
 }
 
+pub fn agent_prompt_v15() -> PromptSpec {
+    let sha256 = format!("{:x}", Sha256::digest(AGENT_SYSTEM_PROMPT_V15.as_bytes()));
+    PromptSpec {
+        version: AGENT_PROMPT_VERSION_V15,
+        sha256,
+        instructions: AGENT_SYSTEM_PROMPT_V15,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn prompt_is_versioned_and_content_addressed() {
-        let prompt = agent_prompt_v14();
-        assert_eq!(prompt.version, "agent-system/v14");
+        let prompt = agent_prompt_v15();
+        assert_eq!(prompt.version, "agent-system/v15");
         assert_eq!(prompt.sha256.len(), 64);
         assert!(prompt.instructions.contains("get_current_scenario"));
         assert!(prompt.instructions.contains("already called"));
@@ -230,5 +247,8 @@ mod tests {
             .instructions
             .contains("orange_weapon_dot_not_implemented"));
         assert!(prompt.instructions.contains("high-quality output"));
+        assert!(prompt.instructions.contains("overrides every earlier instruction"));
+        assert!(prompt.instructions.contains("same_fingerprint=true"));
+        assert!(prompt.instructions.contains("public decision summary"));
     }
 }

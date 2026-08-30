@@ -13,7 +13,7 @@ use super::domain::{
 #[cfg(test)]
 use super::domain::select_analysis_plan;
 use super::evidence::validate_trace_id;
-use super::prompt::agent_prompt_v14;
+use super::prompt::agent_prompt_v15;
 use super::provider::{
     FinishReason, LlmProvider, ModelMessage, ModelRequest, ProviderToolCall,
     StructuredOutputDefinition, TokenUsage,
@@ -63,7 +63,7 @@ impl Default for AgentRunLimits {
             max_tool_calls: 8,
             max_simulations: 8,
             max_output_tokens_per_turn: 2048,
-            wall_time_ms: 60_000,
+            wall_time_ms: 120_000,
         }
     }
 }
@@ -233,6 +233,25 @@ impl TraceCollector {
         self.events.push(event);
     }
 
+    fn push_decision_summary(&mut self, summary: String) {
+        let annotation = trace_annotation(&self.plan, "decision_checkpoint", None, 0);
+        let event = AgentTraceEventV1 {
+            sequence: self.events.len() as u32 + 1,
+            kind: "decision_checkpoint".to_string(),
+            tool_name: None,
+            evidence_ids: Vec::new(),
+            code: Some("public_decision_summary".to_string()),
+            stage_id: Some(annotation.stage_id),
+            label: Some("记录决策依据".to_string()),
+            overview: Some(summary),
+            playbook_id: Some(self.plan.playbook.playbook_id.clone()),
+        };
+        if let Some(sink) = &self.sink {
+            sink(event.clone());
+        }
+        self.events.push(event);
+    }
+
     fn into_events(self) -> Vec<AgentTraceEventV1> {
         self.events
     }
@@ -278,7 +297,7 @@ pub async fn run_agent_recorded(
     replay_sink: Option<AgentReplaySink>,
 ) -> AgentRunResultV1 {
     let started = Instant::now();
-    let prompt = agent_prompt_v14();
+    let prompt = agent_prompt_v15();
     let analysis_plan = select_analysis_plan_with_history(
         &input.question,
         input.session_playbook_id.as_deref(),
@@ -379,8 +398,19 @@ pub async fn run_agent_recorded(
     });
     let mut repairs = 0;
     let mut empty_response_retries = 0;
+    let mut evidence_gap_reminders = 0_u8;
     let mut repair_message = None;
     let mut final_report_only = false;
+    let adaptive_experiments = analysis_plan
+        .playbook
+        .preferred_tools
+        .iter()
+        .any(|tool| tool == "analyze_timeline")
+        && analysis_plan
+            .playbook
+            .preferred_tools
+            .iter()
+            .any(|tool| tool == "compare_scenarios");
     let mut domain_experiment_completed = false;
     trace.push("planning", None, Vec::new(), None);
     trace.push(
@@ -603,7 +633,14 @@ pub async fn run_agent_recorded(
                 .map(|content| vec![ModelMessage::User { content }])
                 .unwrap_or_else(|| messages.clone()),
             tools: if tools_available {
-                tools.clone()
+                tools
+                    .iter()
+                    .filter(|tool| {
+                        tool.name != "search_knowledge_base"
+                            || registry.used_knowledge_searches() < MAX_KNOWLEDGE_SEARCHES
+                    })
+                    .cloned()
+                    .collect()
             } else {
                 Vec::new()
             },
@@ -823,6 +860,10 @@ pub async fn run_agent_recorded(
         trace.push("model_finished", None, Vec::new(), None);
 
         if !response.tool_calls.is_empty() {
+            trace.push_decision_summary(public_decision_summary(
+                response.assistant_text.as_deref(),
+                &response.tool_calls,
+            ));
             let requested_knowledge_calls = response
                 .tool_calls
                 .iter()
@@ -870,7 +911,6 @@ pub async fn run_agent_recorded(
             });
             let mut knowledge_calls_processed = 0_u32;
             let mut knowledge_calls_coalesced = 0_u32;
-            let mut reference_lookup_processed = false;
             for mut call in response.tool_calls {
                 if cancellation.is_cancelled() {
                     return terminal_with_registry(
@@ -913,7 +953,6 @@ pub async fn run_agent_recorded(
                 let reference_lookup_call = is_reference_lookup_call(&call);
                 if call.name == "search_knowledge_base" {
                     knowledge_calls_processed += 1;
-                    reference_lookup_processed |= reference_lookup_call;
                 }
                 if reference_lookup_call {
                     let planned_query = normalize_reference_query(&input.question);
@@ -954,29 +993,24 @@ pub async fn run_agent_recorded(
                 });
                 if outcome.budget_exhausted {
                     let knowledge_budget = call.name == "search_knowledge_base";
-                    return terminal_with_registry(
-                        provider,
-                        &input,
-                        &prompt,
-                        AgentRunStatus::BudgetExhausted,
-                        accounting,
-                        None,
-                        Some(fixed_error(
+                    final_report_only = true;
+                    trace.push(
+                        "budget_limit_reached",
+                        Some(call.name.clone()),
+                        Vec::new(),
+                        Some(
                             if knowledge_budget {
                                 "knowledge_search_budget"
                             } else {
                                 "simulation_budget"
-                            },
-                            if knowledge_budget {
-                                "Knowledge search budget is exhausted"
-                            } else {
-                                "Simulation budget is exhausted"
-                            },
-                        )),
-                        trace,
-                        started,
-                        &registry,
+                            }
+                            .to_string(),
+                        ),
                     );
+                    messages.push(ModelMessage::User {
+                        content: "The requested tool exceeded its bounded budget. Do not call more tools. Return a report using the evidence already registered, clearly marking the unrun experiment as a limitation instead of treating the whole conversation as failed.".to_string(),
+                    });
+                    break;
                 }
             }
             if knowledge_calls_coalesced > 0 {
@@ -997,10 +1031,6 @@ pub async fn run_agent_recorded(
             messages.push(ModelMessage::User {
                 content: evidence_pack_model_context(&evidence_pack),
             });
-            // A domain experiment normally closes the tool phase. The only elastic
-            // exception is a still-missing version/implementation dimension that one
-            // bounded knowledge lookup can fill; this prevents a model that chose the
-            // experiment first from publishing a shallow or version-blind diagnosis.
             let needs_knowledge_followup = runtime.knowledge().is_some()
                 && evidence_pack
                     .coverage
@@ -1013,12 +1043,17 @@ pub async fn run_agent_recorded(
                         )
                     })
                 && registry.used_knowledge_searches() < MAX_KNOWLEDGE_SEARCHES;
-            final_report_only = domain_experiment_completed && !needs_knowledge_followup;
-            if registry.used_knowledge_searches() >= MAX_KNOWLEDGE_SEARCHES
-                || knowledge_calls_coalesced > 0
-                || reference_lookup_processed
-            {
-                final_report_only = true;
+            // Rotation playbooks with both diagnosis and comparison tools remain open
+            // for a bounded diagnose -> candidate -> A/B loop. Other playbooks preserve
+            // their cheap one-experiment or one-point-lookup termination behavior.
+            if !adaptive_experiments {
+                final_report_only = domain_experiment_completed && !needs_knowledge_followup;
+                if registry.used_knowledge_searches() >= MAX_KNOWLEDGE_SEARCHES
+                    || knowledge_calls_coalesced > 0
+                    || reference_lookup_requested
+                {
+                    final_report_only = true;
+                }
             }
             continue;
         }
@@ -1036,6 +1071,47 @@ pub async fn run_agent_recorded(
                 started,
                 &registry,
             );
+        }
+
+        let evidence_pack = build_evidence_pack(&analysis_plan, registry.evidence());
+        let candidate_comparison_missing = evidence_pack
+            .coverage
+            .missing_dimensions
+            .iter()
+            .any(|dimension| dimension == "candidate_comparison");
+        let comparison_available = tools
+            .iter()
+            .any(|tool| tool.name == "compare_scenarios")
+            && limits
+                .max_simulations
+                .saturating_sub(registry.used_simulations())
+                >= 2;
+        // A final report is premature when the server-selected task contract says
+        // the user explicitly asked for a tested candidate. Give the planner one
+        // bounded chance to fill that semantic gap; if it still declines, validate
+        // and publish only what the evidence supports instead of dead-ending.
+        if !is_repair
+            && !final_report_only
+            && candidate_comparison_missing
+            && comparison_available
+            && evidence_gap_reminders == 0
+            && accounting.model_turns < limits.max_model_turns
+        {
+            evidence_gap_reminders += 1;
+            messages.push(ModelMessage::Assistant {
+                content: response.assistant_text,
+                tool_calls: Vec::new(),
+            });
+            messages.push(ModelMessage::User {
+                content: "The server evidence contract still lacks the explicitly requested same-scenario candidate comparison. Do not publish a verified modification yet. Use the current scenario, guide, and timeline evidence to formulate one conservative single-variable candidate and call compare_scenarios. If no grounded candidate exists, preserve that as a limitation on the following turn rather than inventing one.".to_string(),
+            });
+            trace.push(
+                "evidence_gap_requires_tool",
+                Some("compare_scenarios".to_string()),
+                evidence_pack.evidence_ids,
+                Some("candidate_comparison_missing".to_string()),
+            );
+            continue;
         }
 
         trace.push("validating", None, Vec::new(), None);
@@ -1185,6 +1261,32 @@ pub async fn run_agent_recorded(
     }
 }
 
+fn public_decision_summary(
+    assistant_text: Option<&str>,
+    tool_calls: &[ProviderToolCall],
+) -> String {
+    let compact = assistant_text
+        .unwrap_or_default()
+        .replace("<decision_summary>", "")
+        .replace("</decision_summary>", "")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if !compact.is_empty() && !compact.starts_with('{') {
+        let mut summary = compact.chars().take(400).collect::<String>();
+        if compact.chars().count() > 400 {
+            summary.push('…');
+        }
+        return summary;
+    }
+    let tools = tool_calls
+        .iter()
+        .map(|call| call.name.as_str())
+        .collect::<Vec<_>>()
+        .join("、");
+    format!("模型未提供公开决策摘要；本轮请求调用：{tools}。可在私有复现记录中检查供应商原始响应。")
+}
+
 fn is_domain_experiment(tool_name: &str) -> bool {
     matches!(
         tool_name,
@@ -1230,7 +1332,7 @@ fn validate_input(input: &AgentRunInput, limits: &AgentRunLimits) -> Result<(), 
         || limits.max_output_tokens_per_turn == 0
         || limits.max_output_tokens_per_turn > 8192
         || limits.wall_time_ms == 0
-        || limits.wall_time_ms > 60_000
+        || limits.wall_time_ms > 180_000
     {
         return Err(());
     }
@@ -1983,7 +2085,7 @@ mod tests {
         assert_eq!(limits.max_model_turns, 6);
         assert_eq!(limits.max_tool_calls, 8);
         assert_eq!(limits.max_simulations, 8);
-        assert_eq!(limits.wall_time_ms, 60_000);
+        assert_eq!(limits.wall_time_ms, 120_000);
     }
 
     #[test]
@@ -2021,6 +2123,11 @@ mod tests {
         assert_eq!(result.accounting.model_turns, 2);
         assert_eq!(result.accounting.tool_calls, 2);
         assert_eq!(result.accounting.simulations, 1);
+        assert!(result.trace.iter().any(|event| {
+            event.kind == "decision_checkpoint"
+                && event.code.as_deref() == Some("public_decision_summary")
+                && event.overview.as_deref().is_some_and(|text| !text.is_empty())
+        }));
         assert_eq!(
             result
                 .trace
@@ -2059,7 +2166,7 @@ mod tests {
         .await;
 
         assert_eq!(result.status, AgentRunStatus::Completed);
-        assert_eq!(result.prompt_version, "agent-system/v14");
+        assert_eq!(result.prompt_version, "agent-system/v15");
         assert_eq!(result.accounting.knowledge_searches, 1);
         assert_eq!(result.accounting.simulations, 0);
         let report = result.report.unwrap();
@@ -2138,7 +2245,7 @@ mod tests {
         .await;
 
         assert_eq!(result.status, AgentRunStatus::Completed);
-        assert_eq!(result.prompt_version, "agent-system/v14");
+        assert_eq!(result.prompt_version, "agent-system/v15");
         assert_eq!(result.accounting.knowledge_searches, 1);
         assert_eq!(result.accounting.simulations, 0);
         let report = result.report.unwrap();
@@ -2384,25 +2491,39 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn simulation_budget_stops_comparison_before_execution() {
+    async fn simulation_budget_preserves_evidence_and_finishes_a_limited_report() {
         let runtime = AgentRuntime::fixture();
-        let provider = ScriptedProvider::new(vec![Ok(tool_call(
-            "call-compare",
-            "compare_scenarios",
-            json!({
-                "candidates": [{
-                    "label": "增加延迟",
-                    "patch": {
-                        "haste_level": null,
-                        "sequence": null,
-                        "network_delay": 100,
-                        "initial_rage": null,
-                        "base_attack": null,
-                        "target_defense_bonus": null
-                    }
-                }]
+        let provider = ScriptedProvider::new(vec![
+            Ok(tool_call(
+                "call-compare",
+                "compare_scenarios",
+                json!({
+                    "candidates": [{
+                        "label": "增加延迟",
+                        "patch": {
+                            "haste_level": null,
+                            "sequence": null,
+                            "network_delay": 100,
+                            "initial_rage": null,
+                            "base_attack": null,
+                            "target_defense_bonus": null
+                        }
+                    }]
+                }),
+            )),
+            Ok(ModelResponse {
+                assistant_text: Some(
+                    serde_json::to_string(&refusal_content(
+                        "候选对照未运行，保留当前场景证据。",
+                        "模拟预算不足，不能发布候选收益。",
+                    ))
+                    .unwrap(),
+                ),
+                tool_calls: Vec::new(),
+                finish_reason: FinishReason::Stop,
+                usage: TokenUsage::default(),
             }),
-        ))]);
+        ]);
         let limits = AgentRunLimits {
             max_simulations: 1,
             ..AgentRunLimits::default()
@@ -2418,9 +2539,12 @@ mod tests {
             AgentCancellation::default(),
         )
         .await;
-        assert_eq!(result.status, AgentRunStatus::BudgetExhausted);
+        assert_eq!(result.status, AgentRunStatus::Refused);
         assert_eq!(result.accounting.simulations, 0);
-        assert_eq!(result.error.unwrap().code, "simulation_budget");
+        assert!(result
+            .trace
+            .iter()
+            .any(|event| event.kind == "budget_limit_reached"));
     }
 
     #[tokio::test]

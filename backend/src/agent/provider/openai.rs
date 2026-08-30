@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 use std::time::Duration;
 
 const MAX_PROVIDER_RESPONSE_BYTES: usize = 1024 * 1024;
-const PROVIDER_TIMEOUT_SECS: u64 = 30;
+const PROVIDER_TIMEOUT_SECS: u64 = 60;
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -684,12 +684,7 @@ fn parse_tool_call(
             "provider returned an invalid tool call id or name",
         ));
     }
-    let arguments: Value = serde_json::from_str(arguments).map_err(|_| {
-        ProviderError::invalid_response_protocol(
-            "provider_tool_arguments_invalid",
-            "provider returned invalid JSON tool arguments",
-        )
-    })?;
+    let arguments: Value = parse_tool_arguments(arguments)?;
     if !arguments.is_object() {
         return Err(ProviderError::invalid_response_protocol(
             "provider_tool_arguments_invalid",
@@ -701,6 +696,97 @@ fn parse_tool_call(
         name,
         arguments,
     })
+}
+
+/// Some OpenAI-compatible providers occasionally put literal newlines inside a
+/// JSON string or leave a trailing comma in function arguments. Repair only
+/// those two transport-level defects; the closed tool schema and local typed
+/// validation still reject invented fields or invalid simulator inputs.
+fn parse_tool_arguments(arguments: &str) -> Result<Value, ProviderError> {
+    if let Ok(value) = serde_json::from_str(arguments) {
+        return Ok(value);
+    }
+    if arguments.len() > 64 * 1024 {
+        return Err(ProviderError::invalid_response_protocol(
+            "provider_tool_arguments_invalid",
+            "provider returned invalid JSON tool arguments",
+        ));
+    }
+    let repaired = repair_common_json_transport_defects(arguments);
+    serde_json::from_str(&repaired).map_err(|_| {
+        ProviderError::invalid_response_protocol(
+            "provider_tool_arguments_invalid",
+            "provider returned invalid JSON tool arguments",
+        )
+    })
+}
+
+fn repair_common_json_transport_defects(arguments: &str) -> String {
+    let mut escaped_controls = String::with_capacity(arguments.len() + 16);
+    let mut in_string = false;
+    let mut escaped = false;
+    for character in arguments.chars() {
+        if in_string {
+            if escaped {
+                escaped_controls.push(character);
+                escaped = false;
+                continue;
+            }
+            match character {
+                '\\' => {
+                    escaped_controls.push(character);
+                    escaped = true;
+                }
+                '"' => {
+                    escaped_controls.push(character);
+                    in_string = false;
+                }
+                '\n' => escaped_controls.push_str("\\n"),
+                '\r' => escaped_controls.push_str("\\r"),
+                '\t' => escaped_controls.push_str("\\t"),
+                _ => escaped_controls.push(character),
+            }
+        } else {
+            if character == '"' {
+                in_string = true;
+            }
+            escaped_controls.push(character);
+        }
+    }
+
+    let characters = escaped_controls.chars().collect::<Vec<_>>();
+    let mut without_trailing_commas = String::with_capacity(escaped_controls.len());
+    let mut in_string = false;
+    let mut escaped = false;
+    for (index, character) in characters.iter().copied().enumerate() {
+        if in_string {
+            without_trailing_commas.push(character);
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        if character == '"' {
+            in_string = true;
+            without_trailing_commas.push(character);
+            continue;
+        }
+        if character == ',' {
+            let next = characters[index + 1..]
+                .iter()
+                .copied()
+                .find(|next| !next.is_whitespace());
+            if matches!(next, Some('}') | Some(']')) {
+                continue;
+            }
+        }
+        without_trailing_commas.push(character);
+    }
+    without_trailing_commas
 }
 
 #[cfg(test)]
@@ -1066,6 +1152,19 @@ mod tests {
         assert_eq!(
             parse_responses_response(body).unwrap_err().code,
             "provider_tool_arguments_invalid"
+        );
+    }
+
+    #[test]
+    fn literal_newlines_and_trailing_commas_in_tool_arguments_are_repaired() {
+        let parsed = parse_tool_arguments(
+            "{\"candidates\":[{\"patch\":{\"macro_text\":\"/cast 血怒\n/cast 绝刀\",},}],}",
+        )
+        .unwrap();
+
+        assert_eq!(
+            parsed.pointer("/candidates/0/patch/macro_text"),
+            Some(&Value::String("/cast 血怒\n/cast 绝刀".to_string()))
         );
     }
 }

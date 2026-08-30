@@ -668,6 +668,17 @@ pub fn select_analysis_plan(question: &str, scenario: &ScenarioSnapshotV1) -> An
                 .preferred_tools
                 .push("analyze_timeline".to_string());
         }
+        if has_rotation_input
+            && !plan
+            .playbook
+            .preferred_tools
+            .iter()
+            .any(|tool| tool == "compare_scenarios")
+        {
+            plan.playbook
+                .preferred_tools
+                .push("compare_scenarios".to_string());
+        }
         if is_macro {
             plan.routing_signals.push("rotation_input_macro".to_string());
             plan.playbook.knowledge_search_hints.push(
@@ -686,6 +697,31 @@ pub fn select_analysis_plan(question: &str, scenario: &ScenarioSnapshotV1) -> An
                 "手动改法必须指出序列技能或时间轴操作点并同时引用当前攻略与本轮执行证据"
                     .to_string(),
             );
+        }
+        let asks_for_candidate = contains_any(
+            &normalized,
+            &[
+                "修改",
+                "改进",
+                "优化",
+                "漏洞",
+                "具体宏语句",
+                "对照",
+                "对比候选",
+            ],
+        );
+        if asks_for_candidate
+            && !plan
+                .playbook
+                .required_dimensions
+                .iter()
+                .any(|dimension| dimension == "candidate_comparison")
+        {
+            plan.playbook
+                .required_dimensions
+                .push("candidate_comparison".to_string());
+            plan.routing_signals
+                .push("candidate_comparison_explicitly_requested".to_string());
         }
     }
     plan
@@ -1488,6 +1524,7 @@ pub fn trace_annotation(
         ("tool_started" | "tool_finished", Some("simulate_scenario")) => "baseline",
         ("tool_started" | "tool_finished", Some("analyze_timeline")) => "locate",
         ("tool_started" | "tool_finished", Some("compare_scenarios")) => "compare",
+        ("evidence_gap_requires_tool", Some("compare_scenarios")) => "compare",
         ("evidence_coverage_checked", _) => "coverage",
         ("validating", _) => "validation",
         ("model_started" | "model_finished", _) => "synthesis",
@@ -1642,6 +1679,15 @@ mod tests {
         assert!(!macro_plan
             .routing_signals
             .contains(&"rotation_input_manual_sequence".to_string()));
+
+        let edit_plan = select_analysis_plan("找出宏循环漏洞并给出修改对照", &macro_scenario);
+        assert!(edit_plan
+            .playbook
+            .required_dimensions
+            .contains(&"candidate_comparison".to_string()));
+        assert!(edit_plan
+            .routing_signals
+            .contains(&"candidate_comparison_explicitly_requested".to_string()));
     }
 
     #[test]

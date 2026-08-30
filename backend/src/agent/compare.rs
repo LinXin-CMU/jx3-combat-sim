@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::Instant;
 
 use crate::{
@@ -11,8 +11,8 @@ use crate::{
 use super::evidence::{validate_trace_id, EvidenceEnvelopeV1, EvidenceError, ToolProvenance};
 use super::schema::ScenarioSnapshotV1;
 use super::tools::{
-    elapsed_ms, run_simulation, summarize_simulation, verify_runtime, SimulatorContext, ToolBudget,
-    ToolError,
+    elapsed_ms, run_simulation, summarize_simulation, verify_runtime, SimulatorContext,
+    SkillDamageSummary, ToolBudget, ToolError,
 };
 
 pub const COMPARE_SCENARIOS: &str = "compare_scenarios";
@@ -79,6 +79,10 @@ pub struct ComparisonMetrics {
     pub skill_count: usize,
     pub fingerprint: u64,
     pub fingerprint_hex: String,
+    /// Complete simulator-derived damage composition for the baseline. Candidate
+    /// metrics omit this redundant list and expose actual changes in `skill_deltas`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skills: Vec<SkillDamageSummary>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -89,6 +93,26 @@ pub struct ComparisonCandidate {
     pub metrics: ComparisonMetrics,
     pub delta_dps: f64,
     pub delta_percent: Option<f64>,
+    /// True means the candidate produced the exact same deterministic combat trace.
+    pub same_fingerprint: bool,
+    pub skill_deltas: Vec<SkillDamageDelta>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct SkillDamageDelta {
+    pub skill_id: u32,
+    pub name: String,
+    pub triggered: bool,
+    pub baseline_event_count: u32,
+    pub candidate_event_count: u32,
+    pub event_count_delta: i64,
+    pub baseline_damage: f64,
+    pub candidate_damage: f64,
+    pub damage_delta: f64,
+    pub baseline_share: f64,
+    pub candidate_share: f64,
+    pub share_delta: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -152,19 +176,26 @@ pub fn compare_scenarios(
 
     for (label, snapshot, changes) in prepared {
         let response = run_simulation(&snapshot, context);
-        let candidate_metrics = metrics(&snapshot, &response);
+        let mut candidate_metrics = metrics(&snapshot, &response);
         let delta_dps = candidate_metrics.dps - baseline_metrics.dps;
         let delta_percent = if baseline_metrics.dps.abs() > f64::EPSILON {
             Some(delta_dps / baseline_metrics.dps * 100.0)
         } else {
             None
         };
+        let same_fingerprint = candidate_metrics.fingerprint == baseline_metrics.fingerprint;
+        let skill_deltas = compare_skill_damage(&baseline_metrics.skills, &candidate_metrics.skills);
+        // Baseline composition plus the candidate's changed rows is lossless for
+        // analysis and avoids repeating every unchanged skill on every model turn.
+        candidate_metrics.skills.clear();
         result_candidates.push(ComparisonCandidate {
             label: label.clone(),
             changes,
             metrics: candidate_metrics,
             delta_dps,
             delta_percent,
+            same_fingerprint,
+            skill_deltas,
         });
         executions.push(CandidateExecution {
             label,
@@ -194,6 +225,82 @@ pub fn compare_scenarios(
         baseline_response,
         candidates: executions,
     })
+}
+
+fn compare_skill_damage(
+    baseline: &[SkillDamageSummary],
+    candidate: &[SkillDamageSummary],
+) -> Vec<SkillDamageDelta> {
+    type Key = (u32, String, bool);
+    let baseline_by_key = baseline
+        .iter()
+        .map(|skill| {
+            (
+                (skill.skill_id, skill.name.clone(), skill.triggered),
+                skill,
+            )
+        })
+        .collect::<BTreeMap<Key, _>>();
+    let candidate_by_key = candidate
+        .iter()
+        .map(|skill| {
+            (
+                (skill.skill_id, skill.name.clone(), skill.triggered),
+                skill,
+            )
+        })
+        .collect::<BTreeMap<Key, _>>();
+    let mut keys = baseline_by_key
+        .keys()
+        .chain(candidate_by_key.keys())
+        .cloned()
+        .collect::<Vec<_>>();
+    keys.sort();
+    keys.dedup();
+    let mut deltas = keys
+        .into_iter()
+        .filter_map(|(skill_id, name, triggered)| {
+            let before = baseline_by_key.get(&(skill_id, name.clone(), triggered));
+            let after = candidate_by_key.get(&(skill_id, name.clone(), triggered));
+            let baseline_event_count = before.map_or(0, |skill| skill.event_count);
+            let candidate_event_count = after.map_or(0, |skill| skill.event_count);
+            let baseline_damage = before.map_or(0.0, |skill| skill.total_damage);
+            let candidate_damage = after.map_or(0.0, |skill| skill.total_damage);
+            let baseline_share = before.map_or(0.0, |skill| skill.damage_share);
+            let candidate_share = after.map_or(0.0, |skill| skill.damage_share);
+            let damage_delta = candidate_damage - baseline_damage;
+            let share_delta = candidate_share - baseline_share;
+            (baseline_event_count != candidate_event_count
+                || damage_delta.abs() > f64::EPSILON
+                || share_delta.abs() > f64::EPSILON)
+                .then_some(SkillDamageDelta {
+                    skill_id,
+                    name,
+                    triggered,
+                    baseline_event_count,
+                    candidate_event_count,
+                    event_count_delta: i64::from(candidate_event_count)
+                        - i64::from(baseline_event_count),
+                    baseline_damage,
+                    candidate_damage,
+                    damage_delta,
+                    baseline_share,
+                    candidate_share,
+                    share_delta,
+                })
+        })
+        .collect::<Vec<_>>();
+    // Ignore share-only movement caused by a changed total-damage denominator.
+    // These rows have identical casts and damage and distract from causal changes.
+    deltas.retain(|delta| delta.event_count_delta != 0 || delta.damage_delta.abs() >= 0.5);
+    deltas.sort_by(|left, right| {
+        right
+            .damage_delta
+            .abs()
+            .total_cmp(&left.damage_delta.abs())
+            .then_with(|| left.skill_id.cmp(&right.skill_id))
+    });
+    deltas
 }
 
 fn validate_candidate_count(count: usize) -> Result<(), ToolError> {
@@ -426,6 +533,7 @@ fn metrics(snapshot: &ScenarioSnapshotV1, response: &SimulateResponse) -> Compar
         skill_count: summary.skill_count,
         fingerprint: summary.fingerprint,
         fingerprint_hex: summary.fingerprint_hex,
+        skills: summary.skills,
     }
 }
 
@@ -622,6 +730,33 @@ mod tests {
 
         assert!(matches!(error, ToolError::NoScenarioChanges { .. }));
         assert_eq!(budget.used_simulations, 0);
+    }
+
+    #[test]
+    fn skill_damage_delta_reports_count_damage_and_share_changes() {
+        let baseline = vec![SkillDamageSummary {
+            skill_id: 1,
+            name: "绝刀".to_string(),
+            triggered: false,
+            event_count: 10,
+            total_damage: 1_000.0,
+            damage_share: 0.5,
+        }];
+        let candidate = vec![SkillDamageSummary {
+            skill_id: 1,
+            name: "绝刀".to_string(),
+            triggered: false,
+            event_count: 12,
+            total_damage: 1_300.0,
+            damage_share: 0.6,
+        }];
+
+        let deltas = compare_skill_damage(&baseline, &candidate);
+
+        assert_eq!(deltas.len(), 1);
+        assert_eq!(deltas[0].event_count_delta, 2);
+        assert_eq!(deltas[0].damage_delta, 300.0);
+        assert!((deltas[0].share_delta - 0.1).abs() < 1e-12);
     }
 
     #[test]

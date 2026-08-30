@@ -60,6 +60,8 @@
     evidence_coverage_checked: '检查证据覆盖',
     model_started: '模型处理中',
     model_finished: '模型响应完成',
+    decision_checkpoint: '记录决策依据',
+    evidence_gap_requires_tool: '补齐候选对照',
     tool_started: '调用工具',
     tool_finished: '取得证据',
     validating: '校验证据',
@@ -76,6 +78,7 @@
     cancelled: '任务取消',
     evidence_insufficient: '证据校验未通过',
     budget_exhausted: '预算耗尽',
+    budget_limit_reached: '预算边界已收束',
     provider_failed: 'Provider 故障',
     protocol_failed: '协议故障',
     timed_out: '任务超时',
@@ -186,12 +189,14 @@
   function thinkingText(event) {
     const kind = event?.trace_kind || event?.kind;
     if (event?.overview && ['planning', 'analysis_plan_selected', 'evidence_coverage_checked',
-      'tool_started', 'model_started'].includes(kind)) return event.overview;
+      'tool_started', 'model_started', 'decision_checkpoint'].includes(kind)) return event.overview;
     if (kind === 'planning') return '正在拆解问题并选择验证路径…';
     if (kind === 'model_started' && event?.code === 'report_repair') return '模型正在依据校验反馈修复报告…';
     if (kind === 'model_started' && event?.code === 'final_report') return '模型正在依据已有证据生成结论…';
     if (kind === 'model_started') return '模型正在规划下一项可验证动作…';
     if (kind === 'model_finished') return '模型响应已返回，正在解析下一阶段…';
+    if (kind === 'decision_checkpoint') return event?.overview || '正在记录本轮可审计的决策依据…';
+    if (kind === 'evidence_gap_requires_tool') return '当前证据还不足以发布修改方案，正在补做同场景候选对照。';
     if (kind === 'tool_started') return `正在${toolLabel(event.tool_name)}…`;
     if (kind === 'tool_finished') return '已取得工具证据，正在继续分析…';
     if (kind === 'validating') return '正在校验数值、单位与证据引用…';
@@ -199,6 +204,7 @@
     if (kind === 'report_claims_sanitized') return '正在隐藏未验证内容并保留可信结论…';
     if (kind === 'report_citations_normalized') return '已补全可验证引用，正在完成校验…';
     if (kind === 'knowledge_searches_coalesced') return '已合并重复检索，正在依据现有结果收束结论…';
+    if (kind === 'budget_limit_reached') return '实验预算已到边界，正在用已有证据生成受限结论…';
     if (kind === 'cancel_requested') return '正在安全停止当前任务…';
     return '正在分析当前循环…';
   }
@@ -429,6 +435,7 @@
     return kind === 'tool_finished' && !!event?.code
       || ['report_repair_requested', 'report_claims_sanitized', 'provider_empty_retry',
         'provider_empty_evidence_preserved', 'evidence_insufficient', 'budget_exhausted',
+        'budget_limit_reached',
         'provider_failed', 'protocol_failed', 'timed_out', 'cancel_requested', 'cancelled']
         .includes(kind);
   }
@@ -475,10 +482,12 @@
       provider_empty_retry: '供应商返回空正文；保留已有工具证据，并进行一次无工具重试。',
       provider_empty_evidence_preserved: '模型未形成报告，但工具证据仍可复用；系统发布受限结论而非丢弃整轮。',
       knowledge_searches_coalesced: '检测到重复检索意图；复用已有结果并停止无效查询循环。',
+      decision_checkpoint: '记录当前观察、证据缺口、工具选择理由与下一步判定条件。',
       completed: '结构、数值与引用均通过校验，发布可溯源结论。',
       partially_verified: '部分内容未通过校验；仅发布已验证结论并保留限制说明。',
       evidence_insufficient: '现有输出无法满足证据规则；不发布未经验证的结论。',
       budget_exhausted: '本轮已达到预设预算；保留现有证据与诊断信息后停止。',
+      budget_limit_reached: '本次新实验未执行；保留已有证据并转入受限报告，不中断整段对话。',
       provider_failed: '模型供应商调用失败；工具证据和脱敏诊断仍被保留。',
       protocol_failed: '执行协议未满足预期结构；停止运行并保留可定位的诊断码。',
       timed_out: '任务超过运行时限；终止本轮并保留已完成阶段。',

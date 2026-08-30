@@ -137,6 +137,10 @@ impl From<EvidenceError> for ToolError {
 pub struct ScenarioSummary {
     pub game_version: String,
     pub mount: String,
+    /// Exact simulator haste input. Do not infer a haste band from guide text.
+    pub haste_level: u32,
+    /// Frozen panel attributes used by the simulator, including equipment output.
+    pub attributes: Option<serde_json::Value>,
     pub rotation_mode: String,
     pub sequence_entries: usize,
     pub macro_characters: usize,
@@ -144,6 +148,10 @@ pub struct ScenarioSummary {
     pub talent_count: usize,
     pub recipe_count: usize,
     pub equipment_count: usize,
+    /// Exact immutable build selections, so candidate experiments never invent the baseline.
+    pub selected_talents: Vec<u32>,
+    pub selected_recipes: Vec<u32>,
+    pub selected_equipment: std::collections::HashMap<String, u32>,
     pub enabled_team_buff_count: usize,
     pub formation_key: Option<String>,
     pub pre_release_count: usize,
@@ -231,6 +239,11 @@ pub fn get_current_scenario(
     let result = ScenarioSummary {
         game_version: snapshot.game_version.clone(),
         mount: snapshot.mount.clone(),
+        haste_level: simulation.haste_level,
+        attributes: simulation
+            .attributes
+            .as_ref()
+            .and_then(|attributes| serde_json::to_value(attributes).ok()),
         rotation_mode: if simulation
             .macro_text
             .as_deref()
@@ -251,6 +264,9 @@ pub fn get_current_scenario(
         talent_count: simulation.talents.len(),
         recipe_count: simulation.recipes.len(),
         equipment_count: simulation.equipment.len(),
+        selected_talents: simulation.talents.clone(),
+        selected_recipes: simulation.recipes.clone(),
+        selected_equipment: simulation.equipment.clone(),
         enabled_team_buff_count: simulation
             .team_buffs
             .iter()

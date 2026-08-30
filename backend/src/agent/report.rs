@@ -375,6 +375,7 @@ pub fn parse_and_salvage_report(
             || !rotation_change_has_input_evidence(&change, evidence)
             || !rotation_change_has_current_guide(&change, evidence)
             || !rotation_change_numbers_are_grounded(&change, evidence)
+            || !rotation_change_has_comparison_evidence(&change, evidence)
         {
             sanitized_claims += 1;
             continue;
@@ -763,6 +764,12 @@ pub fn validate_report(
                 "macro change contains a number absent from current input and cited guide",
             ));
         }
+        if !rotation_change_has_comparison_evidence(change, evidence) {
+            return Err(error(
+                "rotation_change_not_compared",
+                "macro rotation change must cite a same-scenario comparison that tested the proposal",
+            ));
+        }
     }
     Ok(())
 }
@@ -837,6 +844,37 @@ fn rotation_change_numbers_are_grounded(
     numeric_literals(&change.proposed)
         .iter()
         .all(|literal| matches_knowledge_literal(*literal, &allowed))
+}
+
+fn rotation_change_has_comparison_evidence(
+    change: &RotationChangeV1,
+    evidence: &EvidenceStore,
+) -> bool {
+    if change.change_type != "macro_statement" {
+        return true;
+    }
+    change.evidence_ids.iter().any(|id| {
+        let Some(item) = evidence.get(id) else {
+            return false;
+        };
+        item.get("tool_name").and_then(Value::as_str) == Some("compare_scenarios")
+            && item
+                .get("args")
+                .is_some_and(|args| value_contains_string_fragment(args, &change.proposed))
+    })
+}
+
+fn value_contains_string_fragment(value: &Value, expected: &str) -> bool {
+    match value {
+        Value::String(actual) => actual.contains(expected),
+        Value::Array(items) => items
+            .iter()
+            .any(|item| value_contains_string_fragment(item, expected)),
+        Value::Object(object) => object
+            .values()
+            .any(|item| value_contains_string_fragment(item, expected)),
+        _ => false,
+    }
 }
 
 fn evidence_contains_exact_string(value: &Value, expected: &str) -> bool {
@@ -1405,6 +1443,24 @@ mod tests {
                 }
             }),
         );
+        let comparison_id = "e".repeat(64);
+        store.insert(
+            comparison_id.clone(),
+            json!({
+                "evidence_id": comparison_id,
+                "tool_name": "compare_scenarios",
+                "args": [{
+                    "label": "宏候选",
+                    "patch": {
+                        "macro_text": "/cast [rage>64&nobuff:嗜血] 盾飞"
+                    }
+                }],
+                "result": {
+                    "baseline": {"dps": 123.5},
+                    "candidates": [{"delta_dps": 0.0, "same_fingerprint": true}]
+                }
+            }),
+        );
         let mut value = report();
         value.rotation_changes.push(RotationChangeV1 {
             change_type: "macro_statement".to_string(),
@@ -1413,7 +1469,7 @@ mod tests {
             current: "/cast [rage>64] 盾飞".to_string(),
             proposed: "/cast [rage>64&nobuff:嗜血] 盾飞".to_string(),
             rationale: "按攻略约束调整，并用同场景复测。".to_string(),
-            evidence_ids: vec!["d".repeat(64), "b".repeat(64)],
+            evidence_ids: vec!["d".repeat(64), "b".repeat(64), "e".repeat(64)],
         });
         validate_report(&value, &store).unwrap();
 

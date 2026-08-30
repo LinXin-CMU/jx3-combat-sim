@@ -12,6 +12,7 @@ use super::{
     MAX_KNOWLEDGE_RESULTS,
 };
 use crate::Mount;
+use crate::macro_parser::parse_macro_text;
 
 pub const AGENT_TOOL_RESULT_SCHEMA_V1: &str = "agent-tool-result/v1";
 pub const MAX_AGENT_CANDIDATES: usize = 3;
@@ -24,8 +25,8 @@ pub struct AgentCandidateV1 {
     pub patch: AgentScenarioPatchV1,
 }
 
-/// Deliberately smaller than the HTTP comparison patch. These six fields are
-/// the first portfolio experiments and map one-to-one onto simulator inputs.
+/// Bounded, typed fields the Agent may vary in an immutable comparison run.
+/// Every field maps one-to-one onto a simulator input and is validated locally.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AgentScenarioPatchV1 {
@@ -35,6 +36,10 @@ pub struct AgentScenarioPatchV1 {
     pub initial_rage: Option<i32>,
     pub base_attack: Option<f64>,
     pub target_defense_bonus: Option<f64>,
+    pub macro_text: Option<String>,
+    pub talents: Option<Vec<u32>>,
+    pub recipes: Option<Vec<u32>>,
+    pub equipment: Option<std::collections::HashMap<String, u32>>,
 }
 
 #[derive(Debug, Clone)]
@@ -108,7 +113,7 @@ impl<'a> AgentToolRegistry<'a> {
             },
             ToolDefinition {
                 name: "compare_scenarios".to_string(),
-                description: "Compare one to three explicit typed candidate patches against the immutable baseline.".to_string(),
+                description: "Compare one to three explicit typed candidate patches against the immutable baseline. In each patch include only fields intentionally changed; omitted fields inherit the frozen baseline. Never send zero, empty arrays, or copied build fields as placeholders.".to_string(),
                 parameters: compare_schema(),
             },
             ToolDefinition {
@@ -408,6 +413,10 @@ impl<'a> AgentToolRegistry<'a> {
                 initial_rage: patch.initial_rage.map(PatchValueV1::Set),
                 attributes,
                 target,
+                macro_text: patch.macro_text.map(PatchValueV1::Set),
+                talents: patch.talents,
+                recipes: patch.recipes,
+                equipment: patch.equipment,
                 ..ScenarioPatchV1::default()
             },
         })
@@ -469,6 +478,37 @@ fn validate_agent_patch(patch: &AgentScenarioPatchV1) -> Result<(), &'static str
             })
     }) {
         return Err("invalid_sequence");
+    }
+    if let Some(macro_text) = patch.macro_text.as_deref() {
+        if macro_text.trim().is_empty()
+            || macro_text.chars().count() > 16_384
+            || macro_text
+                .chars()
+                .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
+            || parse_macro_text(macro_text).is_err()
+        {
+            return Err("invalid_macro_text");
+        }
+    }
+    for selection in [&patch.talents, &patch.recipes] {
+        if selection.as_ref().is_some_and(|ids| {
+            ids.len() > 128
+                || ids.contains(&0)
+                || ids.iter().collect::<std::collections::HashSet<_>>().len() != ids.len()
+        }) {
+            return Err("invalid_build_selection");
+        }
+    }
+    if patch.equipment.as_ref().is_some_and(|equipment| {
+        equipment.len() > 32
+            || equipment.iter().any(|(slot, id)| {
+                slot.trim().is_empty()
+                    || slot.chars().count() > 64
+                    || slot.chars().any(char::is_control)
+                    || *id == 0
+            })
+    }) {
+        return Err("invalid_equipment");
     }
     Ok(())
 }
@@ -739,8 +779,12 @@ fn compare_schema() -> Value {
                                 "initial_rage": {"type": ["integer", "null"], "minimum": -1000, "maximum": 1000},
                                 "base_attack": {"type": ["number", "null"], "minimum": 0, "maximum": 1000000000},
                                 "target_defense_bonus": {"type": ["number", "null"], "minimum": -100, "maximum": 1000}
+                                ,"macro_text": {"type": ["string", "null"], "minLength": 1, "maxLength": 16384}
+                                ,"talents": {"type": ["array", "null"], "maxItems": 128, "items": {"type": "integer", "minimum": 1}}
+                                ,"recipes": {"type": ["array", "null"], "maxItems": 128, "items": {"type": "integer", "minimum": 1}}
+                                ,"equipment": {"type": ["object", "null"], "maxProperties": 32, "additionalProperties": {"type": "integer", "minimum": 1}}
                             },
-                            "required": ["haste_level", "sequence", "network_delay", "initial_rage", "base_attack", "target_defense_bonus"],
+                            "required": [],
                             "additionalProperties": false
                         }
                     },
@@ -965,6 +1009,25 @@ mod tests {
             ..AgentScenarioPatchV1::default()
         };
         assert_eq!(validate_agent_patch(&oversized), Err("invalid_sequence"));
+    }
+
+    #[test]
+    fn macro_and_build_candidates_are_locally_typed_and_validated() {
+        let patch = AgentScenarioPatchV1 {
+            macro_text: Some("/cast [skill_energy:血怒>1] 血怒".to_string()),
+            talents: Some(vec![1001, 1002]),
+            recipes: Some(vec![2001]),
+            equipment: Some(std::collections::HashMap::from([(
+                "PRIMARY_WEAPON".to_string(),
+                3001,
+            )])),
+            ..AgentScenarioPatchV1::default()
+        };
+        assert_eq!(validate_agent_patch(&patch), Ok(()));
+
+        let mut invalid = patch;
+        invalid.macro_text = Some("/cast [skill_energy:血怒>] 血怒".to_string());
+        assert_eq!(validate_agent_patch(&invalid), Err("invalid_macro_text"));
     }
 
     fn knowledge_fixture() -> (PathBuf, KnowledgeIndex) {
