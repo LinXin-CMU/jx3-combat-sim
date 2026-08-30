@@ -33,6 +33,13 @@ const AGENT_SYSTEM_PROMPT_V13: &str = concat!(
     include_str!("../../prompts/agent_system_v12_addendum.md"),
     include_str!("../../prompts/agent_system_v13_addendum.md")
 );
+pub const AGENT_PROMPT_VERSION_V14: &str = "agent-system/v14";
+const AGENT_SYSTEM_PROMPT_V14: &str = concat!(
+    include_str!("../../prompts/agent_system_v11.md"),
+    include_str!("../../prompts/agent_system_v12_addendum.md"),
+    include_str!("../../prompts/agent_system_v13_addendum.md"),
+    include_str!("../../prompts/agent_system_v14_addendum.md")
+);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PromptSpec {
@@ -158,14 +165,23 @@ pub fn agent_prompt_v13() -> PromptSpec {
     }
 }
 
+pub fn agent_prompt_v14() -> PromptSpec {
+    let sha256 = format!("{:x}", Sha256::digest(AGENT_SYSTEM_PROMPT_V14.as_bytes()));
+    PromptSpec {
+        version: AGENT_PROMPT_VERSION_V14,
+        sha256,
+        instructions: AGENT_SYSTEM_PROMPT_V14,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn prompt_is_versioned_and_content_addressed() {
-        let prompt = agent_prompt_v13();
-        assert_eq!(prompt.version, "agent-system/v13");
+        let prompt = agent_prompt_v14();
+        assert_eq!(prompt.version, "agent-system/v14");
         assert_eq!(prompt.sha256.len(), 64);
         assert!(prompt.instructions.contains("get_current_scenario"));
         assert!(prompt.instructions.contains("already called"));
@@ -188,6 +204,8 @@ mod tests {
         assert!(prompt.instructions.contains("single point lookup"));
         assert!(prompt.instructions.contains("分山劲·悟"));
         assert!(prompt.instructions.contains("计算器未实现无界端"));
+        assert!(prompt.instructions.contains("rotation_input.mode"));
+        assert!(prompt.instructions.contains("rotation_changes"));
         assert!(prompt.instructions.contains("flagship client"));
         assert!(prompt
             .instructions

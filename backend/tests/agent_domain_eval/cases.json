@@ -45,8 +45,8 @@
       "id": "domain_05_macro",
       "question": "帮我分析当前一键宏的判定和手动循环相比牺牲了什么。",
       "expected_playbook": "macro_and_manual_analysis",
-      "required_dimensions": ["scope", "scenario", "versioned_knowledge", "macro_context"],
-      "expected_tools_any": ["search_knowledge_base"],
+      "required_dimensions": ["scope", "scenario", "versioned_knowledge", "rotation_input", "timeline"],
+      "expected_tools_any": ["search_knowledge_base", "analyze_timeline"],
       "forbidden_tools": [],
       "required_terms_any": ["宏", "手动", "延迟"],
       "forbid_simulation": false

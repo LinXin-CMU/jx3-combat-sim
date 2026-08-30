@@ -150,6 +150,41 @@ pub struct ScenarioSummary {
     pub target_level: u32,
     pub network_delay_ms: u32,
     pub boss_attack_interval: Option<f64>,
+    pub rotation_input: RotationInputSummary,
+}
+
+const MAX_ROTATION_INPUT_ITEMS: usize = 128;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RotationInputSummary {
+    pub mode: String,
+    pub parse_status: String,
+    pub parse_error: Option<String>,
+    pub truncated: bool,
+    pub macro_statements: Vec<MacroStatementSummary>,
+    pub manual_operations: Vec<ManualOperationSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct MacroStatementSummary {
+    pub source_line: usize,
+    pub page: usize,
+    pub stance: Option<String>,
+    pub command: String,
+    pub skill_name: String,
+    pub condition: Option<String>,
+    pub statement: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ManualOperationSummary {
+    pub sequence_index: usize,
+    pub skill_name: String,
+    pub channel_ticks: Option<u32>,
+    pub timing_offset_seconds: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -192,6 +227,7 @@ pub fn get_current_scenario(
         .target
         .as_ref()
         .ok_or(ScenarioError::MissingField("simulation.target"))?;
+    let rotation_input = summarize_rotation_input(simulation);
     let result = ScenarioSummary {
         game_version: snapshot.game_version.clone(),
         mount: snapshot.mount.clone(),
@@ -228,6 +264,7 @@ pub fn get_current_scenario(
         target_level: target.level,
         network_delay_ms: simulation.network_delay,
         boss_attack_interval: simulation.boss_attack_interval,
+        rotation_input,
     };
 
     Ok(EvidenceEnvelopeV1::new(
@@ -239,6 +276,114 @@ pub fn get_current_scenario(
         provenance,
         elapsed_ms(started),
     )?)
+}
+
+fn summarize_rotation_input(simulation: &crate::SimulateRequest) -> RotationInputSummary {
+    let Some(macro_text) = simulation
+        .macro_text
+        .as_deref()
+        .filter(|text| !text.trim().is_empty())
+    else {
+        let operations = simulation
+            .sequence
+            .iter()
+            .take(MAX_ROTATION_INPUT_ITEMS)
+            .enumerate()
+            .map(|(sequence_index, skill_name)| ManualOperationSummary {
+                sequence_index,
+                skill_name: skill_name.clone(),
+                channel_ticks: simulation.channel_ticks.get(&sequence_index.to_string()).copied(),
+                timing_offset_seconds: simulation
+                    .timing_offsets
+                    .get(&sequence_index.to_string())
+                    .copied(),
+            })
+            .collect();
+        return RotationInputSummary {
+            mode: "manual_sequence".to_string(),
+            parse_status: "not_applicable".to_string(),
+            parse_error: None,
+            truncated: simulation.sequence.len() > MAX_ROTATION_INPUT_ITEMS,
+            macro_statements: Vec::new(),
+            manual_operations: operations,
+        };
+    };
+
+    let parsed = crate::macro_parser::parse_macro_text(macro_text);
+    let (parse_status, parse_error) = match &parsed {
+        Ok(_) => ("valid".to_string(), None),
+        Err(error) => (
+            "invalid".to_string(),
+            Some(format!("line {}: {}", error.line + 1, error.message)),
+        ),
+    };
+    let mut page = 0usize;
+    let mut stance = None;
+    let mut statements = Vec::new();
+    let mut total_statements = 0usize;
+    for (source_index, source) in macro_text.lines().enumerate() {
+        let statement = source.trim();
+        if statement.is_empty() || statement.starts_with("//") {
+            continue;
+        }
+        if let Some(rest) = statement.strip_prefix("#page") {
+            if total_statements > 0 {
+                page += 1;
+            }
+            stance = match rest.trim() {
+                "shield" | "擎盾" => Some("shield".to_string()),
+                "blade" | "擎刀" => Some("blade".to_string()),
+                "wall" | "盾墙" => Some("wall".to_string()),
+                _ => None,
+            };
+            continue;
+        }
+        let Some((command, rest)) = statement
+            .strip_prefix("/fcast")
+            .map(|rest| ("fcast", rest.trim()))
+            .or_else(|| statement.strip_prefix("/cast").map(|rest| ("cast", rest.trim())))
+        else {
+            continue;
+        };
+        total_statements += 1;
+        if statements.len() >= MAX_ROTATION_INPUT_ITEMS {
+            continue;
+        }
+        let (condition, skill_name) = if let Some(rest) = rest.strip_prefix('[') {
+            match rest.find(']') {
+                Some(end) => (
+                    Some(rest[..end].trim().to_string()),
+                    rest[end + 1..].trim().to_string(),
+                ),
+                None => (None, rest.trim().to_string()),
+            }
+        } else {
+            let skill_name = rest.split_whitespace().last().unwrap_or_default().to_string();
+            let condition = rest
+                .strip_suffix(&skill_name)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string);
+            (condition, skill_name)
+        };
+        statements.push(MacroStatementSummary {
+            source_line: source_index + 1,
+            page,
+            stance: stance.clone(),
+            command: command.to_string(),
+            skill_name,
+            condition,
+            statement: statement.to_string(),
+        });
+    }
+    RotationInputSummary {
+        mode: "macro".to_string(),
+        parse_status,
+        parse_error,
+        truncated: total_statements > MAX_ROTATION_INPUT_ITEMS,
+        macro_statements: statements,
+        manual_operations: Vec::new(),
+    }
 }
 
 pub fn simulate_scenario(
@@ -450,6 +595,43 @@ mod tests {
         assert_eq!(evidence.result.rotation_mode, "sequence");
         assert_eq!(evidence.result.sequence_entries, 2);
         assert_eq!(evidence.result.target_level, 134);
+        assert_eq!(evidence.result.rotation_input.mode, "manual_sequence");
+        assert_eq!(
+            evidence.result.rotation_input.manual_operations[1].skill_name,
+            "盾压"
+        );
+        assert!(evidence.result.rotation_input.macro_statements.is_empty());
+    }
+
+    #[test]
+    fn current_scenario_exposes_validated_macro_statements_without_manual_operations() {
+        let mut value = request();
+        value.macro_text = Some(
+            "#page shield\n/cast [rage>64&nobuff:嗜血] 盾飞\n#page blade\n/fcast 业火麟光"
+                .to_string(),
+        );
+        let snapshot =
+            ScenarioSnapshotV1::capture(GameVersion::AnYingQianJi, Mount::FenShanJin, value)
+                .unwrap();
+        let evidence =
+            get_current_scenario("trace-macro-input", &snapshot, &ToolProvenance::fixture())
+                .unwrap();
+
+        let input = evidence.result.rotation_input;
+        assert_eq!(input.mode, "macro");
+        assert_eq!(input.parse_status, "valid");
+        assert!(input.parse_error.is_none());
+        assert!(input.manual_operations.is_empty());
+        assert_eq!(input.macro_statements.len(), 2);
+        assert_eq!(input.macro_statements[0].source_line, 2);
+        assert_eq!(input.macro_statements[0].stance.as_deref(), Some("shield"));
+        assert_eq!(input.macro_statements[0].skill_name, "盾飞");
+        assert_eq!(
+            input.macro_statements[0].statement,
+            "/cast [rage>64&nobuff:嗜血] 盾飞"
+        );
+        assert_eq!(input.macro_statements[1].command, "fcast");
+        assert_eq!(input.macro_statements[1].page, 1);
     }
 
     #[test]

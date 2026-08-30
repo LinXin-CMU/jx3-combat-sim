@@ -152,6 +152,13 @@ body.agent-fullheight #page-agent.active {
 .agent-finding { padding: 10px 12px; border-top: 1px solid var(--agent-line); }
 .agent-finding h4 { margin: 0 0 5px; font-size: 13px; }
 .agent-finding p { margin: 0; color: var(--agent-muted); font-size: 12px; line-height: 1.6; }
+.agent-rotation-change { margin-top: 9px; padding: 9px; border: 1px solid var(--agent-line); border-radius: 6px; background: color-mix(in srgb, var(--agent-panel) 88%, var(--gold-tint)); }
+.agent-rotation-change-target { margin-bottom: 6px; color: var(--emphasis-fg); font-size: 12px; font-weight: 600; }
+.agent-rotation-code { display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: 6px; align-items: start; margin-top: 5px; }
+.agent-rotation-code span { color: var(--agent-muted); font-size: 11px; line-height: 1.6; }
+.agent-rotation-code code { display: block; padding: 4px 6px; overflow-wrap: anywhere; border-radius: 4px; background: var(--gold-tint); color: var(--agent-fg); font: 11px/1.55 Consolas, "SFMono-Regular", monospace; white-space: pre-wrap; }
+.agent-rotation-code.is-proposed code { border-left: 2px solid var(--success); }
+.agent-rotation-change p { margin-top: 7px; }
 .agent-metrics { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 8px; }
 .agent-metric { min-width: 130px; padding: 7px 9px; border: 1px solid var(--agent-line); border-radius: 4px; background: var(--surface2); }
 .agent-metric b { display: block; color: var(--warning); font-size: 15px; }

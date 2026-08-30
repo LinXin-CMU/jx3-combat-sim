@@ -6,6 +6,7 @@ pub const AGENT_REPORT_CONTENT_SCHEMA_V1: &str = "agent-report-content/v1";
 pub const AGENT_REPORT_SCHEMA_V1: &str = "agent-report/v1";
 const MAX_FINDINGS: usize = 12;
 const MAX_RECOMMENDATIONS: usize = 8;
+const MAX_ROTATION_CHANGES: usize = 8;
 const MAX_METRICS_PER_FINDING: usize = 12;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -15,8 +16,27 @@ pub struct AgentReportContentV1 {
     pub summary: String,
     pub findings: Vec<AgentFindingV1>,
     pub recommendations: Vec<AgentRecommendationV1>,
+    #[serde(default)]
+    pub rotation_changes: Vec<RotationChangeV1>,
     pub limitations: Vec<String>,
     pub refusal_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RotationChangeV1 {
+    pub change_type: String,
+    #[serde(default = "default_rotation_edit_operation")]
+    pub edit_operation: String,
+    pub target: String,
+    pub current: String,
+    pub proposed: String,
+    pub rationale: String,
+    pub evidence_ids: Vec<String>,
+}
+
+fn default_rotation_edit_operation() -> String {
+    "replace".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -170,10 +190,28 @@ pub fn report_content_json_schema() -> Value {
                     "additionalProperties": false
                 }
             },
+            "rotation_changes": {
+                "type": "array",
+                "maxItems": MAX_ROTATION_CHANGES,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "change_type": {"type": "string", "enum": ["macro_statement", "manual_operation"]},
+                        "edit_operation": {"type": "string", "enum": ["replace", "insert_before", "insert_after", "adjust_timing"]},
+                        "target": {"type": "string", "minLength": 1, "maxLength": 1024},
+                        "current": {"type": "string", "minLength": 1, "maxLength": 1024},
+                        "proposed": {"type": "string", "minLength": 1, "maxLength": 1024},
+                        "rationale": {"type": "string", "minLength": 1, "maxLength": 1024},
+                        "evidence_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}}
+                    },
+                    "required": ["change_type", "edit_operation", "target", "current", "proposed", "rationale", "evidence_ids"],
+                    "additionalProperties": false
+                }
+            },
             "limitations": {"type": "array", "maxItems": MAX_RECOMMENDATIONS, "items": {"type": "string"}},
             "refusal_reason": {"type": ["string", "null"]}
         },
-        "required": ["schema_version", "summary", "findings", "recommendations", "limitations", "refusal_reason"],
+        "required": ["schema_version", "summary", "findings", "recommendations", "rotation_changes", "limitations", "refusal_reason"],
         "additionalProperties": false
     })
 }
@@ -219,6 +257,7 @@ pub fn parse_and_salvage_report(
 
     sanitized_claims += truncate_vec(&mut report.findings, MAX_FINDINGS);
     sanitized_claims += truncate_vec(&mut report.recommendations, MAX_RECOMMENDATIONS);
+    sanitized_claims += truncate_vec(&mut report.rotation_changes, MAX_ROTATION_CHANGES);
     sanitized_claims += truncate_vec(&mut report.limitations, MAX_RECOMMENDATIONS);
     let normalized_metric_citations = normalize_metric_citations(&mut report, evidence);
 
@@ -320,6 +359,33 @@ pub fn parse_and_salvage_report(
         retained_recommendations.push(recommendation);
     }
     report.recommendations = retained_recommendations;
+
+    let mut retained_rotation_changes = Vec::with_capacity(report.rotation_changes.len());
+    for mut change in report.rotation_changes.drain(..) {
+        sanitized_claims += sanitize_evidence_ids(&mut change.evidence_ids, evidence);
+        if !rotation_change_has_input_evidence(&change, evidence) {
+            if let Some(evidence_id) = matching_rotation_input_evidence_id(&change, evidence) {
+                change.evidence_ids.push(evidence_id);
+                sanitized_claims += 1;
+            }
+        }
+        if change.evidence_ids.is_empty()
+            || !matches!(change.change_type.as_str(), "macro_statement" | "manual_operation")
+            || !rotation_edit_operation_is_valid(&change)
+            || !rotation_change_has_input_evidence(&change, evidence)
+            || !rotation_change_has_current_guide(&change, evidence)
+            || !rotation_change_numbers_are_grounded(&change, evidence)
+        {
+            sanitized_claims += 1;
+            continue;
+        }
+        sanitized_claims += sanitize_text_field(&mut change.target, "当前循环位置");
+        sanitized_claims += sanitize_text_field(&mut change.current, "当前操作");
+        sanitized_claims += sanitize_text_field(&mut change.proposed, "建议操作");
+        sanitized_claims += sanitize_text_field(&mut change.rationale, "依据见所引攻略与本轮时间轴。");
+        retained_rotation_changes.push(change);
+    }
+    report.rotation_changes = retained_rotation_changes;
 
     let report_evidence_ids = cited_evidence_ids(&report);
 
@@ -549,6 +615,7 @@ pub fn validate_report(
     validate_short_text(&report.summary)?;
     if report.findings.len() > MAX_FINDINGS
         || report.recommendations.len() > MAX_RECOMMENDATIONS
+        || report.rotation_changes.len() > MAX_ROTATION_CHANGES
         || report.limitations.len() > MAX_RECOMMENDATIONS
     {
         return Err(error(
@@ -657,7 +724,132 @@ pub fn validate_report(
             evidence,
         )?;
     }
+    for change in &report.rotation_changes {
+        if !matches!(change.change_type.as_str(), "macro_statement" | "manual_operation") {
+            return Err(error("invalid_rotation_change_type", "rotation change type is invalid"));
+        }
+        if !rotation_edit_operation_is_valid(change) {
+            return Err(error(
+                "invalid_rotation_edit_operation",
+                "rotation edit operation is invalid for its input mode",
+            ));
+        }
+        validate_short_text(&change.target)?;
+        validate_short_text(&change.current)?;
+        validate_short_text(&change.proposed)?;
+        validate_short_text(&change.rationale)?;
+        if change.evidence_ids.is_empty() {
+            return Err(error(
+                "rotation_change_without_evidence",
+                "every rotation change must cite evidence",
+            ));
+        }
+        validate_evidence_ids(&change.evidence_ids, evidence)?;
+        if !rotation_change_has_input_evidence(change, evidence) {
+            return Err(error(
+                "rotation_change_target_not_grounded",
+                "rotation change current value must occur in cited evidence",
+            ));
+        }
+        if !rotation_change_has_current_guide(change, evidence) {
+            return Err(error(
+                "rotation_change_without_guide",
+                "rotation change must cite current fact-eligible guide evidence",
+            ));
+        }
+        if !rotation_change_numbers_are_grounded(change, evidence) {
+            return Err(error(
+                "rotation_change_number_not_grounded",
+                "macro change contains a number absent from current input and cited guide",
+            ));
+        }
+    }
     Ok(())
+}
+
+fn rotation_edit_operation_is_valid(change: &RotationChangeV1) -> bool {
+    match change.change_type.as_str() {
+        "macro_statement" => matches!(
+            change.edit_operation.as_str(),
+            "replace" | "insert_before" | "insert_after"
+        ),
+        "manual_operation" => matches!(
+            change.edit_operation.as_str(),
+            "replace" | "insert_before" | "insert_after" | "adjust_timing"
+        ),
+        _ => false,
+    }
+}
+
+fn rotation_change_has_input_evidence(change: &RotationChangeV1, evidence: &EvidenceStore) -> bool {
+    matching_rotation_input_evidence_id(change, evidence)
+        .is_some_and(|evidence_id| change.evidence_ids.contains(&evidence_id))
+}
+
+fn matching_rotation_input_evidence_id(
+    change: &RotationChangeV1,
+    evidence: &EvidenceStore,
+) -> Option<String> {
+    let expected_mode = if change.change_type == "macro_statement" {
+        "macro"
+    } else {
+        "manual_sequence"
+    };
+    evidence.iter().find_map(|(id, item)| {
+        (item.get("tool_name").and_then(Value::as_str) == Some("get_current_scenario")
+            && item.pointer("/result/rotation_input/mode").and_then(Value::as_str)
+                == Some(expected_mode)
+            && evidence_contains_exact_string(item, &change.current))
+        .then(|| id.clone())
+    })
+}
+
+fn rotation_change_has_current_guide(change: &RotationChangeV1, evidence: &EvidenceStore) -> bool {
+    change.evidence_ids.iter().any(|id| {
+        let Some(item) = evidence.get(id) else {
+            return false;
+        };
+        item.get("tool_name").and_then(Value::as_str) == Some("search_knowledge_base")
+            && item
+                .pointer("/result/results")
+                .and_then(Value::as_array)
+                .is_some_and(|results| {
+                    results.iter().any(|result| {
+                        result.get("fact_eligible").and_then(Value::as_bool) == Some(true)
+                            && matches!(
+                                result.get("version_match").and_then(Value::as_str),
+                                Some("current_exact") | Some("current_compatible")
+                            )
+                    })
+                })
+    })
+}
+
+fn rotation_change_numbers_are_grounded(
+    change: &RotationChangeV1,
+    evidence: &EvidenceStore,
+) -> bool {
+    if change.change_type != "macro_statement" {
+        return true;
+    }
+    let mut allowed = numeric_literals(&change.current);
+    allowed.extend(cited_knowledge_numeric_literals(&change.evidence_ids, evidence));
+    numeric_literals(&change.proposed)
+        .iter()
+        .all(|literal| matches_knowledge_literal(*literal, &allowed))
+}
+
+fn evidence_contains_exact_string(value: &Value, expected: &str) -> bool {
+    match value {
+        Value::String(actual) => actual == expected,
+        Value::Array(items) => items
+            .iter()
+            .any(|item| evidence_contains_exact_string(item, expected)),
+        Value::Object(object) => object
+            .values()
+            .any(|item| evidence_contains_exact_string(item, expected)),
+        _ => false,
+    }
 }
 
 pub fn cited_evidence_ids(report: &AgentReportContentV1) -> Vec<String> {
@@ -670,6 +862,12 @@ pub fn cited_evidence_ids(report: &AgentReportContentV1) -> Vec<String> {
                 .recommendations
                 .iter()
                 .flat_map(|recommendation| recommendation.evidence_ids.iter()),
+        )
+        .chain(
+            report
+                .rotation_changes
+                .iter()
+                .flat_map(|change| change.evidence_ids.iter()),
         )
         .cloned()
         .collect::<Vec<_>>();
@@ -1134,7 +1332,8 @@ mod tests {
                             "heading": "延迟阈值",
                             "snippet": "宏阈值可从 0.15 调到 0.20；80ms 延迟环境需要自行实测。",
                             "season": "暗影千机（2026）",
-                            "fact_eligible": true
+                            "fact_eligible": true,
+                            "version_match": "current_exact"
                         }]
                     }
                 }),
@@ -1175,6 +1374,7 @@ mod tests {
                 }],
             }],
             recommendations: Vec::new(),
+            rotation_changes: Vec::new(),
             limitations: vec!["只验证了当前场景。".to_string()],
             refusal_reason: None,
         }
@@ -1183,6 +1383,52 @@ mod tests {
     #[test]
     fn grounded_metric_passes() {
         validate_report(&report(), &evidence()).unwrap();
+    }
+
+    #[test]
+    fn rotation_change_requires_exact_current_input_in_cited_evidence() {
+        let scenario_id = "d".repeat(64);
+        let mut store = evidence();
+        store.extend(knowledge_evidence());
+        store.insert(
+            scenario_id.clone(),
+            json!({
+                "evidence_id": scenario_id,
+                "tool_name": "get_current_scenario",
+                "result": {
+                    "rotation_input": {
+                        "mode": "macro",
+                        "macro_statements": [{
+                            "statement": "/cast [rage>64] 盾飞"
+                        }]
+                    }
+                }
+            }),
+        );
+        let mut value = report();
+        value.rotation_changes.push(RotationChangeV1 {
+            change_type: "macro_statement".to_string(),
+            edit_operation: "replace".to_string(),
+            target: "宏第 1 行".to_string(),
+            current: "/cast [rage>64] 盾飞".to_string(),
+            proposed: "/cast [rage>64&nobuff:嗜血] 盾飞".to_string(),
+            rationale: "按攻略约束调整，并用同场景复测。".to_string(),
+            evidence_ids: vec!["d".repeat(64), "b".repeat(64)],
+        });
+        validate_report(&value, &store).unwrap();
+
+        value.rotation_changes[0].current = "/cast [rage>99] 盾飞".to_string();
+        assert_eq!(
+            validate_report(&value, &store).unwrap_err().code,
+            "rotation_change_target_not_grounded"
+        );
+
+        value.rotation_changes[0].current = "/cast [rage>64] 盾飞".to_string();
+        value.rotation_changes[0].proposed = "/cast [rage>44] 盾飞".to_string();
+        assert_eq!(
+            validate_report(&value, &store).unwrap_err().code,
+            "rotation_change_number_not_grounded"
+        );
     }
 
     #[test]

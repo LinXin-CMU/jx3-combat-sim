@@ -818,6 +818,8 @@
       card.appendChild(block);
     });
 
+    appendRotationChanges(card, report.content?.rotation_changes || [], allMetrics, false);
+
     const recommendations = report.content?.recommendations || [];
     if (recommendations.length) {
       const block = element('section', 'agent-finding');
@@ -841,6 +843,30 @@
     card.appendChild(element('div', 'agent-evidence', `scenario ${result.scenario_hash} · prompt ${result.prompt_version} / ${result.prompt_sha256} · evidence ${(report.evidence_ids || []).join(', ') || 'none'}`));
     els.transcript.appendChild(card);
     scrollTranscript();
+  }
+
+  function appendRotationChanges(parent, changes, allMetrics, compact) {
+    if (!changes.length) return;
+    const block = element(compact ? 'div' : 'section', compact ? 'sim-ai-result-finding agent-rotation-changes' : 'agent-finding agent-rotation-changes');
+    block.appendChild(element(compact ? 'b' : 'h4', '', '循环修改方案'));
+    changes.slice(0, compact ? 3 : 8).forEach(change => {
+      const item = element('div', 'agent-rotation-change');
+      const mode = change.change_type === 'macro_statement' ? '宏语句' : '手动操作点';
+      const operationLabels = { replace: '替换', insert_before: '在前插入', insert_after: '在后插入', adjust_timing: '调整时序' };
+      const operation = operationLabels[change.edit_operation] || '修改';
+      item.appendChild(element('div', 'agent-rotation-change-target', `${mode} · ${operation} · ${readableProse(change.target, allMetrics)}`));
+      const current = element('div', 'agent-rotation-code');
+      current.appendChild(element('span', '', '当前'));
+      current.appendChild(element('code', '', change.current || '—'));
+      item.appendChild(current);
+      const proposed = element('div', 'agent-rotation-code is-proposed');
+      proposed.appendChild(element('span', '', '修改'));
+      proposed.appendChild(element('code', '', change.proposed || '—'));
+      item.appendChild(proposed);
+      item.appendChild(element('p', '', readableProse(change.rationale, allMetrics)));
+      block.appendChild(item);
+    });
+    parent.appendChild(block);
   }
 
   function scrollTranscript() {
@@ -1002,6 +1028,7 @@
       appendMetricGrid(block, (finding.metrics || []).slice(0, 4), 'sim-ai-result-metrics');
       card.appendChild(block);
     });
+    appendRotationChanges(card, report?.content?.rotation_changes || [], allMetrics, true);
     appendKnowledgeSources(card, report?.sources || [], true);
     const limitations = report?.content?.limitations || [];
     if (limitations.length) {
@@ -1433,6 +1460,16 @@
       lines.push('', '## 下一步建议');
       report.content.recommendations.forEach(recommendation => {
         lines.push(`- **${recommendation.title || '建议'}**：${recommendation.rationale || ''}`);
+      });
+    }
+    if (report?.content?.rotation_changes?.length) {
+      lines.push('', '## 循环修改方案');
+      report.content.rotation_changes.forEach(change => {
+        const operationLabels = { replace: '替换', insert_before: '在前插入', insert_after: '在后插入', adjust_timing: '调整时序' };
+        lines.push('', `### ${change.change_type === 'macro_statement' ? '宏语句' : '手动操作点'} · ${operationLabels[change.edit_operation] || '修改'} · ${change.target || '当前循环'}`);
+        lines.push(`- 当前：\`${change.current || '—'}\``);
+        lines.push(`- 修改：\`${change.proposed || '—'}\``);
+        lines.push(`- 依据：${change.rationale || ''}`);
       });
     }
     if (report?.content?.limitations?.length) {
