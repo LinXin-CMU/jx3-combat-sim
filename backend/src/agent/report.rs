@@ -547,8 +547,28 @@ fn metric_matches_evidence(metric: &GroundedMetricV1, evidence: &EvidenceStore) 
     else {
         return false;
     };
-    let tolerance = 1e-9_f64.max(source.abs() * 1e-9);
-    (source - metric.value).abs() <= tolerance
+    metric_value_matches_source(metric.value, &metric.unit, source)
+}
+
+fn metric_value_matches_source(value: f64, unit: &str, source: f64) -> bool {
+    let direct_tolerance = 1e-9_f64.max(source.abs() * 1e-9);
+    if (source - value).abs() <= direct_tolerance {
+        return true;
+    }
+
+    // Simulator ratios are stored as 0..=1 fractions, while reports display
+    // them as human-readable percentages. Accept only that explicit unit
+    // conversion and a small rounding window (at most 0.05 percentage point).
+    let percent_unit = unit.eq_ignore_ascii_case("percent")
+        || unit.eq_ignore_ascii_case("percentage")
+        || matches!(unit.trim(), "%" | "％" | "百分比");
+    if percent_unit && (0.0..=1.0).contains(&source) {
+        let displayed = source * 100.0;
+        let display_tolerance = 0.05_f64.max(displayed.abs() * 1e-9);
+        return (displayed - value).abs() <= display_tolerance;
+    }
+
+    false
 }
 
 fn direct_baseline_finding(evidence: &EvidenceStore) -> Option<AgentFindingV1> {
@@ -1108,8 +1128,7 @@ fn validate_metric(
                 "metric source is not a numeric evidence value",
             )
         })?;
-    let tolerance = 1e-9_f64.max(source.abs() * 1e-9);
-    if (source - metric.value).abs() > tolerance {
+    if !metric_value_matches_source(metric.value, &metric.unit, source) {
         return Err(error(
             "metric_value_mismatch",
             "metric value does not match cited evidence",
@@ -1473,6 +1492,35 @@ mod tests {
     #[test]
     fn grounded_metric_passes() {
         validate_report(&report(), &evidence()).unwrap();
+    }
+
+    #[test]
+    fn fractional_evidence_accepts_a_rounded_percentage_metric() {
+        let mut store = evidence();
+        store.get_mut(&"a".repeat(64)).unwrap()["result"]["ratio"] = json!(0.335795);
+        let mut value = report();
+        value.findings[0].metrics[0] = GroundedMetricV1 {
+            label: "核心技能伤害占比".to_string(),
+            value: 33.58,
+            unit: "percent".to_string(),
+            evidence_id: "a".repeat(64),
+            json_pointer: "/result/ratio".to_string(),
+        };
+        value.findings[0].explanation = "核心技能伤害占比为 33.58%。".to_string();
+
+        validate_report(&value, &store).unwrap();
+        let salvaged = parse_and_salvage_report(
+            &serde_json::to_string(&value).unwrap(),
+            &store,
+        )
+        .unwrap();
+        assert_eq!(salvaged.content.findings[0].metrics.len(), 1);
+
+        value.findings[0].metrics[0].value = 34.0;
+        assert_eq!(
+            validate_report(&value, &store).unwrap_err().code,
+            "metric_value_mismatch"
+        );
     }
 
     #[test]
