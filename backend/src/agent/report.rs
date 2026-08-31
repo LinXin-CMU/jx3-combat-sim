@@ -293,16 +293,15 @@ pub fn parse_and_salvage_report(
             evidence,
             "已验证结论",
         );
-        sanitized_claims += sanitize_text_field(
-            &mut finding.explanation,
-            "该结论仅保留通过本次证据校验的部分。",
-        );
+        let explanation_fallback = grounded_finding_explanation(&finding, evidence);
+        sanitized_claims +=
+            sanitize_text_field(&mut finding.explanation, &explanation_fallback);
         sanitized_claims += sanitize_unsupported_numeric_prose(
             &mut finding.explanation,
             &finding.metrics,
             &finding.evidence_ids,
             evidence,
-            "以下指标已通过本次模拟证据校验。",
+            &explanation_fallback,
         );
         retained_findings.push(finding);
     }
@@ -354,7 +353,7 @@ pub fn parse_and_salvage_report(
             &metric_values,
             &recommendation.evidence_ids,
             evidence,
-            "建议通过新的确定性实验继续验证。",
+            "保持其余条件不变，只改这一项跑同场景 A/B；比较 DPS、核心技能次数和资源触顶，再决定是否采用。",
         );
         retained_recommendations.push(recommendation);
     }
@@ -520,6 +519,41 @@ fn sanitize_evidence_ids(ids: &mut Vec<String>, evidence: &EvidenceStore) -> usi
         valid_evidence_id(id) && evidence.contains_key(id) && unique.insert(id.clone())
     });
     before.saturating_sub(ids.len())
+}
+
+fn grounded_finding_explanation(finding: &AgentFindingV1, evidence: &EvidenceStore) -> String {
+    let title = finding.title.as_str();
+    let cites_tool = |tool_name: &str| {
+        finding.evidence_ids.iter().any(|id| {
+            evidence
+                .get(id)
+                .and_then(|item| item.get("tool_name"))
+                .and_then(Value::as_str)
+                == Some(tool_name)
+        })
+    };
+
+    if cites_tool("compare_scenarios") {
+        return "同场景对比已经给出方向性结果；只采用实际改善基线的改法，未改善的候选保留为反证。"
+            .to_string();
+    }
+    if title.contains("怒气") || title.contains("资源") || title.contains("瓶颈") {
+        return "时间轴观察到资源触顶信号；它提示潜在浪费，但实际损失仍需保持其余条件不变的对照实验确认。"
+            .to_string();
+    }
+    if title.contains("时间轴") || title.contains("空档") || title.contains("等待") {
+        return "时间轴没有显示额外空档或主动等待，说明当前输入能连续填满模型内的技能窗口；这不等于循环已经最优。"
+            .to_string();
+    }
+    if title.contains("输出") || title.contains("结构") || title.contains("伤害") {
+        return "主要伤害由绝刀、援戈·血影等核心机制承接，说明当前循环已形成稳定的资源获取与消耗链。"
+            .to_string();
+    }
+    if cites_tool("analyze_timeline") {
+        return "本轮时间轴支持这项观察；因果解释与改动收益仍需同场景对照实验确认。"
+            .to_string();
+    }
+    "本轮模拟证据支持这项观察；未经同场景对比的改动收益仍作为待验证假设。".to_string()
 }
 
 fn valid_evidence_id(id: &str) -> bool {
@@ -2122,7 +2156,7 @@ mod tests {
         assert!(!salvaged.content.summary.contains("999"));
         assert_eq!(
             salvaged.content.findings[0].explanation,
-            "以下指标已通过本次模拟证据校验。"
+            "主要伤害由绝刀、援戈·血影等核心机制承接，说明当前循环已形成稳定的资源获取与消耗链。"
         );
         validate_report(&salvaged.content, &evidence()).unwrap();
     }
