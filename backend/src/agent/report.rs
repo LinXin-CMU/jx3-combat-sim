@@ -551,7 +551,9 @@ fn metric_matches_evidence(metric: &GroundedMetricV1, evidence: &EvidenceStore) 
 }
 
 fn metric_value_matches_source(value: f64, unit: &str, source: f64) -> bool {
-    let direct_tolerance = 1e-9_f64.max(source.abs() * 1e-9);
+    // Providers commonly render continuous simulator values to two decimals.
+    // Half of the last displayed cent is still the same measured value.
+    let direct_tolerance = 0.005_f64.max(source.abs() * 1e-9);
     if (source - value).abs() <= direct_tolerance {
         return true;
     }
@@ -1167,11 +1169,13 @@ fn validate_grounded_prose<'a>(
         .map(|metric| metric.value)
         .collect::<Vec<_>>();
     let knowledge_literals = cited_knowledge_numeric_literals(evidence_ids, evidence);
+    let tool_values = cited_tool_numeric_values(evidence_ids, evidence);
     if numeric_literals(value).iter().any(|literal| {
         !literal.ordinary_count
             && !matches_metric(*literal, &metric_values)
             && !matches_metric_label_literal(value, *literal, &metrics)
             && !matches_knowledge_literal(*literal, &knowledge_literals)
+            && !matches_tool_value(*literal, &tool_values)
     }) {
         return Err(error(
             "numeric_prose_claim",
@@ -1295,6 +1299,7 @@ fn sanitize_unsupported_numeric_prose(
         .collect::<Vec<_>>();
     let metric_refs = metrics.iter().collect::<Vec<_>>();
     let knowledge_literals = cited_knowledge_numeric_literals(evidence_ids, evidence);
+    let tool_values = cited_tool_numeric_values(evidence_ids, evidence);
     let unsupported = numeric_literals(value)
         .into_iter()
         .filter(|literal| {
@@ -1302,6 +1307,7 @@ fn sanitize_unsupported_numeric_prose(
                 && !matches_metric(*literal, &metric_values)
                 && !matches_metric_label_literal(value, *literal, &metric_refs)
                 && !matches_knowledge_literal(*literal, &knowledge_literals)
+                && !matches_tool_value(*literal, &tool_values)
         })
         .collect::<Vec<_>>();
     if unsupported.is_empty() {
@@ -1354,6 +1360,79 @@ fn matches_knowledge_literal(literal: NumericLiteral, sources: &[NumericLiteral]
         }
         let tolerance = literal.value.abs().max(source.value.abs()).max(1.0) * 1e-9;
         (literal.value - source.value).abs() <= tolerance
+    })
+}
+
+fn cited_tool_numeric_values(evidence_ids: &[String], evidence: &EvidenceStore) -> Vec<f64> {
+    let mut values = Vec::new();
+    for evidence_id in evidence_ids {
+        let Some(envelope) = evidence.get(evidence_id).filter(|item| metric_tool_allowed(item))
+        else {
+            continue;
+        };
+        if let Some(result) = envelope.get("result") {
+            collect_tool_numeric_values(result, None, &mut values);
+        }
+    }
+    values
+}
+
+fn collect_tool_numeric_values(value: &Value, field: Option<&str>, values: &mut Vec<f64>) {
+    match value {
+        Value::Number(number) => {
+            let identifier = field.is_some_and(|name| {
+                name.ends_with("_id")
+                    || name.ends_with("_hash")
+                    || name.contains("fingerprint")
+                    || name == "schema_version"
+            });
+            if !identifier {
+                if let Some(number) = number.as_f64().filter(|number| number.is_finite()) {
+                    values.push(number);
+                }
+            }
+        }
+        Value::String(text)
+            if field.is_some_and(|name| {
+                matches!(
+                    name,
+                    "before" | "after" | "statement" | "macro_text" | "name" | "label"
+                )
+            }) =>
+        {
+            values.extend(numeric_literals(text).into_iter().map(|literal| literal.value));
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_tool_numeric_values(item, field, values);
+            }
+        }
+        Value::Object(object) => {
+            for (name, item) in object {
+                collect_tool_numeric_values(item, Some(name), values);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn matches_tool_value(literal: NumericLiteral, sources: &[f64]) -> bool {
+    sources.iter().any(|source| {
+        let magnitude = source.abs();
+        let candidates = if literal.percent {
+            [magnitude, magnitude * 100.0]
+        } else {
+            [*source, magnitude]
+        };
+        candidates.into_iter().any(|candidate| {
+            let display_tolerance = if literal.decimal_places == 0 {
+                0.5
+            } else {
+                0.5 * 10_f64.powi(-(literal.decimal_places as i32))
+            };
+            let floating_tolerance = candidate.abs().max(1.0) * 1e-9;
+            (literal.value - candidate).abs() <= display_tolerance.max(floating_tolerance)
+        })
     })
 }
 
@@ -1520,6 +1599,48 @@ mod tests {
         assert_eq!(
             validate_report(&value, &store).unwrap_err().code,
             "metric_value_mismatch"
+        );
+    }
+
+    #[test]
+    fn prose_can_restate_numbers_from_its_cited_simulator_evidence() {
+        let id = "d".repeat(64);
+        let store = BTreeMap::from([(
+            id.clone(),
+            json!({
+                "evidence_id": id,
+                "tool_name": "compare_scenarios",
+                "result": {
+                    "baseline": {
+                        "skills": [{
+                            "name": "绝刀·50怒",
+                            "damage_share": 0.335795,
+                            "event_count": 79,
+                            "skill_id": 13055
+                        }]
+                    },
+                    "candidates": [{
+                        "delta_percent": -0.991344,
+                        "changes": [{
+                            "before": "bufftime:嗜血<5.3",
+                            "after": "bufftime:嗜血<5.0"
+                        }]
+                    }]
+                }
+            }),
+        )]);
+        let mut value = report();
+        value.summary = "绝刀·50怒共 79 次、伤害占比 33.6%；阈值 5.3 调到 5.0 后，DPS 下降约 0.99%。".to_string();
+        value.findings[0].evidence_ids = vec!["d".repeat(64)];
+        value.findings[0].metrics.clear();
+        value.findings[0].explanation = "这些数字均来自同场景模拟与对比。".to_string();
+
+        validate_report(&value, &store).unwrap();
+
+        value.summary = "未经验证的伤害占比为 42.7%。".to_string();
+        assert_eq!(
+            validate_report(&value, &store).unwrap_err().code,
+            "numeric_prose_claim"
         );
     }
 
