@@ -168,6 +168,23 @@ impl CmpOp {
 }
 
 impl MacroCondition {
+    /// Fully parenthesized semantic projection of the AST.
+    ///
+    /// This is intentionally separate from `display_string`: game macro text
+    /// has no grouping parentheses, while Agent/debug consumers need to see the
+    /// exact tree produced by the right-associative parser.
+    pub fn semantic_string(&self) -> String {
+        match self {
+            MacroCondition::And(a, b) => {
+                format!("({} AND {})", a.semantic_string(), b.semantic_string())
+            }
+            MacroCondition::Or(a, b) => {
+                format!("({} OR {})", a.semantic_string(), b.semantic_string())
+            }
+            _ => self.display_string(),
+        }
+    }
+
     pub fn display_string(&self) -> String {
         match self {
             MacroCondition::Rage(op, v) => format!("rage{}{}", op.symbol(), v),

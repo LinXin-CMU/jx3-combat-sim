@@ -66,7 +66,16 @@ function Start-AgentCase {
   $status = Wait-AgentRun $created
   Assert-True ($status.status -eq 'completed') "Run $($created.run_id) did not complete."
   Assert-True (-not $status.persistence_error) "Run $($created.run_id) was not persisted."
-  Assert-True ($status.result.accounting.tool_calls -eq 2) "Run $($created.run_id) used an unexpected tool count."
+  $toolNames = @($status.result.trace | Where-Object { $_.kind -eq 'tool_started' } | Select-Object -ExpandProperty tool_name)
+  $scenarioCalls = @($toolNames | Where-Object { $_ -eq 'get_current_scenario' }).Count
+  $simulationCalls = @($toolNames | Where-Object { $_ -eq 'simulate_scenario' }).Count
+  $knowledgeCalls = @($toolNames | Where-Object { $_ -eq 'search_knowledge_base' }).Count
+  $unexpectedCalls = @($toolNames | Where-Object { $_ -notin @('get_current_scenario', 'simulate_scenario', 'search_knowledge_base') })
+  Assert-True ($status.result.accounting.tool_calls -eq $toolNames.Count) "Run $($created.run_id) tool accounting does not match its trace."
+  Assert-True ($scenarioCalls -eq 1) "Run $($created.run_id) did not capture exactly one scenario."
+  Assert-True ($simulationCalls -eq 1) "Run $($created.run_id) did not execute exactly one deterministic simulation."
+  Assert-True ($knowledgeCalls -le 1) "Run $($created.run_id) repeated its optional knowledge prefetch."
+  Assert-True ($unexpectedCalls.Count -eq 0) "Run $($created.run_id) crossed the offline read-only tool boundary."
   Assert-True ($status.result.accounting.simulations -eq 1) "Run $($created.run_id) used an unexpected simulation count."
   Assert-True ($status.result.report.evidence_ids.Count -eq 1) "Run $($created.run_id) has no grounded evidence."
   Assert-True ($status.result.report.content.findings[0].metrics[0].evidence_id -eq $status.result.report.evidence_ids[0]) "Metric evidence is disconnected."

@@ -41,7 +41,7 @@ pub struct Phase2EntryDebug {
 // Buff 名称 → ID 映射
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn buff_name_to_id(name: &str) -> Option<u32> {
+pub(crate) fn buff_name_to_id(name: &str) -> Option<u32> {
     use crate::*;
     match name {
         "血怒" => Some(BUFF_XUE_NU),

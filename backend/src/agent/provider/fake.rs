@@ -99,6 +99,29 @@ impl LlmProvider for FakeProvider {
             }
 
             if output.get("tool_name").and_then(Value::as_str) == Some("search_knowledge_base") {
+                // Domain-aware runs may receive a server-owned knowledge prefetch before the
+                // provider's first turn.  A combat-baseline question still needs simulator
+                // evidence; do not mistake the prefetched guide for a complete answer.
+                if request
+                    .tools
+                    .iter()
+                    .any(|tool| tool.name == "simulate_scenario")
+                    && !should_search_knowledge(request)
+                {
+                    return validated(
+                        request,
+                        ModelResponse {
+                            assistant_text: None,
+                            tool_calls: vec![ProviderToolCall {
+                                call_id: "fake-call-2".to_string(),
+                                name: "simulate_scenario".to_string(),
+                                arguments: json!({}),
+                            }],
+                            finish_reason: FinishReason::ToolCalls,
+                            usage: TokenUsage::default(),
+                        },
+                    );
+                }
                 return validated(
                     request,
                     ModelResponse {
@@ -402,5 +425,52 @@ mod tests {
             serde_json::from_str(final_response.assistant_text.as_deref().unwrap()).unwrap();
         assert_eq!(report["findings"][0]["evidence_ids"][0], "a".repeat(64));
         assert!(report["summary"].as_str().unwrap().contains("当前场景版本"));
+    }
+
+    #[tokio::test]
+    async fn server_prefetched_knowledge_does_not_replace_required_simulation() {
+        let provider = FakeProvider::new("offline".to_string(), "fixture-v1".to_string());
+        let request = ModelRequest {
+            instructions: "Use tools.".to_string(),
+            messages: vec![
+                ModelMessage::User {
+                    content: "分析当前循环的确定性输出基线，并说明证据边界。".to_string(),
+                },
+                ModelMessage::Assistant {
+                    content: None,
+                    tool_calls: vec![ProviderToolCall {
+                        call_id: "server-prefetch-knowledge".to_string(),
+                        name: "search_knowledge_base".to_string(),
+                        arguments: json!({}),
+                    }],
+                },
+                ModelMessage::ToolResult {
+                    call_id: "server-prefetch-knowledge".to_string(),
+                    output: json!({
+                        "tool_name": "search_knowledge_base",
+                        "evidence": []
+                    }),
+                },
+            ],
+            tools: vec![
+                ToolDefinition {
+                    name: "search_knowledge_base".to_string(),
+                    description: "Search current guides.".to_string(),
+                    parameters: json!({"type": "object"}),
+                },
+                ToolDefinition {
+                    name: "simulate_scenario".to_string(),
+                    description: "Simulate.".to_string(),
+                    parameters: json!({"type": "object"}),
+                },
+            ],
+            response_format: None,
+            max_output_tokens: 512,
+        };
+
+        let response = provider.complete(&request).await.unwrap();
+        assert_eq!(response.finish_reason, FinishReason::ToolCalls);
+        assert_eq!(response.tool_calls.len(), 1);
+        assert_eq!(response.tool_calls[0].name, "simulate_scenario");
     }
 }

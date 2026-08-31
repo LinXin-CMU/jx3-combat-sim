@@ -170,8 +170,19 @@ pub struct RotationInputSummary {
     pub parse_status: String,
     pub parse_error: Option<String>,
     pub truncated: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub macro_semantics: Option<MacroSemanticsSummary>,
     pub macro_statements: Vec<MacroStatementSummary>,
     pub manual_operations: Vec<ManualOperationSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct MacroSemanticsSummary {
+    pub operator_precedence: String,
+    pub associativity: String,
+    pub line_selection: String,
+    pub absent_bufftime_result: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -183,7 +194,84 @@ pub struct MacroStatementSummary {
     pub command: String,
     pub skill_name: String,
     pub condition: Option<String>,
+    /// Exact parser-produced tree. This, not the flat source string, is the
+    /// authoritative condition grouping for Agent reasoning.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub condition_ast: Option<serde_json::Value>,
+    /// Fully parenthesized, human-readable projection of `condition_ast`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub condition_semantics: Option<String>,
     pub statement: String,
+}
+
+fn macro_condition_ast(condition: &crate::macro_engine::MacroCondition) -> serde_json::Value {
+    use crate::macro_engine::MacroCondition;
+    match condition {
+        MacroCondition::Rage(op, value) => serde_json::json!({
+            "kind": "rage", "operator": op.symbol(), "value": value
+        }),
+        MacroCondition::Life(op, value) => serde_json::json!({
+            "kind": "life", "operator": op.symbol(), "value": value
+        }),
+        MacroCondition::Buff(name) => serde_json::json!({
+            "kind": "buff", "name": name,
+            "resolved_buff_id": crate::macro_eval::buff_name_to_id(name)
+        }),
+        MacroCondition::NoBuff(name) => serde_json::json!({
+            "kind": "no_buff", "name": name,
+            "resolved_buff_id": crate::macro_eval::buff_name_to_id(name)
+        }),
+        MacroCondition::BuffTime(name, op, value) => serde_json::json!({
+            "kind": "buff_time", "name": name, "operator": op.symbol(),
+            "value_seconds": value,
+            "resolved_buff_id": crate::macro_eval::buff_name_to_id(name)
+        }),
+        MacroCondition::BuffStack(name, op, value) => serde_json::json!({
+            "kind": "buff_stack", "name": name, "operator": op.symbol(), "value": value,
+            "resolved_buff_id": crate::macro_eval::buff_name_to_id(name)
+        }),
+        MacroCondition::TBuff(name) => serde_json::json!({
+            "kind": "target_buff", "name": name,
+            "resolved_buff_id": crate::macro_eval::buff_name_to_id(name)
+        }),
+        MacroCondition::TnoBuff(name) => serde_json::json!({
+            "kind": "target_no_buff", "name": name,
+            "resolved_buff_id": crate::macro_eval::buff_name_to_id(name)
+        }),
+        MacroCondition::TBuffTime(name, op, value) => serde_json::json!({
+            "kind": "target_buff_time", "name": name, "operator": op.symbol(),
+            "value_seconds": value,
+            "resolved_buff_id": crate::macro_eval::buff_name_to_id(name)
+        }),
+        MacroCondition::SkillNotInCd(name) => {
+            serde_json::json!({"kind": "skill_not_in_cd", "skill_name": name})
+        }
+        MacroCondition::SkillExists(id) => serde_json::json!({"kind": "skill_exists", "skill_id": id}),
+        MacroCondition::SkillNotExists(id) => {
+            serde_json::json!({"kind": "skill_not_exists", "skill_id": id})
+        }
+        MacroCondition::SkillEnergy(name, op, value) => serde_json::json!({
+            "kind": "skill_charge_count", "skill_name": name,
+            "operator": op.symbol(), "value": value
+        }),
+        MacroCondition::LastSkill(name) => serde_json::json!({"kind": "last_skill", "name": name}),
+        MacroCondition::LastSkillNot(name) => {
+            serde_json::json!({"kind": "last_skill_not", "name": name})
+        }
+        MacroCondition::NearbyEnemy(op, value) => serde_json::json!({
+            "kind": "nearby_enemy_count", "operator": op.symbol(), "value": value
+        }),
+        MacroCondition::And(left, right) => serde_json::json!({
+            "kind": "and",
+            "left": macro_condition_ast(left),
+            "right": macro_condition_ast(right)
+        }),
+        MacroCondition::Or(left, right) => serde_json::json!({
+            "kind": "or",
+            "left": macro_condition_ast(left),
+            "right": macro_condition_ast(right)
+        }),
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -320,6 +408,7 @@ fn summarize_rotation_input(simulation: &crate::SimulateRequest) -> RotationInpu
             parse_status: "not_applicable".to_string(),
             parse_error: None,
             truncated: simulation.sequence.len() > MAX_ROTATION_INPUT_ITEMS,
+            macro_semantics: None,
             macro_statements: Vec::new(),
             manual_operations: operations,
         };
@@ -333,6 +422,19 @@ fn summarize_rotation_input(simulation: &crate::SimulateRequest) -> RotationInpu
             Some(format!("line {}: {}", error.line + 1, error.message)),
         ),
     };
+    let parsed_conditions = parsed.as_ref().ok().map(|config| {
+        config
+            .pages
+            .iter()
+            .flat_map(|page| page.lines.iter())
+            .map(|line| {
+                line.condition.as_ref().map(|condition| {
+                    (macro_condition_ast(condition), condition.semantic_string())
+                })
+            })
+            .collect::<Vec<_>>()
+    });
+    let mut parsed_statement_index = 0usize;
     let mut page = 0usize;
     let mut stance = None;
     let mut statements = Vec::new();
@@ -362,6 +464,12 @@ fn summarize_rotation_input(simulation: &crate::SimulateRequest) -> RotationInpu
             continue;
         };
         total_statements += 1;
+        let parsed_condition = parsed_conditions
+            .as_ref()
+            .and_then(|conditions| conditions.get(parsed_statement_index))
+            .cloned()
+            .flatten();
+        parsed_statement_index += 1;
         if statements.len() >= MAX_ROTATION_INPUT_ITEMS {
             continue;
         }
@@ -389,6 +497,8 @@ fn summarize_rotation_input(simulation: &crate::SimulateRequest) -> RotationInpu
             command: command.to_string(),
             skill_name,
             condition,
+            condition_ast: parsed_condition.as_ref().map(|value| value.0.clone()),
+            condition_semantics: parsed_condition.map(|value| value.1),
             statement: statement.to_string(),
         });
     }
@@ -397,6 +507,12 @@ fn summarize_rotation_input(simulation: &crate::SimulateRequest) -> RotationInpu
         parse_status,
         parse_error,
         truncated: total_statements > MAX_ROTATION_INPUT_ITEMS,
+        macro_semantics: Some(MacroSemanticsSummary {
+            operator_precedence: "and_or_equal".to_string(),
+            associativity: "right".to_string(),
+            line_selection: "source_order_first_condition_true_and_castable".to_string(),
+            absent_bufftime_result: false,
+        }),
         macro_statements: statements,
         manual_operations: Vec::new(),
     }
@@ -642,6 +758,25 @@ mod tests {
         assert_eq!(input.macro_statements[0].source_line, 2);
         assert_eq!(input.macro_statements[0].stance.as_deref(), Some("shield"));
         assert_eq!(input.macro_statements[0].skill_name, "盾飞");
+        assert_eq!(
+            input.macro_statements[0].condition_semantics.as_deref(),
+            Some("(rage>64 AND nobuff:嗜血)")
+        );
+        assert_eq!(
+            input.macro_statements[0]
+                .condition_ast
+                .as_ref()
+                .and_then(|value| value.pointer("/kind"))
+                .and_then(serde_json::Value::as_str),
+            Some("and")
+        );
+        assert_eq!(
+            input
+                .macro_semantics
+                .as_ref()
+                .map(|semantics| semantics.associativity.as_str()),
+            Some("right")
+        );
         assert_eq!(
             input.macro_statements[0].statement,
             "/cast [rage>64&nobuff:嗜血] 盾飞"

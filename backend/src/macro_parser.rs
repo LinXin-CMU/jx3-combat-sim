@@ -96,11 +96,14 @@ fn parse_line(line: &str, line_num: usize) -> Result<Option<MacroLine>, MacroPar
         // 但条件中也可能有空格... 简化：如果包含条件关键字就解析条件
         let has_condition = rest.contains('>')
             || rest.contains('<')
+            || rest.contains("bufftime:")
+            || rest.contains("tbufftime:")
             || rest.contains("buff:")
             || rest.contains("nobuff:")
             || rest.contains("tbuff:")
             || rest.contains("tnobuff:")
             || rest.contains("skill_notin_cd:")
+            || rest.contains("skill_energy:")
             || rest.contains("last_skill")
             || rest.contains("skill:")
             || rest.contains("noskill:")
@@ -373,6 +376,10 @@ pub fn render_macro_text(cfg: &MacroConfig) -> String {
             };
             if !s.is_empty() { out.push_str(&format!("#page {}\n", s)); }
             else { out.push_str("#page\n"); }
+        } else if i > 0 {
+            // A later unfiltered page still needs an explicit delimiter.  Without
+            // it, render -> parse merges this page into the preceding stance page.
+            out.push_str("#page\n");
         }
         for line in &page.lines {
             let cmd = if line.action.is_fcast() { "/fcast" } else { "/cast" };
@@ -439,6 +446,34 @@ mod tests {
     }
 
     #[test]
+    fn current_general_macro_exposes_exact_complex_grouping() {
+        let text = concat!(
+            "/cast [buff:盾飞&nobuff:血怒·惊涌&buff:麟光甲=9|bufftime:狂绝<4.7&buff:麟光甲|skill_energy:血怒>1] 血怒\n",
+            "/cast [buff:天下宏愿|rage>64&bufftime:嗜血<5.3|nobuff:嗜血] 盾飞\n",
+            "/cast [skill_energy:阵云结晦=2|nobuff:麟光甲&bufftime:嗜血>8] 阵云结晦"
+        );
+        let config = parse_macro_text(text).unwrap();
+        let semantics = config.pages[0]
+            .lines
+            .iter()
+            .map(|line| line.condition.as_ref().unwrap().semantic_string())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            semantics[0],
+            "(buff:盾飞 AND (nobuff:血怒·惊涌 AND (buff:麟光甲=9 OR (bufftime:狂绝<4.7 AND (buff:麟光甲 OR skill_energy:血怒>1)))))"
+        );
+        assert_eq!(
+            semantics[1],
+            "(buff:天下宏愿 OR (rage>64 AND (bufftime:嗜血<5.3 OR nobuff:嗜血)))"
+        );
+        assert_eq!(
+            semantics[2],
+            "(skill_energy:阵云结晦=2 OR (nobuff:麟光甲 AND bufftime:嗜血>8))"
+        );
+    }
+
+    #[test]
     fn test_multi_page() {
         let text = "#page shield\n/cast 盾击\n#page blade\n/cast 斩刀";
         let config = parse_macro_text(text).unwrap();
@@ -458,5 +493,32 @@ mod tests {
         let config = parse_macro_text("/cast rage>49 绝刀").unwrap();
         assert!(config.pages[0].lines[0].condition.is_some());
         assert_eq!(config.pages[0].lines[0].action.skill_name(), "绝刀");
+    }
+
+    #[test]
+    fn rendered_skill_energy_equality_round_trips_as_a_condition() {
+        let config = parse_macro_text("/cast [skill_energy:阵云结晦=2] 阵云结晦").unwrap();
+        let rendered = render_macro_text(&config);
+        let reparsed = parse_macro_text(&rendered).unwrap();
+        let line = &reparsed.pages[0].lines[0];
+        assert_eq!(line.action.skill_name(), "阵云结晦");
+        assert!(matches!(
+            line.condition,
+            Some(MacroCondition::SkillEnergy(ref name, CmpOp::Eq, 2)) if name == "阵云结晦"
+        ));
+    }
+
+    #[test]
+    fn rendered_later_unfiltered_page_keeps_its_boundary() {
+        let text = "#page shield\n/cast 盾击\n#page\n/cast 绝刀\n/cast 斩刀";
+        let config = parse_macro_text(text).unwrap();
+        assert_eq!(config.pages.len(), 2);
+
+        let rendered = render_macro_text(&config);
+        let reparsed = parse_macro_text(&rendered).unwrap();
+        assert_eq!(reparsed.pages.len(), 2);
+        assert_eq!(reparsed.pages[0].stance_filter, Some(Stance::Shield));
+        assert_eq!(reparsed.pages[1].stance_filter, None);
+        assert_eq!(reparsed.pages[1].lines[0].action.skill_name(), "绝刀");
     }
 }
