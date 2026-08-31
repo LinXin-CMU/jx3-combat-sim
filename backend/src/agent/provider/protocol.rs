@@ -222,7 +222,11 @@ impl ModelRequest {
 }
 
 impl ModelResponse {
-    pub fn validate_against(&self, request: &ModelRequest) -> Result<(), ProtocolError> {
+    /// Validate provider-controlled response structure without applying the
+    /// request-specific tool allow-list. Adapters use this check so the
+    /// orchestrator can recover from a model selecting an unavailable tool
+    /// instead of losing the whole grounded run at the transport boundary.
+    pub fn validate(&self) -> Result<(), ProtocolError> {
         if self
             .assistant_text
             .as_deref()
@@ -246,26 +250,35 @@ impl ModelResponse {
             ));
         }
 
-        let allowed_tools: HashSet<&str> = request
-            .tools
-            .iter()
-            .map(|tool| tool.name.as_str())
-            .collect();
         let mut call_ids = HashSet::new();
         for call in &self.tool_calls {
             validate_call(call)?;
-            if !allowed_tools.contains(call.name.as_str()) {
-                return Err(protocol_error(
-                    "unregistered_provider_tool",
-                    "provider returned a tool that was not exposed",
-                ));
-            }
             if !call_ids.insert(call.call_id.as_str()) {
                 return Err(protocol_error(
                     "duplicate_provider_call_id",
                     "provider returned duplicate tool call ids",
                 ));
             }
+        }
+        Ok(())
+    }
+
+    pub fn validate_against(&self, request: &ModelRequest) -> Result<(), ProtocolError> {
+        self.validate()?;
+        let allowed_tools: HashSet<&str> = request
+            .tools
+            .iter()
+            .map(|tool| tool.name.as_str())
+            .collect();
+        if self
+            .tool_calls
+            .iter()
+            .any(|call| !allowed_tools.contains(call.name.as_str()))
+        {
+            return Err(protocol_error(
+                "unregistered_provider_tool",
+                "provider returned a tool that was not exposed",
+            ));
         }
         Ok(())
     }

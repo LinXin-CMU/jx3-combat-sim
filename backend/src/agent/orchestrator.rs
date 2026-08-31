@@ -32,6 +32,7 @@ const MAX_QUESTION_BYTES: usize = 16 * 1024;
 const MAX_SESSION_CONTEXT_BYTES: usize = 16 * 1024;
 const MAX_REPORT_REPAIRS: u32 = 1;
 const MAX_EMPTY_RESPONSE_RETRIES: u32 = 1;
+const MAX_TOOL_SELECTION_RETRIES: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -365,14 +366,20 @@ pub async fn run_agent_recorded(
     let knowledge_only_client_scope = requires_knowledge_only_client_scope(&input.question);
     let mut tools = definitions
         .into_iter()
-        .filter(|tool| tool.name != "get_current_scenario")
-        .filter(|tool| !knowledge_only_client_scope || tool.name == "search_knowledge_base")
         .filter(|tool| {
-            analysis_plan
-                .playbook
-                .preferred_tools
-                .iter()
-                .any(|preferred| preferred == &tool.name)
+            !knowledge_only_client_scope
+                || matches!(
+                    tool.name.as_str(),
+                    "get_current_scenario" | "search_knowledge_base"
+                )
+        })
+        .filter(|tool| {
+            tool.name == "get_current_scenario"
+                || analysis_plan
+                    .playbook
+                    .preferred_tools
+                    .iter()
+                    .any(|preferred| preferred == &tool.name)
         })
         .collect::<Vec<_>>();
     tools.sort_by_key(|tool| {
@@ -399,6 +406,7 @@ pub async fn run_agent_recorded(
     });
     let mut repairs = 0;
     let mut empty_response_retries = 0;
+    let mut tool_selection_retries = 0;
     let mut diagnosis_gap_reminders = 0_u8;
     let mut evidence_gap_reminders = 0_u8;
     let mut repair_message = None;
@@ -635,21 +643,11 @@ pub async fn run_agent_recorded(
                 .map(|content| vec![ModelMessage::User { content }])
                 .unwrap_or_else(|| messages.clone()),
             tools: if tools_available {
-                tools
-                    .iter()
-                    .filter(|tool| {
-                        tool.name != "search_knowledge_base"
-                            || registry.used_knowledge_searches() < MAX_KNOWLEDGE_SEARCHES
-                    })
-                    .filter(|tool| {
-                        tool_available_for_analysis_stage(
-                            &analysis_plan,
-                            registry.evidence(),
-                            &tool.name,
-                        )
-                    })
-                    .cloned()
-                    .collect()
+                // Keep the plan-scoped tool catalog stable across model turns.
+                // Budget and diagnosis rules are enforced as recoverable tool
+                // results below; shrinking the catalog made compatible models
+                // repeat a previously visible tool and abort the whole run.
+                tools.clone()
             } else {
                 Vec::new()
             },
@@ -839,7 +837,78 @@ pub async fn run_agent_recorded(
                 &registry,
             );
         }
-        if response.validate_against(&request).is_err() {
+        if let Err(protocol_error) = response.validate_against(&request) {
+            if protocol_error.code == "unregistered_provider_tool"
+                && !is_repair
+                && tool_selection_retries < MAX_TOOL_SELECTION_RETRIES
+                && accounting.model_turns < limits.max_model_turns
+            {
+                tool_selection_retries += 1;
+                let available = request
+                    .tools
+                    .iter()
+                    .map(|tool| tool.name.clone())
+                    .collect::<Vec<_>>();
+                let unavailable = response
+                    .tool_calls
+                    .iter()
+                    .filter(|call| !available.contains(&call.name))
+                    .map(|call| call.name.clone())
+                    .collect::<Vec<_>>();
+                record_replay(
+                    &replay_sink,
+                    "tool_selection_rejected",
+                    serde_json::json!({
+                        "code": protocol_error.code,
+                        "requested_tools": &unavailable,
+                        "available_tools": &available,
+                    }),
+                );
+                let correction = if available.is_empty() {
+                    "The previous action selected a tool, but this is a report-only turn and nothing was executed. Return the final AgentReportContentV1 JSON object now using only the existing evidence.".to_string()
+                } else {
+                    format!(
+                        "The previous action selected an unavailable tool and nothing was executed. Continue from the existing evidence. Select only one of these tools: {}. You may instead return the final AgentReportContentV1 JSON object.",
+                        available.join(", ")
+                    )
+                };
+                messages.push(ModelMessage::User {
+                    content: correction,
+                });
+                trace.push(
+                    "tool_selection_recovered",
+                    None,
+                    Vec::new(),
+                    Some("unregistered_provider_tool".to_string()),
+                );
+                continue;
+            }
+            if protocol_error.code == "unregistered_provider_tool" {
+                if let Some(content) = evidence_preserving_provider_fallback(
+                    &analysis_plan,
+                    registry.evidence(),
+                    "模型连续选择了不可用工具；已保留此前取得的可验证证据。",
+                ) {
+                    trace.push(
+                        "tool_selection_evidence_preserved",
+                        None,
+                        cited_evidence_ids(&content),
+                        Some("unregistered_provider_tool".to_string()),
+                    );
+                    return terminal_with_report(
+                        provider,
+                        &input,
+                        &prompt,
+                        AgentRunStatus::PartiallyVerified,
+                        accounting,
+                        content,
+                        Some(fixed_error(protocol_error.code, protocol_error.message)),
+                        trace,
+                        started,
+                        &registry,
+                    );
+                }
+            }
             record_replay(
                 &replay_sink,
                 "local_protocol_error",
@@ -970,9 +1039,27 @@ pub async fn run_agent_recorded(
                     }
                 }
                 accounting.tool_calls += 1;
-                trace.push("tool_started", Some(call.name.clone()), Vec::new(), None);
+                let diagnosis_deferred = rotation_tool_requires_diagnosis(
+                    &analysis_plan,
+                    registry.evidence(),
+                    &call.name,
+                );
+                trace.push(
+                    if diagnosis_deferred {
+                        "tool_deferred"
+                    } else {
+                        "tool_started"
+                    },
+                    Some(call.name.clone()),
+                    Vec::new(),
+                    diagnosis_deferred.then(|| "rotation_diagnosis_required".to_string()),
+                );
                 let arguments = call.arguments.clone();
-                let outcome = registry.dispatch(&input.run_id, &call.name, call.arguments);
+                let outcome = if diagnosis_deferred {
+                    AgentToolRegistry::rotation_diagnosis_required(&call.name)
+                } else {
+                    registry.dispatch(&input.run_id, &call.name, call.arguments)
+                };
                 record_replay(
                     &replay_sink,
                     "tool_dispatch",
@@ -1130,11 +1217,8 @@ pub async fn run_agent_recorded(
             .missing_dimensions
             .iter()
             .any(|dimension| dimension == "candidate_comparison");
-        let comparison_available = tool_available_for_analysis_stage(
-            &analysis_plan,
-            registry.evidence(),
-            "compare_scenarios",
-        ) && tools.iter().any(|tool| tool.name == "compare_scenarios")
+        let comparison_available = has_rotation_diagnosis(registry.evidence())
+            && tools.iter().any(|tool| tool.name == "compare_scenarios")
             && limits
                 .max_simulations
                 .saturating_sub(registry.used_simulations())
@@ -1347,13 +1431,6 @@ fn is_domain_experiment(tool_name: &str) -> bool {
     )
 }
 
-fn plan_requires_dimension(plan: &AnalysisPlanV1, dimension: &str) -> bool {
-    plan.playbook
-        .required_dimensions
-        .iter()
-        .any(|required| required == dimension)
-}
-
 fn has_rotation_diagnosis(evidence: &EvidenceStore) -> bool {
     evidence.values().any(|item| {
         item.get("tool_name").and_then(serde_json::Value::as_str) == Some("analyze_timeline")
@@ -1361,11 +1438,10 @@ fn has_rotation_diagnosis(evidence: &EvidenceStore) -> bool {
     })
 }
 
-/// Rotation analysis is a server-enforced state machine, not merely a prompt
-/// convention. The baseline timeline tool performs the first simulation; the
-/// candidate comparator is exposed only after diagnosis and only when the user
-/// actually requested an optimization/comparison outcome.
-fn tool_available_for_analysis_stage(
+/// Keep the tool visible but turn premature simulation/comparison calls into a
+/// recoverable tool result. This preserves diagnosis-first semantics without a
+/// brittle, shrinking provider tool catalog.
+fn rotation_tool_requires_diagnosis(
     plan: &AnalysisPlanV1,
     evidence: &EvidenceStore,
     tool_name: &str,
@@ -1374,16 +1450,9 @@ fn tool_available_for_analysis_stage(
         .routing_signals
         .iter()
         .any(|signal| signal == "rotation_diagnosis_first");
-    if !diagnosis_first {
-        return true;
-    }
-    let diagnosed = has_rotation_diagnosis(evidence);
-    match tool_name {
-        "simulate_scenario" => false,
-        "analyze_timeline" => !diagnosed,
-        "compare_scenarios" => diagnosed && plan_requires_dimension(plan, "candidate_comparison"),
-        _ => true,
-    }
+    diagnosis_first
+        && !has_rotation_diagnosis(evidence)
+        && matches!(tool_name, "simulate_scenario" | "compare_scenarios")
 }
 
 fn requires_knowledge_only_client_scope(question: &str) -> bool {
@@ -2192,23 +2261,23 @@ mod tests {
     }
 
     #[test]
-    fn rotation_tools_unlock_diagnosis_before_optional_comparison() {
+    fn rotation_tools_use_a_soft_diagnosis_gate() {
         let runtime = AgentRuntime::fixture();
         let scenario = scenario(&runtime);
         let optimize = select_analysis_plan("分析并优化当前循环", &scenario);
         let empty = EvidenceStore::new();
 
-        assert!(tool_available_for_analysis_stage(
+        assert!(!rotation_tool_requires_diagnosis(
             &optimize,
             &empty,
             "analyze_timeline"
         ));
-        assert!(!tool_available_for_analysis_stage(
+        assert!(rotation_tool_requires_diagnosis(
             &optimize,
             &empty,
             "simulate_scenario"
         ));
-        assert!(!tool_available_for_analysis_stage(
+        assert!(rotation_tool_requires_diagnosis(
             &optimize,
             &empty,
             "compare_scenarios"
@@ -2222,19 +2291,19 @@ mod tests {
                 "result": {"diagnostic_profile": {"input_mode": "manual_sequence"}}
             }),
         );
-        assert!(!tool_available_for_analysis_stage(
+        assert!(!rotation_tool_requires_diagnosis(
             &optimize,
             &diagnosed,
             "analyze_timeline"
         ));
-        assert!(tool_available_for_analysis_stage(
+        assert!(!rotation_tool_requires_diagnosis(
             &optimize,
             &diagnosed,
             "compare_scenarios"
         ));
 
         let diagnose_only = select_analysis_plan("分析当前循环的优缺点", &scenario);
-        assert!(!tool_available_for_analysis_stage(
+        assert!(!rotation_tool_requires_diagnosis(
             &diagnose_only,
             &diagnosed,
             "compare_scenarios"
@@ -2369,7 +2438,7 @@ mod tests {
                 .iter()
                 .map(|tool| tool.name.as_str())
                 .collect::<Vec<_>>(),
-            vec!["search_knowledge_base"]
+            vec!["get_current_scenario", "search_knowledge_base"]
         );
 
         let _ = fs::remove_dir_all(root);
@@ -2643,7 +2712,7 @@ mod tests {
         assert!(requests[0]
             .tools
             .iter()
-            .all(|tool| tool.name != "get_current_scenario"));
+            .any(|tool| tool.name == "get_current_scenario"));
     }
 
     #[tokio::test]
@@ -2685,11 +2754,67 @@ mod tests {
         assert!(requests[0]
             .tools
             .iter()
-            .all(|tool| tool.name != "compare_scenarios"));
+            .any(|tool| tool.name == "compare_scenarios"));
         assert!(requests[1]
             .tools
             .iter()
-            .all(|tool| tool.name != "compare_scenarios"));
+            .any(|tool| tool.name == "compare_scenarios"));
+        assert_eq!(
+            requests[0]
+                .tools
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect::<Vec<_>>(),
+            requests[1]
+                .tools
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[tokio::test]
+    async fn unavailable_tool_selection_is_corrected_without_losing_the_run() {
+        let runtime = AgentRuntime::fixture();
+        let provider = ScriptedProvider::new(vec![
+            Ok(tool_call("call-unknown", "shell", json!({}))),
+            Ok(tool_call("call-diagnose", "analyze_timeline", json!({}))),
+            Ok(ModelResponse {
+                assistant_text: Some(
+                    serde_json::to_string(&refusal_content(
+                        "基线诊断已完成。",
+                        "本轮只验证错误工具选择可以恢复。",
+                    ))
+                    .unwrap(),
+                ),
+                tool_calls: Vec::new(),
+                finish_reason: FinishReason::Stop,
+                usage: TokenUsage::default(),
+            }),
+        ]);
+        let result = run_agent(
+            &provider,
+            &runtime,
+            input(&runtime, "run-tool-selection-recovery"),
+            AgentRunLimits::default(),
+            AgentCancellation::default(),
+        )
+        .await;
+
+        assert_eq!(result.status, AgentRunStatus::Refused);
+        assert_eq!(result.accounting.model_turns, 3);
+        assert_eq!(result.accounting.simulations, 1);
+        assert!(result
+            .trace
+            .iter()
+            .any(|event| event.kind == "tool_selection_recovered"));
+        let requests = provider.requests();
+        assert_eq!(requests.len(), 3);
+        assert!(requests[1].messages.iter().any(|message| matches!(
+            message,
+            ModelMessage::User { content }
+                if content.contains("selected an unavailable tool")
+        )));
     }
 
     #[tokio::test]

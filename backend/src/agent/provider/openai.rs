@@ -199,7 +199,7 @@ impl LlmProvider for OpenAiResponsesProvider {
         let body = responses_request(&self.transport.model, request)?;
         let bytes = self.transport.post_json("responses", &body).await?;
         let response = parse_responses_response(&bytes)?;
-        response.validate_against(request).map_err(|error| {
+        response.validate().map_err(|error| {
             ProviderError::invalid_response_protocol(error.code, error.message)
                 .with_usage(response.usage.clone())
         })?;
@@ -261,7 +261,7 @@ impl LlmProvider for OpenAiChatProvider {
             chat_request_with_compatibility(&self.transport.model, request, self.compatibility)?;
         let bytes = self.transport.post_json("chat/completions", &body).await?;
         let response = parse_chat_response(&bytes)?;
-        response.validate_against(request).map_err(|error| {
+        response.validate().map_err(|error| {
             ProviderError::invalid_response_protocol(error.code, error.message)
                 .with_usage(response.usage.clone())
         })?;
@@ -1012,7 +1012,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn blocked_chat_tool_attempt_retains_usage_for_accounting() {
+    async fn unknown_chat_tool_is_returned_for_orchestrator_recovery() {
         let body = r#"{
             "choices":[{"message":{"content":null,"tool_calls":[{
                 "id":"call-shell",
@@ -1029,10 +1029,10 @@ mod tests {
             "test-secret-value".to_string(),
         )
         .unwrap();
-        let error = provider.complete(&request()).await.unwrap_err();
+        let response = provider.complete(&request()).await.unwrap();
 
-        assert_eq!(error.code, "unregistered_provider_tool");
-        assert_eq!(error.usage.total_tokens, 89);
+        assert_eq!(response.tool_calls[0].name, "shell");
+        assert_eq!(response.usage.total_tokens, 89);
     }
 
     #[tokio::test]

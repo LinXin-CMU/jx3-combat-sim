@@ -162,6 +162,15 @@ impl<'a> AgentToolRegistry<'a> {
         )
     }
 
+    pub fn rotation_diagnosis_required(tool_name: &str) -> ToolDispatchOutcome {
+        failure(
+            tool_name,
+            "rotation_diagnosis_required",
+            "baseline timeline diagnosis must complete before this experiment; call analyze_timeline next",
+            false,
+        )
+    }
+
     pub fn dispatch(
         &mut self,
         trace_id: &str,
