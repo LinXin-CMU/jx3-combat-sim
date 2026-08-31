@@ -686,20 +686,30 @@ fn apply_saved_artifact_contract(plan: &mut AnalysisPlanV1, normalized_question:
         &["对比", "比较", "优缺点", "差异", "哪个好", "哪套"],
     );
     if asks_to_compare {
-        let comparison_tool = if contains_any(normalized_question, &["宏", "一键宏"]) {
-            "compare_saved_macros"
-        } else {
-            "compare_saved_scenarios"
-        };
-        if !plan
-            .playbook
-            .preferred_tools
-            .iter()
-            .any(|preferred| preferred == comparison_tool)
+        let comparison_tools: &[&str] = if contains_any(normalized_question, &["宏", "一键宏"])
         {
-            plan.playbook
+            &["compare_saved_macros"]
+        } else if contains_any(
+            normalized_question,
+            &["循环", "战斗广场", "广场方案", "配装方案"],
+        ) {
+            &["compare_saved_scenarios"]
+        } else {
+            // A display name does not necessarily reveal its artifact kind.
+            // Keep both typed comparators available until catalog evidence does.
+            &["compare_saved_macros", "compare_saved_scenarios"]
+        };
+        for comparison_tool in comparison_tools {
+            if !plan
+                .playbook
                 .preferred_tools
-                .push(comparison_tool.to_string());
+                .iter()
+                .any(|preferred| preferred == comparison_tool)
+            {
+                plan.playbook
+                    .preferred_tools
+                    .push((*comparison_tool).to_string());
+            }
         }
         if !plan
             .playbook
@@ -1819,6 +1829,21 @@ mod tests {
         assert!(!plan
             .routing_signals
             .contains(&"rotation_diagnosis_first".to_string()));
+    }
+
+    #[test]
+    fn saved_comparison_by_display_names_keeps_both_typed_comparators_available() {
+        let runtime = AgentRuntime::fixture();
+        let scenario = runtime.fixture_scenario();
+        let plan = select_analysis_plan("对比我保存的分山绝云和分山武学助手", &scenario);
+
+        for tool in ["compare_saved_macros", "compare_saved_scenarios"] {
+            assert!(plan
+                .playbook
+                .preferred_tools
+                .iter()
+                .any(|value| value == tool));
+        }
     }
 
     #[test]

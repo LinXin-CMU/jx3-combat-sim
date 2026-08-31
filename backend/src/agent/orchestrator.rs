@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -18,7 +19,9 @@ use super::provider::{
     FinishReason, LlmProvider, ModelMessage, ModelRequest, ProviderToolCall,
     StructuredOutputDefinition, TokenUsage,
 };
-use super::registry::{normalize_reference_query, AgentToolRegistry, MAX_KNOWLEDGE_SEARCHES};
+use super::registry::{
+    normalize_reference_query, AgentToolRegistry, ToolDispatchOutcome, MAX_KNOWLEDGE_SEARCHES,
+};
 use super::report::{
     cited_evidence_ids, cited_knowledge_sources, parse_and_salvage_report,
     parse_and_validate_report, report_content_json_schema, AgentFindingV1, AgentReportContentV1,
@@ -422,6 +425,7 @@ pub async fn run_agent_recorded(
             .iter()
             .any(|tool| tool == "compare_scenarios");
     let mut domain_experiment_completed = false;
+    let mut deterministic_tool_cache = HashMap::<String, ToolDispatchOutcome>::new();
     trace.push("planning", None, Vec::new(), None);
     trace.push(
         "analysis_plan_selected",
@@ -978,11 +982,6 @@ pub async fn run_agent_recorded(
                     &registry,
                 );
             }
-            let domain_experiment_requested = response
-                .tool_calls
-                .iter()
-                .any(|call| is_domain_experiment(&call.name));
-            domain_experiment_completed |= domain_experiment_requested;
             messages.push(ModelMessage::Assistant {
                 content: response.assistant_text,
                 tool_calls: response.tool_calls.clone(),
@@ -1055,11 +1054,50 @@ pub async fn run_agent_recorded(
                     diagnosis_deferred.then(|| "rotation_diagnosis_required".to_string()),
                 );
                 let arguments = call.arguments.clone();
-                let outcome = if diagnosis_deferred {
+                let cache_key = (!diagnosis_deferred && is_reusable_deterministic_tool(&call.name))
+                    .then(|| {
+                        super::hash::canonical_sha256(&serde_json::json!({
+                            "tool": &call.name,
+                            "arguments": &arguments,
+                        }))
+                        .ok()
+                    })
+                    .flatten();
+                let cached = cache_key
+                    .as_ref()
+                    .and_then(|key| deterministic_tool_cache.get(key))
+                    .cloned();
+                let reused = cached.is_some();
+                let outcome = if let Some(cached) = cached {
+                    cached
+                } else if diagnosis_deferred {
                     AgentToolRegistry::rotation_diagnosis_required(&call.name)
                 } else {
                     registry.dispatch(&input.run_id, &call.name, call.arguments)
                 };
+                if !reused
+                    && !outcome.budget_exhausted
+                    && outcome
+                        .output
+                        .get("ok")
+                        .and_then(serde_json::Value::as_bool)
+                        == Some(true)
+                {
+                    if let Some(key) = cache_key {
+                        deterministic_tool_cache.insert(key, outcome.clone());
+                    }
+                }
+                if is_domain_experiment(&call.name)
+                    && !outcome.budget_exhausted
+                    && outcome
+                        .output
+                        .get("ok")
+                        .and_then(serde_json::Value::as_bool)
+                        == Some(true)
+                    && !outcome.evidence_ids.is_empty()
+                {
+                    domain_experiment_completed = true;
+                }
                 record_replay(
                     &replay_sink,
                     "tool_dispatch",
@@ -1070,7 +1108,7 @@ pub async fn run_agent_recorded(
                         "output": &outcome.output,
                         "evidence_ids": &outcome.evidence_ids,
                         "budget_exhausted": outcome.budget_exhausted,
-                        "coalesced": false,
+                        "coalesced": reused,
                     }),
                 );
                 trace.push(
@@ -1081,7 +1119,8 @@ pub async fn run_agent_recorded(
                         .output
                         .pointer("/error/code")
                         .and_then(|value| value.as_str())
-                        .map(str::to_string),
+                        .map(str::to_string)
+                        .or_else(|| reused.then(|| "deterministic_result_reused".to_string())),
                 );
                 messages.push(ModelMessage::ToolResult {
                     call_id: call.call_id,
@@ -1430,6 +1469,20 @@ fn is_domain_experiment(tool_name: &str) -> bool {
         "simulate_scenario"
             | "compare_scenarios"
             | "analyze_timeline"
+            | "compare_saved_macros"
+            | "compare_saved_scenarios"
+    )
+}
+
+fn is_reusable_deterministic_tool(tool_name: &str) -> bool {
+    matches!(
+        tool_name,
+        "get_current_scenario"
+            | "simulate_scenario"
+            | "compare_scenarios"
+            | "analyze_timeline"
+            | "list_saved_artifacts"
+            | "read_saved_artifact"
             | "compare_saved_macros"
             | "compare_saved_scenarios"
     )
@@ -2880,6 +2933,55 @@ mod tests {
                 .iter()
                 .map(|tool| tool.name.as_str())
                 .collect::<Vec<_>>()
+        );
+    }
+
+    #[tokio::test]
+    async fn repeated_deterministic_experiment_reuses_first_result() {
+        let runtime = AgentRuntime::fixture();
+        let provider = ScriptedProvider::new(vec![
+            Ok(tool_call("call-timeline-1", "analyze_timeline", json!({}))),
+            Ok(tool_call("call-timeline-2", "analyze_timeline", json!({}))),
+            Ok(ModelResponse {
+                assistant_text: Some(
+                    serde_json::to_string(&refusal_content(
+                        "重复的确定性诊断已复用。",
+                        "本测试只验证重复实验不会再次消耗模拟预算。",
+                    ))
+                    .unwrap(),
+                ),
+                tool_calls: Vec::new(),
+                finish_reason: FinishReason::Stop,
+                usage: TokenUsage::default(),
+            }),
+        ]);
+
+        let mut repeated_input = input(&runtime, "run-deterministic-reuse");
+        repeated_input.question = "帮我比较当前一键宏和手动循环".to_string();
+        let result = run_agent(
+            &provider,
+            &runtime,
+            repeated_input,
+            AgentRunLimits::default(),
+            AgentCancellation::default(),
+        )
+        .await;
+
+        assert_eq!(result.status, AgentRunStatus::Refused);
+        assert_eq!(result.accounting.simulations, 1);
+        assert_eq!(result.accounting.tool_calls, 3);
+        let timeline_results = result
+            .trace
+            .iter()
+            .filter(|event| {
+                event.kind == "tool_finished"
+                    && event.tool_name.as_deref() == Some("analyze_timeline")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(timeline_results.len(), 2);
+        assert_eq!(
+            timeline_results[0].evidence_ids,
+            timeline_results[1].evidence_ids
         );
     }
 

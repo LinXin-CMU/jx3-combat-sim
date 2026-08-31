@@ -294,8 +294,7 @@ pub fn parse_and_salvage_report(
             "已验证结论",
         );
         let explanation_fallback = grounded_finding_explanation(&finding, evidence);
-        sanitized_claims +=
-            sanitize_text_field(&mut finding.explanation, &explanation_fallback);
+        sanitized_claims += sanitize_text_field(&mut finding.explanation, &explanation_fallback);
         sanitized_claims += sanitize_unsupported_numeric_prose(
             &mut finding.explanation,
             &finding.metrics,
@@ -550,8 +549,7 @@ fn grounded_finding_explanation(finding: &AgentFindingV1, evidence: &EvidenceSto
             .to_string();
     }
     if cites_tool("analyze_timeline") {
-        return "本轮时间轴支持这项观察；因果解释与改动收益仍需同场景对照实验确认。"
-            .to_string();
+        return "本轮时间轴支持这项观察；因果解释与改动收益仍需同场景对照实验确认。".to_string();
     }
     "本轮模拟证据支持这项观察；未经同场景对比的改动收益仍作为待验证假设。".to_string()
 }
@@ -1210,11 +1208,18 @@ fn metric_tool_allowed(envelope: &Value) -> bool {
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct NumericLiteral {
     value: f64,
+    multiplier: f64,
     decimal_places: u32,
     percent: bool,
     ordinary_count: bool,
     start: usize,
     end: usize,
+}
+
+impl NumericLiteral {
+    fn scaled_value(self) -> f64 {
+        self.value * self.multiplier
+    }
 }
 
 fn validate_grounded_prose<'a>(
@@ -1311,6 +1316,25 @@ fn numeric_literals(value: &str) -> Vec<NumericLiteral> {
             || bytes
                 .get(number_end)
                 .is_some_and(|byte| byte.is_ascii_alphabetic() || *byte == b'_');
+        let mut suffix = index;
+        while bytes.get(suffix).is_some_and(u8::is_ascii_whitespace) {
+            suffix += 1;
+        }
+        let multiplier = if value
+            .get(suffix..)
+            .is_some_and(|tail| tail.starts_with('万'))
+        {
+            index = suffix + '万'.len_utf8();
+            10_000.0
+        } else if value
+            .get(suffix..)
+            .is_some_and(|tail| tail.starts_with('亿'))
+        {
+            index = suffix + '亿'.len_utf8();
+            100_000_000.0
+        } else {
+            1.0
+        };
         let percent = if bytes.get(index) == Some(&b'%') {
             index += 1;
             true
@@ -1332,10 +1356,12 @@ fn numeric_literals(value: &str) -> Vec<NumericLiteral> {
                 && !has_decimal
                 && !has_exponent
                 && !percent
+                && multiplier == 1.0
                 && !value[start..number_end].contains(',')
                 && (0.0..=12.0).contains(&parsed);
             literals.push(NumericLiteral {
                 value: parsed,
+                multiplier,
                 decimal_places,
                 percent,
                 ordinary_count,
@@ -1419,15 +1445,19 @@ fn matches_knowledge_literal(literal: NumericLiteral, sources: &[NumericLiteral]
         if literal.percent != source.percent {
             return false;
         }
-        let tolerance = literal.value.abs().max(source.value.abs()).max(1.0) * 1e-9;
-        (literal.value - source.value).abs() <= tolerance
+        let literal_value = literal.scaled_value();
+        let source_value = source.scaled_value();
+        let tolerance = literal_value.abs().max(source_value.abs()).max(1.0) * 1e-9;
+        (literal_value - source_value).abs() <= tolerance
     })
 }
 
 fn cited_tool_numeric_values(evidence_ids: &[String], evidence: &EvidenceStore) -> Vec<f64> {
     let mut values = Vec::new();
     for evidence_id in evidence_ids {
-        let Some(envelope) = evidence.get(evidence_id).filter(|item| metric_tool_allowed(item))
+        let Some(envelope) = evidence
+            .get(evidence_id)
+            .filter(|item| metric_tool_allowed(item))
         else {
             continue;
         };
@@ -1461,7 +1491,11 @@ fn collect_tool_numeric_values(value: &Value, field: Option<&str>, values: &mut 
                 )
             }) =>
         {
-            values.extend(numeric_literals(text).into_iter().map(|literal| literal.value));
+            values.extend(
+                numeric_literals(text)
+                    .into_iter()
+                    .map(NumericLiteral::scaled_value),
+            );
         }
         Value::Array(items) => {
             for item in items {
@@ -1486,13 +1520,13 @@ fn matches_tool_value(literal: NumericLiteral, sources: &[f64]) -> bool {
             [*source, magnitude]
         };
         candidates.into_iter().any(|candidate| {
-            let display_tolerance = if literal.decimal_places == 0 {
+            let display_tolerance = (if literal.decimal_places == 0 {
                 0.5
             } else {
                 0.5 * 10_f64.powi(-(literal.decimal_places as i32))
-            };
+            }) * literal.multiplier;
             let floating_tolerance = candidate.abs().max(1.0) * 1e-9;
-            (literal.value - candidate).abs() <= display_tolerance.max(floating_tolerance)
+            (literal.scaled_value() - candidate).abs() <= display_tolerance.max(floating_tolerance)
         })
     })
 }
@@ -1509,7 +1543,7 @@ fn matches_metric_label_literal(
             .into_iter()
             .any(|label_literal| {
                 if literal.percent != label_literal.percent
-                    || (literal.value - label_literal.value).abs() > f64::EPSILON
+                    || (literal.scaled_value() - label_literal.scaled_value()).abs() > f64::EPSILON
                 {
                     return false;
                 }
@@ -1528,13 +1562,13 @@ fn matches_metric(literal: NumericLiteral, metric_values: &[f64]) -> bool {
             [*metric, *metric]
         };
         candidates.into_iter().any(|candidate| {
-            let display_tolerance = if literal.decimal_places == 0 {
+            let display_tolerance = (if literal.decimal_places == 0 {
                 0.5
             } else {
                 0.5 * 10_f64.powi(-(literal.decimal_places as i32))
-            };
+            }) * literal.multiplier;
             let floating_tolerance = candidate.abs().max(1.0) * 1e-9;
-            (literal.value - candidate).abs() <= display_tolerance.max(floating_tolerance)
+            (literal.scaled_value() - candidate).abs() <= display_tolerance.max(floating_tolerance)
         })
     })
 }
@@ -1649,11 +1683,8 @@ mod tests {
         value.findings[0].explanation = "核心技能伤害占比为 33.58%。".to_string();
 
         validate_report(&value, &store).unwrap();
-        let salvaged = parse_and_salvage_report(
-            &serde_json::to_string(&value).unwrap(),
-            &store,
-        )
-        .unwrap();
+        let salvaged =
+            parse_and_salvage_report(&serde_json::to_string(&value).unwrap(), &store).unwrap();
         assert_eq!(salvaged.content.findings[0].metrics.len(), 1);
 
         value.findings[0].metrics[0].value = 34.0;
@@ -1666,8 +1697,7 @@ mod tests {
     #[test]
     fn large_simulator_metric_accepts_integer_display_rounding() {
         let mut store = evidence();
-        store.get_mut(&"a".repeat(64)).unwrap()["result"]["dps"] =
-            json!(99021.01333333334);
+        store.get_mut(&"a".repeat(64)).unwrap()["result"]["dps"] = json!(99021.01333333334);
         let mut value = report();
         value.findings[0].metrics[0].value = 99021.0;
 
@@ -1708,7 +1738,9 @@ mod tests {
             }),
         )]);
         let mut value = report();
-        value.summary = "绝刀·50怒共 79 次、伤害占比 33.6%；阈值 5.3 调到 5.0 后，DPS 下降约 0.99%。".to_string();
+        value.summary =
+            "绝刀·50怒共 79 次、伤害占比 33.6%；阈值 5.3 调到 5.0 后，DPS 下降约 0.99%。"
+                .to_string();
         value.findings[0].evidence_ids = vec!["d".repeat(64)];
         value.findings[0].metrics.clear();
         value.findings[0].explanation = "这些数字均来自同场景模拟与对比。".to_string();
@@ -2096,6 +2128,16 @@ mod tests {
         let mut formatted_evidence = evidence();
         formatted_evidence.get_mut(&"a".repeat(64)).unwrap()["result"]["dps"] = json!(80_596.56);
         validate_report(&formatted, &formatted_evidence).unwrap();
+
+        let mut chinese_units = report();
+        chinese_units.findings[0].explanation =
+            "武学助手约 303.73 万，差距约 6.83 万，援戈伤害约 647 万。".to_string();
+        let mut chinese_units_evidence = evidence();
+        let result = &mut chinese_units_evidence.get_mut(&"a".repeat(64)).unwrap()["result"];
+        result["candidate_dps"] = json!(3_037_347.33);
+        result["delta_dps"] = json!(68_343.02);
+        result["yuange_damage"] = json!(6_472_188.0);
+        validate_report(&chinese_units, &chinese_units_evidence).unwrap();
 
         let mut named_skill = report();
         named_skill.findings[0].metrics[0].label = "绝刀·50怒总伤害".to_string();

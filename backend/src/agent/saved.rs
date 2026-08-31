@@ -191,10 +191,54 @@ pub fn read_saved_artifact(
     artifact_id: &str,
 ) -> Result<SavedArtifactDocument, SavedArtifactError> {
     let record = resolve(root, artifact_id)?;
+    let content = public_artifact_content(
+        record.summary.kind,
+        &record.content,
+        record.macro_text.as_deref(),
+    );
     Ok(SavedArtifactDocument {
         artifact: record.summary,
-        content: record.content,
+        content,
     })
+}
+
+fn public_artifact_content(
+    kind: SavedArtifactKind,
+    content: &Value,
+    macro_text: Option<&str>,
+) -> Value {
+    if kind != SavedArtifactKind::Macro {
+        return content.clone();
+    }
+
+    let mode = content
+        .get("mode")
+        .and_then(Value::as_str)
+        .unwrap_or("general");
+    let mut public = serde_json::Map::new();
+    for key in ["_mount", "_version", "mode"] {
+        if let Some(value) = content.get(key) {
+            public.insert(key.to_string(), value.clone());
+        }
+    }
+    public.insert(
+        "active_macro_text".to_string(),
+        Value::String(macro_text.unwrap_or_default().to_string()),
+    );
+    if mode == "stance" {
+        public.insert("active_sections".to_string(), json!(["shield", "blade"]));
+        for key in ["shield", "blade"] {
+            if let Some(value) = content.get(key) {
+                public.insert(key.to_string(), value.clone());
+            }
+        }
+    } else {
+        public.insert("active_sections".to_string(), json!(["general"]));
+        if let Some(value) = content.get("general") {
+            public.insert("general".to_string(), value.clone());
+        }
+    }
+    Value::Object(public)
 }
 
 pub fn prepare_saved_macro_comparison(
@@ -1082,6 +1126,25 @@ mod tests {
             macro_object_to_text(&value).unwrap(),
             "#page shield\n/cast 盾击\n#page blade\n/cast 绝刀"
         );
+    }
+
+    #[test]
+    fn general_macro_reader_hides_inactive_stance_storage_fields() {
+        let root = fixture_root();
+        fs::write(
+            root.join("macros_helper.json"),
+            r#"{"_mount":"FenShanJin","mode":"general","general":"/cast 盾击","shield":"/cast 盾猛","blade":"/cast 绝刀"}"#,
+        )
+        .unwrap();
+        let catalog = list_saved_artifacts(&root, "helper", &[SavedArtifactKind::Macro]).unwrap();
+        let document = read_saved_artifact(&root, &catalog.items[0].artifact_id).unwrap();
+
+        assert_eq!(document.content["mode"], "general");
+        assert_eq!(document.content["active_sections"], json!(["general"]));
+        assert_eq!(document.content["active_macro_text"], "/cast 盾击");
+        assert!(document.content.get("shield").is_none());
+        assert!(document.content.get("blade").is_none());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
