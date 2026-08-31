@@ -22,8 +22,8 @@ use super::registry::{normalize_reference_query, AgentToolRegistry, MAX_KNOWLEDG
 use super::report::{
     cited_evidence_ids, cited_knowledge_sources, parse_and_salvage_report,
     parse_and_validate_report, report_content_json_schema, AgentFindingV1, AgentReportContentV1,
-    AgentReportV1, AgentRunAccountingV1, EvidenceStore, AGENT_REPORT_CONTENT_SCHEMA_V1,
-    AGENT_REPORT_SCHEMA_V1,
+    AgentReportV1, AgentRunAccountingV1, EvidenceStore, GroundedMetricV1,
+    AGENT_REPORT_CONTENT_SCHEMA_V1, AGENT_REPORT_SCHEMA_V1,
 };
 use super::{AgentRuntime, ScenarioSnapshotV1};
 
@@ -1675,6 +1675,104 @@ fn evidence_preserving_provider_fallback(
     if evidence_ids.is_empty() {
         return None;
     }
+    let mut diagnostic_findings = Vec::new();
+    if let Some((evidence_id, envelope)) = evidence.iter().find(|(_, envelope)| {
+        envelope
+            .get("tool_name")
+            .and_then(serde_json::Value::as_str)
+            == Some("simulate_scenario")
+            && envelope.pointer("/result/dps").is_some()
+    }) {
+        if let Some(dps) = envelope
+            .pointer("/result/dps")
+            .and_then(serde_json::Value::as_f64)
+        {
+            let mut metrics = vec![GroundedMetricV1 {
+                label: "平均 DPS".to_string(),
+                value: dps,
+                unit: "damage_per_second".to_string(),
+                evidence_id: evidence_id.clone(),
+                json_pointer: "/result/dps".to_string(),
+            }];
+            if let Some(total_damage) = envelope
+                .pointer("/result/total_damage")
+                .and_then(serde_json::Value::as_f64)
+            {
+                metrics.push(GroundedMetricV1 {
+                    label: "总伤害".to_string(),
+                    value: total_damage,
+                    unit: "damage".to_string(),
+                    evidence_id: evidence_id.clone(),
+                    json_pointer: "/result/total_damage".to_string(),
+                });
+            }
+            diagnostic_findings.push(AgentFindingV1 {
+                title: "当前输出基线".to_string(),
+                explanation: "这是冻结场景的模拟结果，用于描述当前表现，不自动代表循环已经最优。"
+                    .to_string(),
+                evidence_ids: vec![evidence_id.clone()],
+                metrics,
+            });
+        }
+    }
+    if let Some((evidence_id, envelope)) = evidence.iter().find(|(_, envelope)| {
+        envelope
+            .get("tool_name")
+            .and_then(serde_json::Value::as_str)
+            == Some("analyze_timeline")
+            && envelope.pointer("/result/diagnostic_profile").is_some()
+    }) {
+        let profile = envelope
+            .pointer("/result/diagnostic_profile")
+            .expect("timeline profile checked above");
+        let input_mode = profile
+            .get("input_mode")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("unknown");
+        let input_label = match input_mode {
+            "macro" => "宏循环",
+            "manual_sequence" => "手动序列",
+            _ => "当前输入",
+        };
+        let strengths = profile
+            .get("observed_strengths")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|item| item.get("summary").and_then(serde_json::Value::as_str))
+            .take(3)
+            .collect::<Vec<_>>();
+        if !strengths.is_empty() {
+            diagnostic_findings.push(AgentFindingV1 {
+                title: format!("执行层优点 · {input_label}"),
+                explanation: format!(
+                    "{}。这些是时间轴观察，说明输入执行连续，但不证明技能优先级已经最优。",
+                    strengths.join("；")
+                ),
+                evidence_ids: vec![evidence_id.clone()],
+                metrics: Vec::new(),
+            });
+        }
+        let risks = profile
+            .get("observed_risks")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|item| item.get("summary").and_then(serde_json::Value::as_str))
+            .take(3)
+            .collect::<Vec<_>>();
+        if !risks.is_empty() {
+            diagnostic_findings.push(AgentFindingV1 {
+                title: "下一步应验证的循环风险".to_string(),
+                explanation: format!(
+                    "{}。这里只把它标为风险，不在缺少对照实验时直接判定为损失来源。",
+                    risks.join("；")
+                ),
+                evidence_ids: vec![evidence_id.clone()],
+                metrics: Vec::new(),
+            });
+        }
+    }
     let mut knowledge_findings = Vec::new();
     let mut seen_excerpts = Vec::<String>::new();
     for (evidence_id, envelope) in evidence {
@@ -1720,7 +1818,7 @@ fn evidence_preserving_provider_fallback(
             .unwrap_or("知识库证据");
         knowledge_findings.push(AgentFindingV1 {
             title: concise_evidence_excerpt(heading.unwrap_or(title), 48),
-            explanation: format!("知识库原文摘录：{excerpt}"),
+            explanation: format!("资料要点：{excerpt}"),
             evidence_ids: vec![evidence_id.clone()],
             metrics: Vec::new(),
         });
@@ -1728,8 +1826,11 @@ fn evidence_preserving_provider_fallback(
             break;
         }
     }
+    let has_diagnostic_evidence = !diagnostic_findings.is_empty();
     let has_readable_knowledge = !knowledge_findings.is_empty();
-    let findings = if has_readable_knowledge {
+    let findings = if has_diagnostic_evidence {
+        diagnostic_findings
+    } else if has_readable_knowledge {
         knowledge_findings
     } else {
         vec![AgentFindingV1 {
@@ -1743,9 +1844,14 @@ fn evidence_preserving_provider_fallback(
     };
     Some(AgentReportContentV1 {
         schema_version: AGENT_REPORT_CONTENT_SCHEMA_V1.to_string(),
-        summary: if has_readable_knowledge {
+        summary: if has_diagnostic_evidence {
             format!(
-                "模型解释未通过发布校验；以下直接展示“{}”命中的可溯源知识，不补写未经验证的结论。",
+                "已完成“{}”的模拟器基线与时间线诊断。模型解释未通过发布校验，因此这里只保留模拟器可直接证明的结果。",
+                plan.playbook.label
+            )
+        } else if has_readable_knowledge {
+            format!(
+                "模型解释未通过发布校验；以下整理“{}”命中的可溯源资料要点，不补写未经验证的结论。",
                 plan.playbook.label
             )
         } else {
@@ -3059,7 +3165,8 @@ mod tests {
         );
         let report = result.report.unwrap();
         assert_eq!(report.evidence_ids.len(), 2);
-        assert_eq!(report.content.findings.len(), 1);
+        assert!(report.content.findings.len() >= 2);
+        assert!(report.content.findings[0].title.contains("当前输出基线"));
         assert!(result
             .trace
             .iter()
@@ -3204,7 +3311,9 @@ mod tests {
         assert_eq!(result.status, AgentRunStatus::PartiallyVerified);
         let report = result.report.expect("evidence-preserving report");
         assert!(!report.evidence_ids.is_empty());
-        assert!(report.content.summary.contains("证据已保留"));
+        assert!(report.content.summary.contains("模拟器基线与时间线诊断"));
+        assert!(report.content.findings[0].title.contains("当前输出基线"));
+        assert!(!report.content.findings[0].metrics.is_empty());
         assert!(result
             .trace
             .iter()
@@ -3237,8 +3346,9 @@ mod tests {
 
         let report = evidence_preserving_provider_fallback(&plan, &evidence, "格式错误")
             .expect("knowledge fallback");
-        assert!(report.summary.contains("直接展示"));
+        assert!(report.summary.contains("可溯源资料要点"));
         assert!(report.findings[0].explanation.contains("提前倒数10秒"));
+        assert!(!report.findings[0].explanation.contains("知识库原文摘录"));
         assert_eq!(report.findings[0].evidence_ids, vec!["ev-knowledge"]);
     }
 

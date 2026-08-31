@@ -45,6 +45,7 @@ pub struct AgentFindingV1 {
     pub title: String,
     pub explanation: String,
     pub evidence_ids: Vec<String>,
+    #[serde(default)]
     pub metrics: Vec<GroundedMetricV1>,
 }
 
@@ -1472,6 +1473,18 @@ mod tests {
     #[test]
     fn grounded_metric_passes() {
         validate_report(&report(), &evidence()).unwrap();
+    }
+
+    #[test]
+    fn omitted_finding_metrics_defaults_to_an_empty_list() {
+        let mut value = serde_json::to_value(report()).unwrap();
+        value["findings"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("metrics");
+        let parsed = parse_and_validate_report(&value.to_string(), &evidence()).unwrap();
+
+        assert!(parsed.content.findings[0].metrics.is_empty());
     }
 
     #[test]
