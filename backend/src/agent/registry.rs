@@ -8,11 +8,12 @@ use super::{
     analyze_timeline, compare_scenarios, get_current_scenario, simulate_scenario, AgentRuntime,
     CandidatePatchV1, EvidenceEnvelopeV1, KnowledgeAudience, KnowledgeIndex, KnowledgeIndexError,
     KnowledgeMountScope, KnowledgeSearchQuery, KnowledgeVersionContext, KnowledgeVersionScope,
-    PatchValueV1, ScenarioPatchV1, ScenarioSnapshotV1, ToolBudget, ToolError,
-    MAX_KNOWLEDGE_RESULTS,
+    PatchValueV1, SavedArtifactError, SavedArtifactKind, ScenarioPatchV1, ScenarioSnapshotV1,
+    ToolBudget, ToolError, COMPARE_SAVED_MACROS, COMPARE_SAVED_SCENARIOS, LIST_SAVED_ARTIFACTS,
+    MAX_KNOWLEDGE_RESULTS, READ_SAVED_ARTIFACT,
 };
-use crate::Mount;
 use crate::macro_parser::parse_macro_text;
+use crate::Mount;
 
 pub const AGENT_TOOL_RESULT_SCHEMA_V1: &str = "agent-tool-result/v1";
 pub const MAX_AGENT_CANDIDATES: usize = 3;
@@ -120,6 +121,26 @@ impl<'a> AgentToolRegistry<'a> {
                 name: "analyze_timeline".to_string(),
                 description: "Run the immutable baseline and return deterministic timeline diagnosis evidence.".to_string(),
                 parameters: empty_object_schema(),
+            },
+            ToolDefinition {
+                name: LIST_SAVED_ARTIFACTS.to_string(),
+                description: "Search the current user's allow-listed saved simulator artifacts by their distinctive display name. Returns opaque artifact IDs; never accepts or exposes filesystem locations. Use this before reading or comparing saved data.".to_string(),
+                parameters: list_saved_schema(),
+            },
+            ToolDefinition {
+                name: READ_SAVED_ARTIFACT.to_string(),
+                description: "Read one exact saved simulator artifact selected by an opaque ID returned from list_saved_artifacts. This is read-only and cannot access settings, credentials, sessions, caches, or unrelated files.".to_string(),
+                parameters: read_saved_schema(),
+            },
+            ToolDefinition {
+                name: COMPARE_SAVED_MACROS.to_string(),
+                description: "Run a deterministic A/B comparison of two saved artifacts that contain macros. The server freezes the current attributes, equipment, talents, recipes, target, latency and buffs, and changes only the macro text. IDs must come from list_saved_artifacts.".to_string(),
+                parameters: compare_saved_schema(),
+            },
+            ToolDefinition {
+                name: COMPARE_SAVED_SCENARIOS.to_string(),
+                description: "Run a deterministic comparison of two complete saved loop or battle-plaza scenarios. The server validates version and mount and reports the actual changed fields. IDs must come from list_saved_artifacts.".to_string(),
+                parameters: compare_saved_schema(),
             },
         ]
     }
@@ -282,6 +303,113 @@ impl<'a> AgentToolRegistry<'a> {
                             ),
                             Err(error) => tool_failure(tool_name, error),
                         }
+                    }
+                    Err(error) => tool_failure(tool_name, error),
+                }
+            }
+            LIST_SAVED_ARTIFACTS => {
+                let args = match serde_json::from_value::<ListSavedArguments>(arguments.clone()) {
+                    Ok(args) => args,
+                    Err(_) => return invalid_arguments(tool_name),
+                };
+                let started = Instant::now();
+                match super::list_saved_artifacts(&crate::userdata_base(), &args.query, &args.kinds)
+                {
+                    Ok(result) => match EvidenceEnvelopeV1::new(
+                        trace_id,
+                        tool_name,
+                        &self.scenario.scenario_hash,
+                        arguments,
+                        result,
+                        self.runtime.provenance(),
+                        started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+                    ) {
+                        Ok(evidence) => self.success(tool_name, vec![serialize_evidence(evidence)]),
+                        Err(_) => saved_failure(tool_name, SavedArtifactError::Unreadable),
+                    },
+                    Err(error) => saved_failure(tool_name, error),
+                }
+            }
+            READ_SAVED_ARTIFACT => {
+                let args = match serde_json::from_value::<ReadSavedArguments>(arguments.clone()) {
+                    Ok(args) => args,
+                    Err(_) => return invalid_arguments(tool_name),
+                };
+                let started = Instant::now();
+                match super::read_saved_artifact(&crate::userdata_base(), &args.artifact_id) {
+                    Ok(result) => match EvidenceEnvelopeV1::new(
+                        trace_id,
+                        tool_name,
+                        &self.scenario.scenario_hash,
+                        arguments,
+                        result,
+                        self.runtime.provenance(),
+                        started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+                    ) {
+                        Ok(evidence) => self.success(tool_name, vec![serialize_evidence(evidence)]),
+                        Err(_) => saved_failure(tool_name, SavedArtifactError::Unreadable),
+                    },
+                    Err(error) => saved_failure(tool_name, error),
+                }
+            }
+            COMPARE_SAVED_MACROS | COMPARE_SAVED_SCENARIOS => {
+                let args = match serde_json::from_value::<CompareSavedArguments>(arguments.clone())
+                {
+                    Ok(args) => args,
+                    Err(_) => return invalid_arguments(tool_name),
+                };
+                let prepared = if tool_name == COMPARE_SAVED_MACROS {
+                    super::prepare_saved_macro_comparison(
+                        &crate::userdata_base(),
+                        &args.left_id,
+                        &args.right_id,
+                        self.scenario,
+                        self.runtime.game_version(),
+                        self.runtime.mount(),
+                    )
+                } else {
+                    super::prepare_saved_scenario_comparison(
+                        &crate::userdata_base(),
+                        &args.left_id,
+                        &args.right_id,
+                        self.scenario,
+                        self.runtime.game_version(),
+                        self.runtime.mount(),
+                    )
+                };
+                let prepared = match prepared {
+                    Ok(prepared) => prepared,
+                    Err(error) => return saved_failure(tool_name, error),
+                };
+                let started = Instant::now();
+                let context_evidence = match EvidenceEnvelopeV1::new(
+                    trace_id,
+                    tool_name,
+                    &prepared.baseline.scenario_hash,
+                    arguments,
+                    prepared.context,
+                    self.runtime.provenance(),
+                    0,
+                ) {
+                    Ok(evidence) => serialize_evidence(evidence),
+                    Err(_) => return saved_failure(tool_name, SavedArtifactError::Unreadable),
+                };
+                let context = self.runtime.context();
+                match compare_scenarios(
+                    trace_id,
+                    &prepared.baseline,
+                    &[prepared.candidate],
+                    &context,
+                    self.runtime.provenance(),
+                    &mut self.budget,
+                ) {
+                    Ok(mut execution) => {
+                        execution.evidence.duration_ms =
+                            started.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+                        self.success(
+                            tool_name,
+                            vec![context_evidence, serialize_evidence(execution.evidence)],
+                        )
                     }
                     Err(error) => tool_failure(tool_name, error),
                 }
@@ -533,6 +661,35 @@ struct CompareArguments {
 }
 
 #[derive(Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct ListSavedArguments {
+    query: String,
+    kinds: Vec<SavedArtifactKind>,
+}
+
+impl Default for ListSavedArguments {
+    fn default() -> Self {
+        Self {
+            query: String::new(),
+            kinds: Vec::new(),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReadSavedArguments {
+    artifact_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CompareSavedArguments {
+    left_id: String,
+    right_id: String,
+}
+
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct KnowledgeArguments {
     query: String,
@@ -740,6 +897,10 @@ fn knowledge_failure(tool_name: &str, error: KnowledgeIndexError) -> ToolDispatc
     failure(tool_name, code, message, false)
 }
 
+fn saved_failure(tool_name: &str, error: SavedArtifactError) -> ToolDispatchOutcome {
+    failure(tool_name, error.code(), error.message(), false)
+}
+
 fn failure(
     tool_name: &str,
     code: &'static str,
@@ -807,6 +968,46 @@ fn compare_schema() -> Value {
     })
 }
 
+fn list_saved_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "maxLength": 128},
+            "kinds": {
+                "type": "array",
+                "maxItems": 5,
+                "uniqueItems": true,
+                "items": {"type": "string", "enum": ["macro", "loop", "equipment", "attributes", "plaza"]}
+            }
+        },
+        "required": ["query", "kinds"],
+        "additionalProperties": false
+    })
+}
+
+fn read_saved_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "artifact_id": {"type": "string", "pattern": "^sa_[0-9a-f]{64}$"}
+        },
+        "required": ["artifact_id"],
+        "additionalProperties": false
+    })
+}
+
+fn compare_saved_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "left_id": {"type": "string", "pattern": "^sa_[0-9a-f]{64}$"},
+            "right_id": {"type": "string", "pattern": "^sa_[0-9a-f]{64}$"}
+        },
+        "required": ["left_id", "right_id"],
+        "additionalProperties": false
+    })
+}
+
 fn knowledge_search_schema(seasons: &[String], categories: &[String]) -> Value {
     let season_values = std::iter::once(Value::Null)
         .chain(seasons.iter().cloned().map(Value::String))
@@ -839,7 +1040,7 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
-    fn only_four_read_only_tools_are_exposed() {
+    fn only_allow_listed_read_only_tools_are_exposed() {
         let definitions = AgentToolRegistry::definitions();
         let names = definitions
             .iter()
@@ -851,7 +1052,11 @@ mod tests {
                 "get_current_scenario",
                 "simulate_scenario",
                 "compare_scenarios",
-                "analyze_timeline"
+                "analyze_timeline",
+                "list_saved_artifacts",
+                "read_saved_artifact",
+                "compare_saved_macros",
+                "compare_saved_scenarios"
             ]
         );
         let encoded = serde_json::to_string(&definitions).unwrap();
@@ -880,7 +1085,7 @@ mod tests {
         ];
         let categories = vec!["基础".to_string(), "白皮书".to_string()];
         let definitions = AgentToolRegistry::definitions_with_knowledge(&seasons, &categories);
-        assert_eq!(definitions.len(), 5);
+        assert_eq!(definitions.len(), 9);
         let knowledge = definitions.last().unwrap();
         assert_eq!(knowledge.name, "search_knowledge_base");
         assert_eq!(knowledge.parameters["additionalProperties"], false);
@@ -924,7 +1129,10 @@ mod tests {
             season: None,
             category: None,
         };
-        assert!(matches!(invalid.into_query(), Err(KnowledgeIndexError::InvalidQuery(_))));
+        assert!(matches!(
+            invalid.into_query(),
+            Err(KnowledgeIndexError::InvalidQuery(_))
+        ));
 
         let valid = KnowledgeArguments {
             query: "山海源流盾飞".to_string(),

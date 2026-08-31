@@ -630,8 +630,109 @@ pub fn select_analysis_plan(question: &str, scenario: &ScenarioSnapshotV1) -> An
         plan.routing_signals
             .push("scenario_has_no_equipment_context".to_string());
     }
-    apply_rotation_diagnosis_contract(&mut plan, &normalized, scenario);
+    apply_saved_artifact_contract(&mut plan, &normalized);
+    if !plan
+        .routing_signals
+        .iter()
+        .any(|signal| signal == "saved_artifact_access_requested")
+    {
+        apply_rotation_diagnosis_contract(&mut plan, &normalized, scenario);
+    }
     plan
+}
+
+fn apply_saved_artifact_contract(plan: &mut AnalysisPlanV1, normalized_question: &str) {
+    let refers_to_saved_data = contains_any(
+        normalized_question,
+        &[
+            "我保存的",
+            "已保存",
+            "保存的",
+            "存档",
+            "命名宏",
+            "宏配置",
+            "战斗广场",
+            "广场方案",
+        ],
+    );
+    if !refers_to_saved_data || plan.resolved_scope.client != DomainClient::Flagship {
+        return;
+    }
+    if !plan
+        .playbook
+        .required_dimensions
+        .iter()
+        .any(|dimension| dimension == "saved_artifacts")
+    {
+        plan.playbook
+            .required_dimensions
+            .push("saved_artifacts".to_string());
+    }
+    plan.playbook
+        .required_dimensions
+        .retain(|dimension| dimension != "macro_context");
+    for tool in ["list_saved_artifacts", "read_saved_artifact"] {
+        if !plan
+            .playbook
+            .preferred_tools
+            .iter()
+            .any(|preferred| preferred == tool)
+        {
+            plan.playbook.preferred_tools.push(tool.to_string());
+        }
+    }
+    let asks_to_compare = contains_any(
+        normalized_question,
+        &["对比", "比较", "优缺点", "差异", "哪个好", "哪套"],
+    );
+    if asks_to_compare {
+        let comparison_tool = if contains_any(normalized_question, &["宏", "一键宏"]) {
+            "compare_saved_macros"
+        } else {
+            "compare_saved_scenarios"
+        };
+        if !plan
+            .playbook
+            .preferred_tools
+            .iter()
+            .any(|preferred| preferred == comparison_tool)
+        {
+            plan.playbook
+                .preferred_tools
+                .push(comparison_tool.to_string());
+        }
+        if !plan
+            .playbook
+            .required_dimensions
+            .iter()
+            .any(|dimension| dimension == "candidate_comparison")
+        {
+            plan.playbook
+                .required_dimensions
+                .push("candidate_comparison".to_string());
+        }
+    }
+    if !plan
+        .playbook
+        .stages
+        .iter()
+        .any(|stage| stage.stage_id == "saved")
+    {
+        let index = usize::from(!plan.playbook.stages.is_empty());
+        plan.playbook.stages.insert(
+            index,
+            AnalysisStageV1 {
+                stage_id: "saved".to_string(),
+                label: "定位已保存资料".to_string(),
+                purpose: "按显示名称列出候选，用不透明资源标识精确读取或对比。".to_string(),
+            },
+        );
+    }
+    plan.playbook
+        .forbidden_inferences
+        .push("名称存在多个匹配时必须列出候选并让用户消歧，不得静默选择".to_string());
+    plan.routing_signals
+        .push("saved_artifact_access_requested".to_string());
 }
 
 fn apply_rotation_diagnosis_contract(
@@ -762,7 +863,14 @@ pub fn select_analysis_plan_with_history(
     plan.playbook = playbook(task_type, plan.resolved_scope.client);
     plan.routing_signals
         .push("inherited_session_playbook".to_string());
-    apply_rotation_diagnosis_contract(&mut plan, &question.to_lowercase(), scenario);
+    apply_saved_artifact_contract(&mut plan, &question.to_lowercase());
+    if !plan
+        .routing_signals
+        .iter()
+        .any(|signal| signal == "saved_artifact_access_requested")
+    {
+        apply_rotation_diagnosis_contract(&mut plan, &question.to_lowercase(), scenario);
+    }
     plan
 }
 
@@ -1442,6 +1550,8 @@ fn satisfied_dimensions(
     if tools.contains("simulate_scenario")
         || tools.contains("analyze_timeline")
         || tools.contains("compare_scenarios")
+        || tools.contains("compare_saved_macros")
+        || tools.contains("compare_saved_scenarios")
     {
         dimensions.insert("baseline_metrics".to_string());
     }
@@ -1454,8 +1564,14 @@ fn satisfied_dimensions(
             dimensions.insert("rotation_diagnosis".to_string());
         }
     }
-    if tools.contains("compare_scenarios") {
+    if tools.contains("compare_scenarios")
+        || tools.contains("compare_saved_macros")
+        || tools.contains("compare_saved_scenarios")
+    {
         dimensions.insert("candidate_comparison".to_string());
+    }
+    if tools.contains("list_saved_artifacts") || tools.contains("read_saved_artifact") {
+        dimensions.insert("saved_artifacts".to_string());
     }
     if !boundaries.is_empty() {
         dimensions.insert("implementation_boundary".to_string());
@@ -1548,6 +1664,10 @@ pub fn trace_annotation(
         ("tool_started" | "tool_finished", Some("simulate_scenario")) => "baseline",
         ("tool_started" | "tool_finished", Some("analyze_timeline")) => "locate",
         ("tool_started" | "tool_finished", Some("compare_scenarios")) => "compare",
+        ("tool_started" | "tool_finished", Some("list_saved_artifacts")) => "saved",
+        ("tool_started" | "tool_finished", Some("read_saved_artifact")) => "saved",
+        ("tool_started" | "tool_finished", Some("compare_saved_macros")) => "compare",
+        ("tool_started" | "tool_finished", Some("compare_saved_scenarios")) => "compare",
         ("evidence_gap_requires_tool", Some("analyze_timeline")) => "locate",
         ("evidence_gap_requires_tool", Some("compare_scenarios")) => "compare",
         ("evidence_coverage_checked", _) => "coverage",
@@ -1670,6 +1790,35 @@ mod tests {
                 expected
             );
         }
+    }
+
+    #[test]
+    fn saved_macro_question_enables_catalog_and_server_side_ab_tools() {
+        let runtime = AgentRuntime::fixture();
+        let scenario = runtime.fixture_scenario();
+        let plan = select_analysis_plan("对比我保存的绝云宏和武学助手宏，分析优缺点", &scenario);
+        for tool in [
+            "list_saved_artifacts",
+            "read_saved_artifact",
+            "compare_saved_macros",
+        ] {
+            assert!(plan
+                .playbook
+                .preferred_tools
+                .iter()
+                .any(|value| value == tool));
+        }
+        assert!(plan
+            .playbook
+            .required_dimensions
+            .contains(&"saved_artifacts".to_string()));
+        assert!(plan
+            .playbook
+            .required_dimensions
+            .contains(&"candidate_comparison".to_string()));
+        assert!(!plan
+            .routing_signals
+            .contains(&"rotation_diagnosis_first".to_string()));
     }
 
     #[test]

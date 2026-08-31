@@ -98,6 +98,10 @@
     simulate_scenario: '运行基线模拟',
     compare_scenarios: '对比候选方案',
     analyze_timeline: '分析战斗时间轴',
+    list_saved_artifacts: '查找已保存资料',
+    read_saved_artifact: '读取已保存资料',
+    compare_saved_macros: '对比已保存宏',
+    compare_saved_scenarios: '对比已保存方案',
   };
 
   const versionLabels = {
@@ -462,6 +466,10 @@
       simulate_scenario: '在冻结场景上运行确定性基线，战斗数值只由模拟器产生。',
       compare_scenarios: '仅改变声明过的候选参数，在同一场景口径下对比结果。',
       analyze_timeline: '聚合技能、资源、冷却与增益事件，定位可观察的时间轴现象。',
+      list_saved_artifacts: '只在当前账号的宏、循环、配装、属性与广场方案目录中按名称查找。',
+      read_saved_artifact: '用目录返回的不透明标识精确读取一份资料，不接触路径或敏感设置。',
+      compare_saved_macros: '固定当前战斗环境，只替换两份已保存宏并分别运行真实模拟。',
+      compare_saved_scenarios: '分别还原两份完整存档，校验版本与心法后运行真实模拟对比。',
     };
     if (kind === 'tool_started') return toolStarted[event.tool_name] || '调用一个只读工具，为下一阶段取得可验证证据。';
     if (kind === 'model_started') {

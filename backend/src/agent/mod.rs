@@ -18,6 +18,7 @@ pub mod registry;
 pub mod report;
 pub mod run;
 pub mod runtime;
+pub mod saved;
 pub mod schema;
 pub mod session;
 pub mod timeline;
@@ -42,6 +43,12 @@ pub use knowledge::{
     KnowledgeVersionScope, MAX_KNOWLEDGE_RESULTS,
 };
 pub use runtime::AgentRuntime;
+pub use saved::{
+    list_saved_artifacts, prepare_saved_macro_comparison, prepare_saved_scenario_comparison,
+    read_saved_artifact, PreparedSavedComparison, SavedArtifactCatalog, SavedArtifactDocument,
+    SavedArtifactError, SavedArtifactKind, SavedArtifactSummary, SavedComparisonContext,
+    COMPARE_SAVED_MACROS, COMPARE_SAVED_SCENARIOS, LIST_SAVED_ARTIFACTS, READ_SAVED_ARTIFACT,
+};
 pub use schema::{ScenarioError, ScenarioSnapshotV1, SCENARIO_SCHEMA_V1};
 pub use timeline::{
     analyze_timeline, BuffCoverage, GcdGapEvidence, RageObservation, TimeInterval,

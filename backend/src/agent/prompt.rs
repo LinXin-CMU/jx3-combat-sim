@@ -67,6 +67,17 @@ const AGENT_SYSTEM_PROMPT_V17: &str = concat!(
     include_str!("../../prompts/agent_system_v16_addendum.md"),
     include_str!("../../prompts/agent_system_v17_addendum.md")
 );
+pub const AGENT_PROMPT_VERSION_V18: &str = "agent-system/v18";
+const AGENT_SYSTEM_PROMPT_V18: &str = concat!(
+    include_str!("../../prompts/agent_system_v11.md"),
+    include_str!("../../prompts/agent_system_v12_addendum.md"),
+    include_str!("../../prompts/agent_system_v13_addendum.md"),
+    include_str!("../../prompts/agent_system_v14_addendum.md"),
+    include_str!("../../prompts/agent_system_v15_addendum.md"),
+    include_str!("../../prompts/agent_system_v16_addendum.md"),
+    include_str!("../../prompts/agent_system_v17_addendum.md"),
+    include_str!("../../prompts/agent_system_v18_addendum.md")
+);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PromptSpec {
@@ -228,14 +239,23 @@ pub fn agent_prompt_v17() -> PromptSpec {
     }
 }
 
+pub fn agent_prompt_v18() -> PromptSpec {
+    let sha256 = format!("{:x}", Sha256::digest(AGENT_SYSTEM_PROMPT_V18.as_bytes()));
+    PromptSpec {
+        version: AGENT_PROMPT_VERSION_V18,
+        sha256,
+        instructions: AGENT_SYSTEM_PROMPT_V18,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn prompt_is_versioned_and_content_addressed() {
-        let prompt = agent_prompt_v17();
-        assert_eq!(prompt.version, "agent-system/v17");
+        let prompt = agent_prompt_v18();
+        assert_eq!(prompt.version, "agent-system/v18");
         assert_eq!(prompt.sha256.len(), 64);
         assert!(prompt.instructions.contains("get_current_scenario"));
         assert!(prompt.instructions.contains("already called"));
@@ -277,6 +297,9 @@ mod tests {
         assert!(prompt.instructions.contains("typed candidate field"));
         assert!(prompt.instructions.contains("condition_ast"));
         assert!(prompt.instructions.contains("right-associative"));
+        assert!(prompt.instructions.contains("list_saved_artifacts"));
+        assert!(prompt.instructions.contains("compare_saved_macros"));
+        assert!(prompt.instructions.contains("opaque server-issued handles"));
         assert!(prompt
             .instructions
             .contains("parsed meaning from observed runtime effect"));

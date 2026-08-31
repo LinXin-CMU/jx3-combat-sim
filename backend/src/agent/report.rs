@@ -592,6 +592,13 @@ fn metric_value_matches_source(value: f64, unit: &str, source: f64) -> bool {
         return true;
     }
 
+    // Large combat totals and DPS values are often presented without decimal
+    // places. Accept ordinary nearest-integer display rounding, while keeping
+    // small values (ratios, timings and counts) on the tighter rule above.
+    if source.abs() >= 100.0 && value.fract().abs() <= f64::EPSILON {
+        return (source - value).abs() < 0.5;
+    }
+
     // Simulator ratios are stored as 0..=1 fractions, while reports display
     // them as human-readable percentages. Accept only that explicit unit
     // conversion and a small rounding window (at most 0.05 percentage point).
@@ -652,12 +659,32 @@ fn normalize_metric_citations(
 ) -> usize {
     let mut normalized = 0;
     for finding in &mut report.findings {
-        for metric in &finding.metrics {
+        for metric in &mut finding.metrics {
             if evidence.contains_key(&metric.evidence_id)
                 && !finding.evidence_ids.contains(&metric.evidence_id)
             {
                 finding.evidence_ids.push(metric.evidence_id.clone());
                 normalized += 1;
+            }
+            // Models occasionally copy a JSON Pointer relative to the
+            // evidence result object even though the public report contract
+            // requires the explicit /result prefix. Repair only when the
+            // resulting absolute pointer exists and is numeric.
+            if metric.json_pointer.starts_with('/')
+                && !metric.json_pointer.starts_with("/result/")
+                && metric.json_pointer.len() <= 249
+            {
+                let candidate = format!("/result{}", metric.json_pointer);
+                let exists = evidence
+                    .get(&metric.evidence_id)
+                    .filter(|envelope| metric_tool_allowed(envelope))
+                    .and_then(|envelope| envelope.pointer(&candidate))
+                    .and_then(Value::as_f64)
+                    .is_some();
+                if exists {
+                    metric.json_pointer = candidate;
+                    normalized += 1;
+                }
             }
         }
     }
@@ -1637,6 +1664,23 @@ mod tests {
     }
 
     #[test]
+    fn large_simulator_metric_accepts_integer_display_rounding() {
+        let mut store = evidence();
+        store.get_mut(&"a".repeat(64)).unwrap()["result"]["dps"] =
+            json!(99021.01333333334);
+        let mut value = report();
+        value.findings[0].metrics[0].value = 99021.0;
+
+        validate_report(&value, &store).unwrap();
+
+        value.findings[0].metrics[0].value = 99022.0;
+        assert_eq!(
+            validate_report(&value, &store).unwrap_err().code,
+            "metric_value_mismatch"
+        );
+    }
+
+    #[test]
     fn prose_can_restate_numbers_from_its_cited_simulator_evidence() {
         let id = "d".repeat(64);
         let store = BTreeMap::from([(
@@ -1970,6 +2014,22 @@ mod tests {
         assert_eq!(
             parsed.content.findings[0].evidence_ids,
             vec!["a".repeat(64)]
+        );
+    }
+
+    #[test]
+    fn result_relative_metric_pointer_is_normalized_when_it_exists() {
+        let mut value = report();
+        value.findings[0].metrics[0].json_pointer = "/dps".to_string();
+
+        let parsed =
+            parse_and_validate_report(&serde_json::to_string(&value).unwrap(), &evidence())
+                .unwrap();
+
+        assert_eq!(parsed.normalized_metric_citations, 1);
+        assert_eq!(
+            parsed.content.findings[0].metrics[0].json_pointer,
+            "/result/dps"
         );
     }
 

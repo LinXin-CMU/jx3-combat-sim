@@ -13,7 +13,7 @@ use super::domain::{
     select_analysis_plan_with_history, trace_annotation, AnalysisPlanV1,
 };
 use super::evidence::validate_trace_id;
-use super::prompt::agent_prompt_v17;
+use super::prompt::agent_prompt_v18;
 use super::provider::{
     FinishReason, LlmProvider, ModelMessage, ModelRequest, ProviderToolCall,
     StructuredOutputDefinition, TokenUsage,
@@ -299,7 +299,7 @@ pub async fn run_agent_recorded(
     replay_sink: Option<AgentReplaySink>,
 ) -> AgentRunResultV1 {
     let started = Instant::now();
-    let prompt = agent_prompt_v17();
+    let prompt = agent_prompt_v18();
     let analysis_plan = select_analysis_plan_with_history(
         &input.question,
         input.session_playbook_id.as_deref(),
@@ -1427,7 +1427,11 @@ fn public_decision_summary(
 fn is_domain_experiment(tool_name: &str) -> bool {
     matches!(
         tool_name,
-        "simulate_scenario" | "compare_scenarios" | "analyze_timeline"
+        "simulate_scenario"
+            | "compare_scenarios"
+            | "analyze_timeline"
+            | "compare_saved_macros"
+            | "compare_saved_scenarios"
     )
 }
 
@@ -2488,7 +2492,7 @@ mod tests {
         .await;
 
         assert_eq!(result.status, AgentRunStatus::Completed);
-        assert_eq!(result.prompt_version, "agent-system/v17");
+        assert_eq!(result.prompt_version, "agent-system/v18");
         assert_eq!(result.accounting.knowledge_searches, 1);
         assert_eq!(result.accounting.simulations, 0);
         let report = result.report.unwrap();
@@ -2567,7 +2571,7 @@ mod tests {
         .await;
 
         assert_eq!(result.status, AgentRunStatus::Completed);
-        assert_eq!(result.prompt_version, "agent-system/v17");
+        assert_eq!(result.prompt_version, "agent-system/v18");
         assert_eq!(result.accounting.knowledge_searches, 1);
         assert_eq!(result.accounting.simulations, 1);
         let report = result.report.unwrap();
