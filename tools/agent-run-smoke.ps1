@@ -74,8 +74,11 @@ for ($i = 0; $i -lt 40; $i++) {
 Assert-True ($null -ne $status) 'Run status was not returned.'
 Assert-True (-not $status.running) 'Offline Agent run did not finish.'
 Assert-True ($status.status -eq 'completed') 'Offline Agent run did not complete.'
-Assert-True ($status.result.report.evidence_ids.Count -eq 1) 'Grounded report evidence is missing.'
+Assert-True ($status.result.report.evidence_ids.Count -ge 1) 'Grounded report evidence is missing.'
 Assert-True ($status.result.accounting.tool_calls -eq 2) 'Unexpected tool-call count.'
+Assert-True (@($status.result.trace | Where-Object {
+  $_.kind -eq 'tool_started' -and $_.tool_name -eq 'analyze_timeline'
+}).Count -eq 1) 'Rotation run did not execute exactly one baseline timeline diagnosis.'
 Assert-True ($status.session_id -eq $created.session_id) 'Run status lost its session id.'
 Assert-True (-not $status.persistence_error) 'Run reported a persistence failure.'
 

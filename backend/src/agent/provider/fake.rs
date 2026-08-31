@@ -68,11 +68,7 @@ impl LlmProvider for FakeProvider {
                         },
                     );
                 }
-                if !request
-                    .tools
-                    .iter()
-                    .any(|tool| tool.name == "simulate_scenario")
-                {
+                let Some(baseline_tool) = baseline_tool_name(request) else {
                     return validated(
                         request,
                         ModelResponse {
@@ -82,14 +78,16 @@ impl LlmProvider for FakeProvider {
                             usage: TokenUsage::default(),
                         },
                     );
-                }
+                };
                 return validated(
                     request,
                     ModelResponse {
-                        assistant_text: None,
+                        assistant_text: Some(
+                            "先取得当前循环的基线诊断，再判断是否需要候选实验。".to_string(),
+                        ),
                         tool_calls: vec![ProviderToolCall {
                             call_id: "fake-call-2".to_string(),
-                            name: "simulate_scenario".to_string(),
+                            name: baseline_tool.to_string(),
                             arguments: json!({}),
                         }],
                         finish_reason: FinishReason::ToolCalls,
@@ -102,19 +100,23 @@ impl LlmProvider for FakeProvider {
                 // Domain-aware runs may receive a server-owned knowledge prefetch before the
                 // provider's first turn.  A combat-baseline question still needs simulator
                 // evidence; do not mistake the prefetched guide for a complete answer.
-                if request
+                let diagnostic_available = request
                     .tools
                     .iter()
-                    .any(|tool| tool.name == "simulate_scenario")
-                    && !should_search_knowledge(request)
+                    .any(|tool| tool.name == "analyze_timeline");
+                if let Some(baseline_tool) = baseline_tool_name(request)
+                    .filter(|_| diagnostic_available || !should_search_knowledge(request))
                 {
                     return validated(
                         request,
                         ModelResponse {
-                            assistant_text: None,
+                            assistant_text: Some(
+                                "攻略证据已取得；下一步运行基线时间轴，区分已确认优点与观察到的风险。"
+                                    .to_string(),
+                            ),
                             tool_calls: vec![ProviderToolCall {
                                 call_id: "fake-call-2".to_string(),
-                                name: "simulate_scenario".to_string(),
+                                name: baseline_tool.to_string(),
                                 arguments: json!({}),
                             }],
                             finish_reason: FinishReason::ToolCalls,
@@ -135,7 +137,7 @@ impl LlmProvider for FakeProvider {
                 );
             }
 
-            let report = simulation_report(output).unwrap_or_else(refusal_report);
+            let report = simulation_report(request, output).unwrap_or_else(refusal_report);
             return validated(
                 request,
                 ModelResponse {
@@ -181,6 +183,20 @@ impl LlmProvider for FakeProvider {
             .map_err(|_| ProviderError::invalid_response())?;
         Ok(response)
     }
+}
+
+fn baseline_tool_name(request: &ModelRequest) -> Option<&str> {
+    request
+        .tools
+        .iter()
+        .find(|tool| tool.name == "analyze_timeline")
+        .or_else(|| {
+            request
+                .tools
+                .iter()
+                .find(|tool| tool.name == "simulate_scenario")
+        })
+        .map(|tool| tool.name.as_str())
 }
 
 fn should_search_knowledge(request: &ModelRequest) -> bool {
@@ -257,28 +273,67 @@ fn validated(
     Ok(response)
 }
 
-fn simulation_report(output: &Value) -> Option<String> {
-    let evidence =
+fn simulation_report(request: &ModelRequest, output: &Value) -> Option<String> {
+    let simulation =
         output.get("evidence")?.as_array()?.iter().find(|item| {
             item.get("tool_name").and_then(Value::as_str) == Some("simulate_scenario")
         })?;
-    let evidence_id = evidence.get("evidence_id")?.as_str()?;
-    let dps = evidence.pointer("/result/dps")?.as_f64()?;
+    let simulation_id = simulation.get("evidence_id")?.as_str()?;
+    let dps = simulation.pointer("/result/dps")?.as_f64()?;
+    let timeline = output
+        .get("evidence")?
+        .as_array()?
+        .iter()
+        .find(|item| item.get("tool_name").and_then(Value::as_str) == Some("analyze_timeline"));
+    let knowledge = request
+        .messages
+        .iter()
+        .filter_map(|message| match message {
+            ModelMessage::ToolResult { output, .. } => output.get("evidence")?.as_array(),
+            _ => None,
+        })
+        .flatten()
+        .find(|item| {
+            item.get("tool_name").and_then(Value::as_str) == Some("search_knowledge_base")
+                && item
+                    .pointer("/result/results/0/fact_eligible")
+                    .and_then(Value::as_bool)
+                    == Some(true)
+        });
+    let mut findings = vec![json!({
+        "title": "当前输出基线",
+        "explanation": "数值来自确定性模拟器证据。",
+        "evidence_ids": [simulation_id],
+        "metrics": [{
+            "label": "DPS",
+            "value": dps,
+            "unit": "damage_per_second",
+            "evidence_id": simulation_id,
+            "json_pointer": "/result/dps"
+        }]
+    })];
+    if let Some(timeline) = timeline {
+        let timeline_id = timeline.get("evidence_id")?.as_str()?;
+        findings.push(json!({
+            "title": "循环诊断已建立",
+            "explanation": "已生成循环输入类型、节奏、冷却、姿态、资源与操作跳过的基线诊断；现象不直接等同于因果。",
+            "evidence_ids": [timeline_id],
+            "metrics": []
+        }));
+    }
+    if let Some(knowledge) = knowledge {
+        let knowledge_id = knowledge.get("evidence_id")?.as_str()?;
+        findings.push(json!({
+            "title": "当前版本攻略依据",
+            "explanation": "已取得与当前版本匹配且可用于事实判断的攻略正文。",
+            "evidence_ids": [knowledge_id],
+            "metrics": []
+        }));
+    }
     serde_json::to_string(&json!({
         "schema_version": "agent-report-content/v1",
-        "summary": "离线基线分析已完成。",
-        "findings": [{
-            "title": "当前输出基线",
-            "explanation": "数值来自确定性模拟器证据。",
-            "evidence_ids": [evidence_id],
-            "metrics": [{
-                "label": "DPS",
-                "value": dps,
-                "unit": "damage_per_second",
-                "evidence_id": evidence_id,
-                "json_pointer": "/result/dps"
-            }]
-        }],
+        "summary": "离线循环基线与诊断已完成。",
+        "findings": findings,
         "recommendations": [],
         "limitations": ["离线供应商只验证基线工具闭环。"],
         "refusal_reason": null

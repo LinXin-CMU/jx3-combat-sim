@@ -6,14 +6,14 @@ use std::sync::{
 use std::time::{Duration, Instant};
 use tokio::sync::Notify;
 
+#[cfg(test)]
+use super::domain::select_analysis_plan;
 use super::domain::{
     build_evidence_pack, evidence_pack_model_context, knowledge_prefetch, plan_model_context,
     select_analysis_plan_with_history, trace_annotation, AnalysisPlanV1,
 };
-#[cfg(test)]
-use super::domain::select_analysis_plan;
 use super::evidence::validate_trace_id;
-use super::prompt::agent_prompt_v16;
+use super::prompt::agent_prompt_v17;
 use super::provider::{
     FinishReason, LlmProvider, ModelMessage, ModelRequest, ProviderToolCall,
     StructuredOutputDefinition, TokenUsage,
@@ -22,7 +22,8 @@ use super::registry::{normalize_reference_query, AgentToolRegistry, MAX_KNOWLEDG
 use super::report::{
     cited_evidence_ids, cited_knowledge_sources, parse_and_salvage_report,
     parse_and_validate_report, report_content_json_schema, AgentFindingV1, AgentReportContentV1,
-    AgentReportV1, AgentRunAccountingV1, AGENT_REPORT_CONTENT_SCHEMA_V1, AGENT_REPORT_SCHEMA_V1,
+    AgentReportV1, AgentRunAccountingV1, EvidenceStore, AGENT_REPORT_CONTENT_SCHEMA_V1,
+    AGENT_REPORT_SCHEMA_V1,
 };
 use super::{AgentRuntime, ScenarioSnapshotV1};
 
@@ -297,7 +298,7 @@ pub async fn run_agent_recorded(
     replay_sink: Option<AgentReplaySink>,
 ) -> AgentRunResultV1 {
     let started = Instant::now();
-    let prompt = agent_prompt_v16();
+    let prompt = agent_prompt_v17();
     let analysis_plan = select_analysis_plan_with_history(
         &input.question,
         input.session_playbook_id.as_deref(),
@@ -398,6 +399,7 @@ pub async fn run_agent_recorded(
     });
     let mut repairs = 0;
     let mut empty_response_retries = 0;
+    let mut diagnosis_gap_reminders = 0_u8;
     let mut evidence_gap_reminders = 0_u8;
     let mut repair_message = None;
     let mut final_report_only = false;
@@ -639,6 +641,13 @@ pub async fn run_agent_recorded(
                         tool.name != "search_knowledge_base"
                             || registry.used_knowledge_searches() < MAX_KNOWLEDGE_SEARCHES
                     })
+                    .filter(|tool| {
+                        tool_available_for_analysis_stage(
+                            &analysis_plan,
+                            registry.evidence(),
+                            &tool.name,
+                        )
+                    })
                     .cloned()
                     .collect()
             } else {
@@ -718,7 +727,7 @@ pub async fn run_agent_recorded(
                     trace,
                     started,
                     &registry,
-                )
+                );
             }
             Some(Ok(Ok(response))) => response,
             Some(Ok(Err(error))) => {
@@ -807,7 +816,7 @@ pub async fn run_agent_recorded(
                     trace,
                     started,
                     &registry,
-                )
+                );
             }
         };
         record_replay(
@@ -1074,14 +1083,58 @@ pub async fn run_agent_recorded(
         }
 
         let evidence_pack = build_evidence_pack(&analysis_plan, registry.evidence());
+        let explicit_refusal = response
+            .assistant_text
+            .as_deref()
+            .and_then(|raw| parse_and_validate_report(raw, registry.evidence()).ok())
+            .is_some_and(|validated| validated.content.refusal_reason.is_some());
+        let rotation_diagnosis_missing = evidence_pack
+            .coverage
+            .missing_dimensions
+            .iter()
+            .any(|dimension| dimension == "rotation_diagnosis");
+        let diagnosis_available = tools.iter().any(|tool| tool.name == "analyze_timeline")
+            && limits
+                .max_simulations
+                .saturating_sub(registry.used_simulations())
+                >= 1;
+        // A rotation report is premature until the server has produced the
+        // deterministic diagnostic profile. This gate applies equally to manual
+        // sequences and macros, and comes before any candidate experiment.
+        if !is_repair
+            && !final_report_only
+            && !explicit_refusal
+            && rotation_diagnosis_missing
+            && diagnosis_available
+            && diagnosis_gap_reminders == 0
+            && accounting.model_turns < limits.max_model_turns
+        {
+            diagnosis_gap_reminders += 1;
+            messages.push(ModelMessage::Assistant {
+                content: response.assistant_text,
+                tool_calls: Vec::new(),
+            });
+            messages.push(ModelMessage::User {
+                content: "The server evidence contract still lacks the baseline rotation diagnosis. Do not propose or verify a modification yet. Call analyze_timeline, then distinguish supported strengths from observed risks and state the interpretation boundary before deciding whether a candidate experiment is warranted.".to_string(),
+            });
+            trace.push(
+                "evidence_gap_requires_tool",
+                Some("analyze_timeline".to_string()),
+                evidence_pack.evidence_ids,
+                Some("rotation_diagnosis_missing".to_string()),
+            );
+            continue;
+        }
         let candidate_comparison_missing = evidence_pack
             .coverage
             .missing_dimensions
             .iter()
             .any(|dimension| dimension == "candidate_comparison");
-        let comparison_available = tools
-            .iter()
-            .any(|tool| tool.name == "compare_scenarios")
+        let comparison_available = tool_available_for_analysis_stage(
+            &analysis_plan,
+            registry.evidence(),
+            "compare_scenarios",
+        ) && tools.iter().any(|tool| tool.name == "compare_scenarios")
             && limits
                 .max_simulations
                 .saturating_sub(registry.used_simulations())
@@ -1292,6 +1345,45 @@ fn is_domain_experiment(tool_name: &str) -> bool {
         tool_name,
         "simulate_scenario" | "compare_scenarios" | "analyze_timeline"
     )
+}
+
+fn plan_requires_dimension(plan: &AnalysisPlanV1, dimension: &str) -> bool {
+    plan.playbook
+        .required_dimensions
+        .iter()
+        .any(|required| required == dimension)
+}
+
+fn has_rotation_diagnosis(evidence: &EvidenceStore) -> bool {
+    evidence.values().any(|item| {
+        item.get("tool_name").and_then(serde_json::Value::as_str) == Some("analyze_timeline")
+            && item.pointer("/result/diagnostic_profile").is_some()
+    })
+}
+
+/// Rotation analysis is a server-enforced state machine, not merely a prompt
+/// convention. The baseline timeline tool performs the first simulation; the
+/// candidate comparator is exposed only after diagnosis and only when the user
+/// actually requested an optimization/comparison outcome.
+fn tool_available_for_analysis_stage(
+    plan: &AnalysisPlanV1,
+    evidence: &EvidenceStore,
+    tool_name: &str,
+) -> bool {
+    let diagnosis_first = plan
+        .routing_signals
+        .iter()
+        .any(|signal| signal == "rotation_diagnosis_first");
+    if !diagnosis_first {
+        return true;
+    }
+    let diagnosed = has_rotation_diagnosis(evidence);
+    match tool_name {
+        "simulate_scenario" => false,
+        "analyze_timeline" => !diagnosed,
+        "compare_scenarios" => diagnosed && plan_requires_dimension(plan, "candidate_comparison"),
+        _ => true,
+    }
 }
 
 fn requires_knowledge_only_client_scope(question: &str) -> bool {
@@ -1517,7 +1609,9 @@ fn evidence_preserving_provider_fallback(
     let mut knowledge_findings = Vec::new();
     let mut seen_excerpts = Vec::<String>::new();
     for (evidence_id, envelope) in evidence {
-        if envelope.get("tool_name").and_then(serde_json::Value::as_str)
+        if envelope
+            .get("tool_name")
+            .and_then(serde_json::Value::as_str)
             != Some("search_knowledge_base")
         {
             continue;
@@ -2098,6 +2192,56 @@ mod tests {
     }
 
     #[test]
+    fn rotation_tools_unlock_diagnosis_before_optional_comparison() {
+        let runtime = AgentRuntime::fixture();
+        let scenario = scenario(&runtime);
+        let optimize = select_analysis_plan("分析并优化当前循环", &scenario);
+        let empty = EvidenceStore::new();
+
+        assert!(tool_available_for_analysis_stage(
+            &optimize,
+            &empty,
+            "analyze_timeline"
+        ));
+        assert!(!tool_available_for_analysis_stage(
+            &optimize,
+            &empty,
+            "simulate_scenario"
+        ));
+        assert!(!tool_available_for_analysis_stage(
+            &optimize,
+            &empty,
+            "compare_scenarios"
+        ));
+
+        let mut diagnosed = EvidenceStore::new();
+        diagnosed.insert(
+            "diagnosis".to_string(),
+            json!({
+                "tool_name": "analyze_timeline",
+                "result": {"diagnostic_profile": {"input_mode": "manual_sequence"}}
+            }),
+        );
+        assert!(!tool_available_for_analysis_stage(
+            &optimize,
+            &diagnosed,
+            "analyze_timeline"
+        ));
+        assert!(tool_available_for_analysis_stage(
+            &optimize,
+            &diagnosed,
+            "compare_scenarios"
+        ));
+
+        let diagnose_only = select_analysis_plan("分析当前循环的优缺点", &scenario);
+        assert!(!tool_available_for_analysis_stage(
+            &diagnose_only,
+            &diagnosed,
+            "compare_scenarios"
+        ));
+    }
+
+    #[test]
     fn refusal_content_contains_no_unverified_numbers() {
         let content = refusal_content("证据不足。", "需要更多只读实验。 ");
         assert_eq!(content.schema_version, AGENT_REPORT_CONTENT_SCHEMA_V1);
@@ -2126,7 +2270,10 @@ mod tests {
         assert!(result.trace.iter().any(|event| {
             event.kind == "decision_checkpoint"
                 && event.code.as_deref() == Some("public_decision_summary")
-                && event.overview.as_deref().is_some_and(|text| !text.is_empty())
+                && event
+                    .overview
+                    .as_deref()
+                    .is_some_and(|text| !text.is_empty())
         }));
         assert_eq!(
             result
@@ -2145,7 +2292,7 @@ mod tests {
             2
         );
         let report = result.report.unwrap();
-        assert_eq!(report.evidence_ids.len(), 1);
+        assert_eq!(report.evidence_ids.len(), 2);
         assert_eq!(
             report.content.findings[0].metrics[0].json_pointer,
             "/result/dps"
@@ -2166,7 +2313,7 @@ mod tests {
         .await;
 
         assert_eq!(result.status, AgentRunStatus::Completed);
-        assert_eq!(result.prompt_version, "agent-system/v16");
+        assert_eq!(result.prompt_version, "agent-system/v17");
         assert_eq!(result.accounting.knowledge_searches, 1);
         assert_eq!(result.accounting.simulations, 0);
         let report = result.report.unwrap();
@@ -2245,15 +2392,24 @@ mod tests {
         .await;
 
         assert_eq!(result.status, AgentRunStatus::Completed);
-        assert_eq!(result.prompt_version, "agent-system/v16");
+        assert_eq!(result.prompt_version, "agent-system/v17");
         assert_eq!(result.accounting.knowledge_searches, 1);
-        assert_eq!(result.accounting.simulations, 0);
+        assert_eq!(result.accounting.simulations, 1);
         let report = result.report.unwrap();
         assert_eq!(report.sources.len(), 1);
         assert_eq!(report.sources[0].season, "暗影千机（2026）");
         assert_eq!(report.sources[0].version_match, "current_exact");
         assert!(report.sources[0].fact_eligible);
-        assert!(report.content.findings[0].metrics.is_empty());
+        assert!(report
+            .content
+            .findings
+            .iter()
+            .any(|finding| !finding.metrics.is_empty()));
+        assert!(report
+            .content
+            .findings
+            .iter()
+            .any(|finding| finding.title == "循环诊断已建立"));
 
         let _ = fs::remove_dir_all(root);
     }
@@ -2494,28 +2650,12 @@ mod tests {
     async fn simulation_budget_preserves_evidence_and_finishes_a_limited_report() {
         let runtime = AgentRuntime::fixture();
         let provider = ScriptedProvider::new(vec![
-            Ok(tool_call(
-                "call-compare",
-                "compare_scenarios",
-                json!({
-                    "candidates": [{
-                        "label": "增加延迟",
-                        "patch": {
-                            "haste_level": null,
-                            "sequence": null,
-                            "network_delay": 100,
-                            "initial_rage": null,
-                            "base_attack": null,
-                            "target_defense_bonus": null
-                        }
-                    }]
-                }),
-            )),
+            Ok(tool_call("call-diagnose", "analyze_timeline", json!({}))),
             Ok(ModelResponse {
                 assistant_text: Some(
                     serde_json::to_string(&refusal_content(
-                        "候选对照未运行，保留当前场景证据。",
-                        "模拟预算不足，不能发布候选收益。",
+                        "基线诊断已完成，但候选对照未运行。",
+                        "剩余模拟预算不足，不能发布候选收益。",
                     ))
                     .unwrap(),
                 ),
@@ -2540,11 +2680,16 @@ mod tests {
         )
         .await;
         assert_eq!(result.status, AgentRunStatus::Refused);
-        assert_eq!(result.accounting.simulations, 0);
-        assert!(result
-            .trace
+        assert_eq!(result.accounting.simulations, 1);
+        let requests = provider.requests();
+        assert!(requests[0]
+            .tools
             .iter()
-            .any(|event| event.kind == "budget_limit_reached"));
+            .all(|tool| tool.name != "compare_scenarios"));
+        assert!(requests[1]
+            .tools
+            .iter()
+            .all(|tool| tool.name != "compare_scenarios"));
     }
 
     #[tokio::test]
@@ -2707,7 +2852,7 @@ mod tests {
     async fn empty_provider_report_gets_one_bounded_report_only_retry() {
         let runtime = AgentRuntime::fixture();
         let provider = ScriptedProvider::new(vec![
-            Ok(tool_call("call-sim", "simulate_scenario", json!({}))),
+            Ok(tool_call("call-diagnose", "analyze_timeline", json!({}))),
             Err(ProviderError::invalid_response_protocol(
                 "provider_response_empty",
                 "provider response contained neither text nor tool calls",
@@ -2767,7 +2912,7 @@ mod tests {
             ))
         };
         let provider = ScriptedProvider::new(vec![
-            Ok(tool_call("call-sim", "simulate_scenario", json!({}))),
+            Ok(tool_call("call-diagnose", "analyze_timeline", json!({}))),
             empty(),
             empty(),
         ]);
@@ -2788,7 +2933,7 @@ mod tests {
             "provider_response_empty"
         );
         let report = result.report.unwrap();
-        assert_eq!(report.evidence_ids.len(), 1);
+        assert_eq!(report.evidence_ids.len(), 2);
         assert_eq!(report.content.findings.len(), 1);
         assert!(result
             .trace
@@ -2820,7 +2965,7 @@ mod tests {
         })
         .to_string();
         let provider = ScriptedProvider::new(vec![
-            Ok(tool_call("call-sim", "simulate_scenario", json!({}))),
+            Ok(tool_call("call-diagnose", "analyze_timeline", json!({}))),
             Ok(ModelResponse {
                 assistant_text: Some(bad_report),
                 tool_calls: Vec::new(),
@@ -2862,7 +3007,7 @@ mod tests {
     async fn structurally_invalid_json_still_gets_one_bounded_repair() {
         let runtime = AgentRuntime::fixture();
         let provider = ScriptedProvider::new(vec![
-            Ok(tool_call("call-sim", "simulate_scenario", json!({}))),
+            Ok(tool_call("call-diagnose", "analyze_timeline", json!({}))),
             Ok(ModelResponse {
                 assistant_text: Some("not-json".to_string()),
                 tool_calls: Vec::new(),
@@ -2908,7 +3053,7 @@ mod tests {
     async fn repeated_invalid_json_preserves_tool_evidence_instead_of_dead_ending() {
         let runtime = AgentRuntime::fixture();
         let provider = ScriptedProvider::new(vec![
-            Ok(tool_call("call-sim", "simulate_scenario", json!({}))),
+            Ok(tool_call("call-diagnose", "analyze_timeline", json!({}))),
             Ok(ModelResponse {
                 assistant_text: Some("not-json".to_string()),
                 tool_calls: Vec::new(),
@@ -2944,7 +3089,10 @@ mod tests {
     #[test]
     fn evidence_fallback_surfaces_readable_knowledge_excerpt() {
         let runtime = AgentRuntime::fixture();
-        let plan = select_analysis_plan("英雄阆风悬城老四的业火怎么交？", &runtime.fixture_scenario());
+        let plan = select_analysis_plan(
+            "英雄阆风悬城老四的业火怎么交？",
+            &runtime.fixture_scenario(),
+        );
         let mut evidence = super::super::report::EvidenceStore::new();
         evidence.insert(
             "ev-knowledge".to_string(),

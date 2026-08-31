@@ -61,7 +61,7 @@
     model_started: '模型处理中',
     model_finished: '模型响应完成',
     decision_checkpoint: '记录决策依据',
-    evidence_gap_requires_tool: '补齐候选对照',
+    evidence_gap_requires_tool: '补齐必要证据',
     tool_started: '调用工具',
     tool_finished: '取得证据',
     validating: '校验证据',
@@ -196,7 +196,11 @@
     if (kind === 'model_started') return '模型正在规划下一项可验证动作…';
     if (kind === 'model_finished') return '模型响应已返回，正在解析下一阶段…';
     if (kind === 'decision_checkpoint') return event?.overview || '正在记录本轮可审计的决策依据…';
-    if (kind === 'evidence_gap_requires_tool') return '当前证据还不足以发布修改方案，正在补做同场景候选对照。';
+    if (kind === 'evidence_gap_requires_tool') {
+      return event?.tool_name === 'analyze_timeline'
+        ? '当前证据还不足以判断循环优缺点，正在补做基线诊断。'
+        : '当前证据还不足以发布修改方案，正在补做同场景候选对照。';
+    }
     if (kind === 'tool_started') return `正在${toolLabel(event.tool_name)}…`;
     if (kind === 'tool_finished') return '已取得工具证据，正在继续分析…';
     if (kind === 'validating') return '正在校验数值、单位与证据引用…';
@@ -483,6 +487,9 @@
       provider_empty_evidence_preserved: '模型未形成报告，但工具证据仍可复用；系统发布受限结论而非丢弃整轮。',
       knowledge_searches_coalesced: '检测到重复检索意图；复用已有结果并停止无效查询循环。',
       decision_checkpoint: '记录当前观察、证据缺口、工具选择理由与下一步判定条件。',
+      evidence_gap_requires_tool: event?.tool_name === 'analyze_timeline'
+        ? '必须先取得基线时间轴诊断，才能判断循环哪里做得好、哪里存在风险。'
+        : '修改方案还缺少同场景候选对照，暂不发布为已验证结论。',
       completed: '结构、数值与引用均通过校验，发布可溯源结论。',
       partially_verified: '部分内容未通过校验；仅发布已验证结论并保留限制说明。',
       evidence_insufficient: '现有输出无法满足证据规则；不发布未经验证的结论。',

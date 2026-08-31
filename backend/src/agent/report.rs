@@ -285,14 +285,13 @@ pub fn parse_and_salvage_report(
             continue;
         }
         sanitized_claims += sanitize_text_field(&mut finding.title, "已验证结论");
-        sanitized_claims +=
-            sanitize_unsupported_numeric_prose(
-                &mut finding.title,
-                &finding.metrics,
-                &finding.evidence_ids,
-                evidence,
-                "已验证结论",
-            );
+        sanitized_claims += sanitize_unsupported_numeric_prose(
+            &mut finding.title,
+            &finding.metrics,
+            &finding.evidence_ids,
+            evidence,
+            "已验证结论",
+        );
         sanitized_claims += sanitize_text_field(
             &mut finding.explanation,
             "该结论仅保留通过本次证据校验的部分。",
@@ -370,11 +369,15 @@ pub fn parse_and_salvage_report(
             }
         }
         if change.evidence_ids.is_empty()
-            || !matches!(change.change_type.as_str(), "macro_statement" | "manual_operation")
+            || !matches!(
+                change.change_type.as_str(),
+                "macro_statement" | "manual_operation"
+            )
             || !rotation_edit_operation_is_valid(&change)
             || !rotation_change_has_input_evidence(&change, evidence)
             || !rotation_change_has_current_guide(&change, evidence)
             || !rotation_change_numbers_are_grounded(&change, evidence)
+            || !rotation_change_has_diagnosis_evidence(&change, evidence)
             || !rotation_change_has_comparison_evidence(&change, evidence)
         {
             sanitized_claims += 1;
@@ -383,7 +386,8 @@ pub fn parse_and_salvage_report(
         sanitized_claims += sanitize_text_field(&mut change.target, "当前循环位置");
         sanitized_claims += sanitize_text_field(&mut change.current, "当前操作");
         sanitized_claims += sanitize_text_field(&mut change.proposed, "建议操作");
-        sanitized_claims += sanitize_text_field(&mut change.rationale, "依据见所引攻略与本轮时间轴。");
+        sanitized_claims +=
+            sanitize_text_field(&mut change.rationale, "依据见所引攻略与本轮时间轴。");
         retained_rotation_changes.push(change);
     }
     report.rotation_changes = retained_rotation_changes;
@@ -726,8 +730,14 @@ pub fn validate_report(
         )?;
     }
     for change in &report.rotation_changes {
-        if !matches!(change.change_type.as_str(), "macro_statement" | "manual_operation") {
-            return Err(error("invalid_rotation_change_type", "rotation change type is invalid"));
+        if !matches!(
+            change.change_type.as_str(),
+            "macro_statement" | "manual_operation"
+        ) {
+            return Err(error(
+                "invalid_rotation_change_type",
+                "rotation change type is invalid",
+            ));
         }
         if !rotation_edit_operation_is_valid(change) {
             return Err(error(
@@ -764,10 +774,16 @@ pub fn validate_report(
                 "macro change contains a number absent from current input and cited guide",
             ));
         }
+        if !rotation_change_has_diagnosis_evidence(change, evidence) {
+            return Err(error(
+                "rotation_change_without_diagnosis",
+                "rotation change must cite the baseline timeline diagnostic profile",
+            ));
+        }
         if !rotation_change_has_comparison_evidence(change, evidence) {
             return Err(error(
                 "rotation_change_not_compared",
-                "macro rotation change must cite a same-scenario comparison that tested the proposal",
+                "rotation change must cite a same-scenario comparison that tested its input mode",
             ));
         }
     }
@@ -804,7 +820,9 @@ fn matching_rotation_input_evidence_id(
     };
     evidence.iter().find_map(|(id, item)| {
         (item.get("tool_name").and_then(Value::as_str) == Some("get_current_scenario")
-            && item.pointer("/result/rotation_input/mode").and_then(Value::as_str)
+            && item
+                .pointer("/result/rotation_input/mode")
+                .and_then(Value::as_str)
                 == Some(expected_mode)
             && evidence_contains_exact_string(item, &change.current))
         .then(|| id.clone())
@@ -840,7 +858,10 @@ fn rotation_change_numbers_are_grounded(
         return true;
     }
     let mut allowed = numeric_literals(&change.current);
-    allowed.extend(cited_knowledge_numeric_literals(&change.evidence_ids, evidence));
+    allowed.extend(cited_knowledge_numeric_literals(
+        &change.evidence_ids,
+        evidence,
+    ));
     numeric_literals(&change.proposed)
         .iter()
         .all(|literal| matches_knowledge_literal(*literal, &allowed))
@@ -850,17 +871,47 @@ fn rotation_change_has_comparison_evidence(
     change: &RotationChangeV1,
     evidence: &EvidenceStore,
 ) -> bool {
-    if change.change_type != "macro_statement" {
-        return true;
-    }
     change.evidence_ids.iter().any(|id| {
         let Some(item) = evidence.get(id) else {
             return false;
         };
-        item.get("tool_name").and_then(Value::as_str) == Some("compare_scenarios")
-            && item
+        if item.get("tool_name").and_then(Value::as_str) != Some("compare_scenarios") {
+            return false;
+        }
+        if change.change_type == "macro_statement" {
+            return item
                 .get("args")
-                .is_some_and(|args| value_contains_string_fragment(args, &change.proposed))
+                .is_some_and(|args| value_contains_string_fragment(args, &change.proposed));
+        }
+        item.pointer("/result/candidates")
+            .and_then(Value::as_array)
+            .is_some_and(|candidates| {
+                candidates.iter().any(|candidate| {
+                    candidate
+                        .get("changes")
+                        .and_then(Value::as_array)
+                        .is_some_and(|changes| {
+                            changes.iter().any(|field| {
+                                matches!(
+                                    field.get("field").and_then(Value::as_str),
+                                    Some("sequence") | Some("timing_offsets") | Some("pauses")
+                                )
+                            })
+                        })
+                })
+            })
+    })
+}
+
+fn rotation_change_has_diagnosis_evidence(
+    change: &RotationChangeV1,
+    evidence: &EvidenceStore,
+) -> bool {
+    change.evidence_ids.iter().any(|id| {
+        evidence.get(id).is_some_and(|item| {
+            item.get("tool_name").and_then(Value::as_str) == Some("analyze_timeline")
+                && item.pointer("/result/diagnostic_profile").is_some()
+        })
     })
 }
 
@@ -1461,6 +1512,15 @@ mod tests {
                 }
             }),
         );
+        let diagnosis_id = "f".repeat(64);
+        store.insert(
+            diagnosis_id.clone(),
+            json!({
+                "evidence_id": diagnosis_id,
+                "tool_name": "analyze_timeline",
+                "result": {"diagnostic_profile": {"input_mode": "macro"}}
+            }),
+        );
         let mut value = report();
         value.rotation_changes.push(RotationChangeV1 {
             change_type: "macro_statement".to_string(),
@@ -1469,7 +1529,12 @@ mod tests {
             current: "/cast [rage>64] 盾飞".to_string(),
             proposed: "/cast [rage>64&nobuff:嗜血] 盾飞".to_string(),
             rationale: "按攻略约束调整，并用同场景复测。".to_string(),
-            evidence_ids: vec!["d".repeat(64), "b".repeat(64), "e".repeat(64)],
+            evidence_ids: vec![
+                "d".repeat(64),
+                "b".repeat(64),
+                "e".repeat(64),
+                "f".repeat(64),
+            ],
         });
         validate_report(&value, &store).unwrap();
 
@@ -1484,6 +1549,85 @@ mod tests {
         assert_eq!(
             validate_report(&value, &store).unwrap_err().code,
             "rotation_change_number_not_grounded"
+        );
+    }
+
+    #[test]
+    fn manual_change_requires_both_diagnosis_and_sequence_comparison() {
+        let scenario_id = "d".repeat(64);
+        let diagnosis_id = "f".repeat(64);
+        let comparison_id = "e".repeat(64);
+        let mut store = evidence();
+        store.extend(knowledge_evidence());
+        store.insert(
+            scenario_id.clone(),
+            json!({
+                "evidence_id": scenario_id,
+                "tool_name": "get_current_scenario",
+                "result": {
+                    "rotation_input": {
+                        "mode": "manual_sequence",
+                        "manual_operations": [{"skill_name": "盾击"}]
+                    }
+                }
+            }),
+        );
+        store.insert(
+            diagnosis_id.clone(),
+            json!({
+                "evidence_id": diagnosis_id,
+                "tool_name": "analyze_timeline",
+                "result": {"diagnostic_profile": {"input_mode": "manual_sequence"}}
+            }),
+        );
+        store.insert(
+            comparison_id.clone(),
+            json!({
+                "evidence_id": comparison_id,
+                "tool_name": "compare_scenarios",
+                "args": [{"label": "手动候选", "patch": {"sequence": ["盾压", "盾击"]}}],
+                "result": {
+                    "candidates": [{
+                        "changes": [{
+                            "field": "sequence",
+                            "before": ["盾击", "盾压"],
+                            "after": ["盾压", "盾击"]
+                        }]
+                    }]
+                }
+            }),
+        );
+        let mut value = report();
+        value.rotation_changes.push(RotationChangeV1 {
+            change_type: "manual_operation".to_string(),
+            edit_operation: "adjust_timing".to_string(),
+            target: "起手操作".to_string(),
+            current: "盾击".to_string(),
+            proposed: "在盾压后使用盾击".to_string(),
+            rationale: "依据攻略和基线诊断提出，并在同场景序列候选中复测。".to_string(),
+            evidence_ids: vec![
+                "d".repeat(64),
+                "b".repeat(64),
+                "f".repeat(64),
+                "e".repeat(64),
+            ],
+        });
+        validate_report(&value, &store).unwrap();
+
+        value.rotation_changes[0]
+            .evidence_ids
+            .retain(|id| id != &diagnosis_id);
+        assert_eq!(
+            validate_report(&value, &store).unwrap_err().code,
+            "rotation_change_without_diagnosis"
+        );
+        value.rotation_changes[0].evidence_ids.push(diagnosis_id);
+        value.rotation_changes[0]
+            .evidence_ids
+            .retain(|id| id != &comparison_id);
+        assert_eq!(
+            validate_report(&value, &store).unwrap_err().code,
+            "rotation_change_not_compared"
         );
     }
 
@@ -1621,7 +1765,10 @@ mod tests {
         );
         let parsed = parse_and_validate_report(&raw, &evidence()).unwrap();
 
-        assert_eq!(parsed.content.schema_version, AGENT_REPORT_CONTENT_SCHEMA_V1);
+        assert_eq!(
+            parsed.content.schema_version,
+            AGENT_REPORT_CONTENT_SCHEMA_V1
+        );
         assert_eq!(parsed.content.findings.len(), 1);
     }
 
@@ -1630,7 +1777,10 @@ mod tests {
         let encoded = serde_json::to_string(&serde_json::to_string(&report()).unwrap()).unwrap();
         let parsed = parse_and_validate_report(&encoded, &evidence()).unwrap();
 
-        assert_eq!(parsed.content.schema_version, AGENT_REPORT_CONTENT_SCHEMA_V1);
+        assert_eq!(
+            parsed.content.schema_version,
+            AGENT_REPORT_CONTENT_SCHEMA_V1
+        );
         assert_eq!(parsed.content.findings.len(), 1);
     }
 
@@ -1638,7 +1788,9 @@ mod tests {
     fn unrelated_wrapped_json_is_not_accepted_as_a_report() {
         let raw = r#"analysis {\"message\":\"not a report\"} done"#;
         assert_eq!(
-            parse_and_validate_report(raw, &evidence()).unwrap_err().code,
+            parse_and_validate_report(raw, &evidence())
+                .unwrap_err()
+                .code,
             "invalid_report_json"
         );
     }
@@ -1687,8 +1839,7 @@ mod tests {
         value.summary = "当前赛季资料建议在 80ms 环境中自行实测宏阈值。".to_string();
         value.findings[0].title = "2026 赛季宏阈值说明".to_string();
         value.findings[0].explanation =
-            "原始资料给出的示例范围是 0.15 到 0.20；这里只复述攻略，不表示模拟收益。"
-                .to_string();
+            "原始资料给出的示例范围是 0.15 到 0.20；这里只复述攻略，不表示模拟收益。".to_string();
         value.findings[0].evidence_ids = vec!["b".repeat(64)];
         value.findings[0].metrics.clear();
         value.limitations = vec!["这是 2026 赛季知识资料，未运行战斗模拟。".to_string()];
@@ -1721,8 +1872,8 @@ mod tests {
         value.summary = "资料示例阈值为 0.15。".to_string();
         value.findings[0].evidence_ids = vec!["b".repeat(64)];
         let mut ineligible = knowledge_evidence();
-        ineligible.get_mut(&"b".repeat(64)).unwrap()["result"]["results"][0]
-            ["fact_eligible"] = json!(false);
+        ineligible.get_mut(&"b".repeat(64)).unwrap()["result"]["results"][0]["fact_eligible"] =
+            json!(false);
         assert_eq!(
             validate_report(&value, &ineligible).unwrap_err().code,
             "numeric_prose_claim"

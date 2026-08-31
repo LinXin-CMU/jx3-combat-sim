@@ -611,12 +611,11 @@ pub fn select_analysis_plan(question: &str, scenario: &ScenarioSnapshotV1) -> An
         routing_signals,
     };
     let has_macro_input = scenario
-            .simulation
-            .macro_text
-            .as_deref()
-            .is_some_and(|text| !text.trim().is_empty());
+        .simulation
+        .macro_text
+        .as_deref()
+        .is_some_and(|text| !text.trim().is_empty());
     let has_rotation_input = scenario.simulation.sequence.len() >= 6 || has_macro_input;
-    let has_any_rotation_input = !scenario.simulation.sequence.is_empty() || has_macro_input;
     if task_type == AnalysisTaskType::HasteDecision && !has_rotation_input {
         demote_required_dimension(&mut plan.playbook, "candidate_comparison");
         retain_knowledge_tools(&mut plan.playbook);
@@ -631,100 +630,118 @@ pub fn select_analysis_plan(question: &str, scenario: &ScenarioSnapshotV1) -> An
         plan.routing_signals
             .push("scenario_has_no_equipment_context".to_string());
     }
-    if client == DomainClient::Flagship
-        && matches!(
-            task_type,
+    apply_rotation_diagnosis_contract(&mut plan, &normalized, scenario);
+    plan
+}
+
+fn apply_rotation_diagnosis_contract(
+    plan: &mut AnalysisPlanV1,
+    normalized_question: &str,
+    scenario: &ScenarioSnapshotV1,
+) {
+    let is_macro = scenario
+        .simulation
+        .macro_text
+        .as_deref()
+        .is_some_and(|text| !text.trim().is_empty());
+    let has_any_rotation_input = !scenario.simulation.sequence.is_empty() || is_macro;
+    if plan.resolved_scope.client != DomainClient::Flagship
+        || !matches!(
+            plan.task_type,
             AnalysisTaskType::BaselineAnalysis
                 | AnalysisTaskType::RotationStallDiagnosis
                 | AnalysisTaskType::MacroAnalysis
         )
-        && has_any_rotation_input
+        || !has_any_rotation_input
     {
-        let is_macro = scenario
-            .simulation
-            .macro_text
-            .as_deref()
-            .is_some_and(|text| !text.trim().is_empty());
-        plan.playbook
-            .required_dimensions
-            .retain(|dimension| dimension != "macro_context");
-        for dimension in ["rotation_input", "timeline"] {
-            if !plan
-                .playbook
-                .required_dimensions
-                .iter()
-                .any(|value| value == dimension)
-            {
-                plan.playbook.required_dimensions.push(dimension.to_string());
-            }
-        }
+        return;
+    }
+
+    plan.playbook
+        .required_dimensions
+        .retain(|dimension| dimension != "macro_context");
+    for dimension in ["rotation_input", "timeline", "rotation_diagnosis"] {
         if !plan
             .playbook
-            .preferred_tools
+            .required_dimensions
             .iter()
-            .any(|tool| tool == "analyze_timeline")
+            .any(|value| value == dimension)
         {
             plan.playbook
-                .preferred_tools
-                .push("analyze_timeline".to_string());
+                .required_dimensions
+                .push(dimension.to_string());
         }
-        if has_rotation_input
-            && !plan
+    }
+    if !plan
+        .playbook
+        .preferred_tools
+        .iter()
+        .any(|tool| tool == "analyze_timeline")
+    {
+        plan.playbook
+            .preferred_tools
+            .push("analyze_timeline".to_string());
+    }
+    let has_meaningful_rotation = scenario.simulation.sequence.len() >= 6 || is_macro;
+    if has_meaningful_rotation
+        && !plan
             .playbook
             .preferred_tools
             .iter()
             .any(|tool| tool == "compare_scenarios")
-        {
-            plan.playbook
-                .preferred_tools
-                .push("compare_scenarios".to_string());
-        }
-        if is_macro {
-            plan.routing_signals.push("rotation_input_macro".to_string());
-            plan.playbook.knowledge_search_hints.push(
-                "当前分山宏语句 条件阈值 技能顺序 延迟适配 循环漏洞".to_string(),
-            );
-            plan.playbook.forbidden_inferences.push(
-                "宏改法必须指出当前原句并同时引用当前攻略与本轮执行证据".to_string(),
-            );
-        } else {
-            plan.routing_signals
-                .push("rotation_input_manual_sequence".to_string());
-            plan.playbook.knowledge_search_hints.push(
-                "当前分山手动循环 技能顺序 操作节点 怒气覆盖 循环漏洞".to_string(),
-            );
-            plan.playbook.forbidden_inferences.push(
-                "手动改法必须指出序列技能或时间轴操作点并同时引用当前攻略与本轮执行证据"
-                    .to_string(),
-            );
-        }
-        let asks_for_candidate = contains_any(
-            &normalized,
-            &[
-                "修改",
-                "改进",
-                "优化",
-                "漏洞",
-                "具体宏语句",
-                "对照",
-                "对比候选",
-            ],
-        );
-        if asks_for_candidate
-            && !plan
-                .playbook
-                .required_dimensions
-                .iter()
-                .any(|dimension| dimension == "candidate_comparison")
-        {
-            plan.playbook
-                .required_dimensions
-                .push("candidate_comparison".to_string());
-            plan.routing_signals
-                .push("candidate_comparison_explicitly_requested".to_string());
-        }
+    {
+        plan.playbook
+            .preferred_tools
+            .push("compare_scenarios".to_string());
     }
-    plan
+    if is_macro {
+        plan.routing_signals
+            .push("rotation_input_macro".to_string());
+        plan.playbook
+            .knowledge_search_hints
+            .push("当前分山宏语句 条件阈值 技能顺序 延迟适配 循环漏洞".to_string());
+        plan.playbook
+            .forbidden_inferences
+            .push("宏改法必须指出当前原句并同时引用当前攻略与本轮执行证据".to_string());
+    } else {
+        plan.routing_signals
+            .push("rotation_input_manual_sequence".to_string());
+        plan.playbook
+            .knowledge_search_hints
+            .push("当前分山手动循环 技能顺序 操作节点 怒气覆盖 循环漏洞".to_string());
+        plan.playbook.forbidden_inferences.push(
+            "手动改法必须指出序列技能或时间轴操作点并同时引用当前攻略与本轮执行证据".to_string(),
+        );
+    }
+    plan.routing_signals
+        .push("rotation_diagnosis_first".to_string());
+    let asks_for_candidate = contains_any(
+        normalized_question,
+        &[
+            "修改",
+            "改进",
+            "优化",
+            "漏洞",
+            "方案",
+            "怎么改",
+            "具体宏语句",
+            "对照",
+            "对比候选",
+        ],
+    );
+    if asks_for_candidate
+        && !plan
+            .playbook
+            .required_dimensions
+            .iter()
+            .any(|dimension| dimension == "candidate_comparison")
+    {
+        plan.playbook
+            .required_dimensions
+            .push("candidate_comparison".to_string());
+        plan.routing_signals
+            .push("candidate_comparison_explicitly_requested".to_string());
+    }
 }
 
 /// Resolve a short follow-up against the last server-selected playbook without
@@ -745,6 +762,7 @@ pub fn select_analysis_plan_with_history(
     plan.playbook = playbook(task_type, plan.resolved_scope.client);
     plan.routing_signals
         .push("inherited_session_playbook".to_string());
+    apply_rotation_diagnosis_contract(&mut plan, &question.to_lowercase(), scenario);
     plan
 }
 
@@ -1429,6 +1447,12 @@ fn satisfied_dimensions(
     }
     if tools.contains("analyze_timeline") {
         dimensions.insert("timeline".to_string());
+        if evidence.values().any(|item| {
+            item.get("tool_name").and_then(Value::as_str) == Some("analyze_timeline")
+                && item.pointer("/result/diagnostic_profile").is_some()
+        }) {
+            dimensions.insert("rotation_diagnosis".to_string());
+        }
     }
     if tools.contains("compare_scenarios") {
         dimensions.insert("candidate_comparison".to_string());
@@ -1524,6 +1548,7 @@ pub fn trace_annotation(
         ("tool_started" | "tool_finished", Some("simulate_scenario")) => "baseline",
         ("tool_started" | "tool_finished", Some("analyze_timeline")) => "locate",
         ("tool_started" | "tool_finished", Some("compare_scenarios")) => "compare",
+        ("evidence_gap_requires_tool", Some("analyze_timeline")) => "locate",
         ("evidence_gap_requires_tool", Some("compare_scenarios")) => "compare",
         ("evidence_coverage_checked", _) => "coverage",
         ("validating", _) => "validation",
@@ -1663,6 +1688,17 @@ mod tests {
             .playbook
             .required_dimensions
             .contains(&"timeline".to_string()));
+        assert!(manual_plan
+            .playbook
+            .required_dimensions
+            .contains(&"rotation_diagnosis".to_string()));
+        assert!(manual_plan
+            .routing_signals
+            .contains(&"rotation_diagnosis_first".to_string()));
+        assert!(!manual_plan
+            .playbook
+            .required_dimensions
+            .contains(&"candidate_comparison".to_string()));
 
         let mut macro_request = manual.simulation.clone();
         macro_request.macro_text = Some("/cast 盾击".to_string());
@@ -1694,18 +1730,19 @@ mod tests {
     fn short_follow_up_inherits_the_last_server_selected_playbook() {
         let runtime = AgentRuntime::fixture();
         let scenario = runtime.fixture_scenario();
-        let inherited = select_analysis_plan_with_history(
-            "继续",
-            Some("current_rotation_baseline"),
-            &scenario,
-        );
-        assert_eq!(
-            inherited.playbook.playbook_id,
-            "current_rotation_baseline"
-        );
+        let inherited =
+            select_analysis_plan_with_history("继续", Some("current_rotation_baseline"), &scenario);
+        assert_eq!(inherited.playbook.playbook_id, "current_rotation_baseline");
         assert!(inherited
             .routing_signals
             .contains(&"inherited_session_playbook".to_string()));
+        assert!(inherited
+            .routing_signals
+            .contains(&"rotation_diagnosis_first".to_string()));
+        assert!(inherited
+            .playbook
+            .required_dimensions
+            .contains(&"rotation_diagnosis".to_string()));
 
         let explicit = select_analysis_plan_with_history(
             "绝刀公式怎么算？",

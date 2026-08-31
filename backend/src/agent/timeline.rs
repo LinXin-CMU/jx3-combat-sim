@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
 
-use crate::{BuffTimelineTrack, CastEvent};
+use crate::{BuffTimelineTrack, CastEvent, Stance};
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::evidence::{validate_trace_id, EvidenceEnvelopeV1, ToolProvenance};
 use super::tools::{elapsed_ms, SimulationExecution, SkillDamageSummary, ToolError};
@@ -70,6 +71,49 @@ pub struct SkippedSkill {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+pub struct DurationObservation {
+    pub count: usize,
+    pub total_seconds: f64,
+    pub maximum_seconds: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct StanceObservation {
+    pub active_casts_by_stance: BTreeMap<String, usize>,
+    pub observed_transitions: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct DiagnosticSignal {
+    pub code: String,
+    pub summary: String,
+    pub evidence_paths: Vec<String>,
+    pub interpretation_boundary: String,
+}
+
+/// Compact, input-mode-independent observations used for the diagnosis stage.
+/// These are not a hidden quality score: guide evidence and same-scenario
+/// experiments are still required to interpret whether a signal matters.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RotationDiagnosticProfile {
+    pub input_mode: String,
+    pub active_cast_count: usize,
+    pub main_gcd_cast_count: usize,
+    pub active_casts_per_minute: f64,
+    pub active_skill_variety: usize,
+    pub damaging_skill_variety: usize,
+    pub cadence_gaps: DurationObservation,
+    pub cooldown_waits: DurationObservation,
+    pub stance: StanceObservation,
+    pub observed_strengths: Vec<DiagnosticSignal>,
+    pub observed_risks: Vec<DiagnosticSignal>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct TimelineAnalysis {
     pub fingerprint: u64,
     pub fingerprint_hex: String,
@@ -84,6 +128,7 @@ pub struct TimelineAnalysis {
     pub rage: Option<RageObservation>,
     pub buff_coverage: Vec<BuffCoverage>,
     pub skipped: Vec<SkippedSkill>,
+    pub diagnostic_profile: RotationDiagnosticProfile,
     pub limitations: Vec<String>,
 }
 
@@ -121,6 +166,25 @@ pub fn analyze_timeline(
     // evidence identity. The Agent result uses the stable buff ID as its key.
     buff_coverage.sort_by_key(|coverage| coverage.buff_id);
 
+    let skipped = response
+        .skipped
+        .iter()
+        .map(|(sequence_index, reason)| SkippedSkill {
+            sequence_index: *sequence_index,
+            reason: reason.clone(),
+        })
+        .collect::<Vec<_>>();
+    let rage = observe_rage(&response.timeline, response.rage);
+    let diagnostic_profile = build_diagnostic_profile(
+        &response.timeline,
+        response.fight_time,
+        &simulation.evidence.result.skills,
+        &cd_waits,
+        &gcd_gaps,
+        rage.as_ref(),
+        &skipped,
+    );
+
     let result = TimelineAnalysis {
         fingerprint: response.fingerprint,
         fingerprint_hex: format!("{:016x}", response.fingerprint),
@@ -132,16 +196,10 @@ pub fn analyze_timeline(
         cd_waits,
         total_observed_gcd_gap_seconds,
         gcd_gaps,
-        rage: observe_rage(&response.timeline, response.rage),
+        rage,
         buff_coverage,
-        skipped: response
-            .skipped
-            .iter()
-            .map(|(sequence_index, reason)| SkippedSkill {
-                sequence_index: *sequence_index,
-                reason: reason.clone(),
-            })
-            .collect(),
+        skipped,
+        diagnostic_profile,
         limitations: vec![
             "rage_cap_observations_do_not_measure_lost_rage".to_string(),
             "timeline_correlations_are_not_causal_without_ab_test".to_string(),
@@ -162,6 +220,191 @@ pub fn analyze_timeline(
     )?;
 
     Ok(TimelineExecution { evidence })
+}
+
+fn duration_observation(values: impl IntoIterator<Item = f64>) -> DurationObservation {
+    let values = values.into_iter().collect::<Vec<_>>();
+    DurationObservation {
+        count: values.len(),
+        total_seconds: values.iter().sum(),
+        maximum_seconds: values.iter().copied().fold(0.0_f64, f64::max),
+    }
+}
+
+fn stance_name(stance: Stance) -> &'static str {
+    match stance {
+        Stance::Any => "any",
+        Stance::Shield => "shield",
+        Stance::Blade => "blade",
+        Stance::Wall => "wall",
+        Stance::NotWall => "not_wall",
+    }
+}
+
+fn diagnostic_signal(
+    code: &str,
+    summary: &str,
+    evidence_paths: &[&str],
+    interpretation_boundary: &str,
+) -> DiagnosticSignal {
+    DiagnosticSignal {
+        code: code.to_string(),
+        summary: summary.to_string(),
+        evidence_paths: evidence_paths
+            .iter()
+            .map(|value| (*value).to_string())
+            .collect(),
+        interpretation_boundary: interpretation_boundary.to_string(),
+    }
+}
+
+fn build_diagnostic_profile(
+    timeline: &[CastEvent],
+    fight_time: f64,
+    skills: &[SkillDamageSummary],
+    cd_waits: &[WaitEvidence],
+    gcd_gaps: &[GcdGapEvidence],
+    rage: Option<&RageObservation>,
+    skipped: &[SkippedSkill],
+) -> RotationDiagnosticProfile {
+    let active = timeline
+        .iter()
+        .filter(|event| !event.triggered)
+        .collect::<Vec<_>>();
+    let main_gcd_cast_count = active.iter().filter(|event| event.is_main).count();
+    let active_skill_variety = active
+        .iter()
+        .map(|event| (event.skill_id, event.name.as_str()))
+        .collect::<BTreeSet<_>>()
+        .len();
+    let damaging_skill_variety = skills
+        .iter()
+        .filter(|skill| skill.total_damage > 0.0)
+        .map(|skill| (skill.skill_id, skill.name.as_str(), skill.triggered))
+        .collect::<BTreeSet<_>>()
+        .len();
+    let input_mode = if active.iter().any(|event| event.is_macro) {
+        "macro"
+    } else {
+        "manual_sequence"
+    };
+    let mut active_casts_by_stance = BTreeMap::<String, usize>::new();
+    let mut last_stance = None;
+    let mut observed_transitions = 0usize;
+    for event in &active {
+        let stance = event
+            .state_before
+            .as_ref()
+            .map(|state| state.stance)
+            .or_else(|| event.state_after.as_ref().map(|state| state.stance));
+        if let Some(stance) = stance {
+            *active_casts_by_stance
+                .entry(stance_name(stance).to_string())
+                .or_default() += 1;
+            if last_stance.is_some_and(|previous| previous != stance) {
+                observed_transitions += 1;
+            }
+            last_stance = Some(stance);
+        }
+    }
+    let cadence_gaps = duration_observation(gcd_gaps.iter().map(|gap| gap.observed_gap_seconds));
+    let cooldown_waits = duration_observation(cd_waits.iter().map(|wait| wait.wait_seconds));
+    let mut observed_strengths = Vec::new();
+    let mut observed_risks = Vec::new();
+    if main_gcd_cast_count > 1 && cadence_gaps.count == 0 {
+        observed_strengths.push(diagnostic_signal(
+            "no_observed_main_gcd_gap",
+            "本次时间轴未观察到主技能 GCD 就绪后的额外空档。",
+            &["/result/diagnostic_profile/cadence_gaps/count"],
+            "这只说明模拟时间轴连续，不证明循环已经最优。",
+        ));
+    } else if cadence_gaps.count > 0 {
+        observed_risks.push(diagnostic_signal(
+            "observed_main_gcd_gaps",
+            "本次时间轴观察到主技能 GCD 就绪后的额外空档。",
+            &[
+                "/result/diagnostic_profile/cadence_gaps/count",
+                "/result/diagnostic_profile/cadence_gaps/total_seconds",
+                "/result/diagnostic_profile/cadence_gaps/maximum_seconds",
+            ],
+            "空档是现象，不自动证明由宏、手法、冷却或资源中的哪一项造成。",
+        ));
+    }
+    if cooldown_waits.count == 0 && !active.is_empty() {
+        observed_strengths.push(diagnostic_signal(
+            "no_observed_cooldown_wait",
+            "本次时间轴没有记录主动等待技能冷却。",
+            &["/result/diagnostic_profile/cooldown_waits/count"],
+            "没有冷却等待不等于技能顺序、资源转化或增益覆盖已经合理。",
+        ));
+    } else if cooldown_waits.count > 0 {
+        observed_risks.push(diagnostic_signal(
+            "observed_cooldown_wait",
+            "本次时间轴记录了主动等待技能冷却。",
+            &[
+                "/result/diagnostic_profile/cooldown_waits/count",
+                "/result/diagnostic_profile/cooldown_waits/total_seconds",
+                "/result/diagnostic_profile/cooldown_waits/maximum_seconds",
+            ],
+            "必须结合等待位置前后的技能、姿态和资源判断是否为循环问题。",
+        ));
+    }
+    if skipped.is_empty() {
+        observed_strengths.push(diagnostic_signal(
+            "no_skipped_input",
+            "当前输入没有被模拟器标记为跳过的操作。",
+            &["/result/skipped"],
+            "未跳过只说明输入可执行，不证明每个操作时机合理。",
+        ));
+    } else {
+        observed_risks.push(diagnostic_signal(
+            "skipped_input",
+            "当前输入包含被模拟器跳过的操作。",
+            &["/result/skipped"],
+            "需逐项读取跳过原因，不能把所有跳过都归为玩家失误。",
+        ));
+    }
+    if let Some(rage) = rage {
+        if rage.at_cap_observations == 0 {
+            observed_strengths.push(diagnostic_signal(
+                "rage_cap_not_observed",
+                "本次采样没有观察到怒气处于上限。",
+                &["/result/rage/at_cap_observations"],
+                "离散采样未触顶不等于已证明不存在瞬时怒气浪费。",
+            ));
+        } else {
+            observed_risks.push(diagnostic_signal(
+                "rage_cap_observed",
+                "本次采样观察到怒气处于上限。",
+                &[
+                    "/result/rage/at_cap_observations",
+                    "/result/rage/sample_count",
+                ],
+                "触顶样本不等于已测得具体损失怒气，需结合事件前后状态或候选实验。",
+            ));
+        }
+    }
+
+    RotationDiagnosticProfile {
+        input_mode: input_mode.to_string(),
+        active_cast_count: active.len(),
+        main_gcd_cast_count,
+        active_casts_per_minute: if fight_time > 0.0 {
+            active.len() as f64 / fight_time * 60.0
+        } else {
+            0.0
+        },
+        active_skill_variety,
+        damaging_skill_variety,
+        cadence_gaps,
+        cooldown_waits,
+        stance: StanceObservation {
+            active_casts_by_stance,
+            observed_transitions,
+        },
+        observed_strengths,
+        observed_risks,
+    }
 }
 
 fn require_full_timeline(simulation: &SimulationExecution) -> Result<(), ToolError> {
@@ -509,6 +752,34 @@ mod tests {
         assert!(timeline.evidence.result.active_event_count > 0);
         assert!(!timeline.evidence.result.skills.is_empty());
         assert!(timeline.evidence.result.rage.is_some());
+        assert_eq!(
+            timeline.evidence.result.diagnostic_profile.input_mode,
+            "manual_sequence"
+        );
+        assert!(
+            timeline
+                .evidence
+                .result
+                .diagnostic_profile
+                .active_cast_count
+                > 0
+        );
+        assert!(timeline
+            .evidence
+            .result
+            .diagnostic_profile
+            .observed_strengths
+            .iter()
+            .all(|signal| !signal.evidence_paths.is_empty()
+                && !signal.interpretation_boundary.is_empty()));
+        assert!(timeline
+            .evidence
+            .result
+            .diagnostic_profile
+            .observed_risks
+            .iter()
+            .all(|signal| !signal.evidence_paths.is_empty()
+                && !signal.interpretation_boundary.is_empty()));
         assert!(timeline
             .evidence
             .result
@@ -531,11 +802,9 @@ mod tests {
             events: vec![buff_event(0.0)],
         };
         let mut first = simulation_execution();
-        first.response.buff_timeline =
-            vec![track(200, "后一个气劲"), track(100, "前一个气劲")];
+        first.response.buff_timeline = vec![track(200, "后一个气劲"), track(100, "前一个气劲")];
         let mut second = simulation_execution();
-        second.response.buff_timeline =
-            vec![track(100, "前一个气劲"), track(200, "后一个气劲")];
+        second.response.buff_timeline = vec![track(100, "前一个气劲"), track(200, "后一个气劲")];
 
         let first_evidence =
             analyze_timeline("trace-order-a", &first, &ToolProvenance::fixture()).unwrap();

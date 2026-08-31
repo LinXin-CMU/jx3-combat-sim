@@ -73,9 +73,12 @@ for ($i = 0; $i -lt 100; $i++) {
 Assert-True ($null -ne $status -and -not $status.running) 'Knowledge run did not terminate.'
 Assert-True ($status.status -eq 'completed') 'Knowledge run did not complete.'
 $result = $status.result
-Assert-True ($result.prompt_version -eq 'agent-system/v16') 'Knowledge run used an unexpected prompt.'
+Assert-True ($result.prompt_version -eq 'agent-system/v17') 'Knowledge run used an unexpected prompt.'
 Assert-True ($result.accounting.knowledge_searches -eq 1) 'Knowledge search count is incorrect.'
-Assert-True ($result.accounting.simulations -eq 0) 'Knowledge-only run unexpectedly simulated.'
+Assert-True ($result.accounting.simulations -eq 1) 'Guide-grounded rotation run did not execute one baseline diagnosis.'
+Assert-True (@($result.trace | Where-Object {
+  $_.kind -eq 'tool_started' -and $_.tool_name -eq 'analyze_timeline'
+}).Count -eq 1) 'Guide-grounded rotation run did not call analyze_timeline exactly once.'
 $sources = @($result.report.sources)
 Assert-True ($sources.Count -ge 1) 'Structured knowledge sources are missing.'
 Assert-True (@($sources | Where-Object { $_.season -ne $currentSeason }).Count -eq 0) 'A historical source crossed into current scope.'
