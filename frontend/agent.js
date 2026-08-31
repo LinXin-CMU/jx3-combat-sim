@@ -675,8 +675,13 @@
     const value = Number(metric?.value);
     if (!Number.isFinite(value)) return '—';
     const unit = String(metric?.unit || '').toLowerCase();
-    if (['fraction', 'ratio', 'percent', 'percentage'].includes(unit)) {
+    // Ratios are stored as 0..1 fractions; percent values are already stored
+    // in percentage points (for example buff coverage 97.38 means 97.38%).
+    if (['fraction', 'ratio'].includes(unit)) {
       return `${localizedNumber(value * 100, 2)}%`;
+    }
+    if (['percent', 'percentage'].includes(unit)) {
+      return `${localizedNumber(value, 2)}%`;
     }
     if (['second', 'seconds', 'sec', 's'].includes(unit)) {
       return `${localizedNumber(value, 2)} 秒`;
