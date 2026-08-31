@@ -79,6 +79,8 @@ pub struct AgentReportV1 {
     pub model: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sources: Vec<AgentKnowledgeSourceV1>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub equipment_comparisons: Vec<super::EquipmentComparisonPresentationV1>,
     pub content: AgentReportContentV1,
     pub evidence_ids: Vec<String>,
     pub accounting: AgentRunAccountingV1,
@@ -532,6 +534,16 @@ fn grounded_finding_explanation(finding: &AgentFindingV1, evidence: &EvidenceSto
         })
     };
 
+    let cites_equipment_comparison = cites_tool("compare_focused_equipment")
+        || cites_tool("compare_equipment_strategies");
+    if cites_equipment_comparison && (title.contains("黑话") || title.contains("装备方案")) {
+        return "装备术语已按当前心法和本地装备目录解析；最终取舍仍以同一冻结循环下的面板与伤害实测为准。"
+            .to_string();
+    }
+    if cites_equipment_comparison {
+        return "两侧装备已分别重算面板，并在同一冻结循环与目标条件下完成对照模拟；结论只适用于这组候选和当前循环。"
+            .to_string();
+    }
     if cites_tool("compare_scenarios") {
         return "同场景对比已经给出方向性结果；只采用实际改善基线的改法，未改善的候选保留为反证。"
             .to_string();
@@ -1201,7 +1213,13 @@ fn validate_metric(
 fn metric_tool_allowed(envelope: &Value) -> bool {
     matches!(
         envelope.get("tool_name").and_then(Value::as_str),
-        Some("simulate_scenario" | "compare_scenarios" | "analyze_timeline")
+        Some(
+            "simulate_scenario"
+                | "compare_scenarios"
+                | "analyze_timeline"
+                | "compare_focused_equipment"
+                | "compare_equipment_strategies"
+        )
     )
 }
 
@@ -1666,6 +1684,38 @@ mod tests {
     #[test]
     fn grounded_metric_passes() {
         validate_report(&report(), &evidence()).unwrap();
+    }
+
+    #[test]
+    fn equipment_comparison_metrics_are_publishable_with_exact_pointers() {
+        let evidence_id = "e".repeat(64);
+        let store = BTreeMap::from([(
+            evidence_id.clone(),
+            json!({
+                "evidence_id": evidence_id,
+                "tool_name": "compare_equipment_strategies",
+                "result": {
+                    "comparison": {
+                        "before_dps": 329798.0,
+                        "after_dps": 205525.0,
+                        "dps_delta_percent": -37.681550524866736,
+                        "panel_rows": [{"label": "外功攻击", "delta": -11019.0}]
+                    }
+                }
+            }),
+        )]);
+        let mut value = report();
+        value.findings[0].evidence_ids = vec!["e".repeat(64)];
+        value.findings[0].explanation = "同循环实测 DPS 为 329798。".to_string();
+        value.findings[0].metrics[0] = GroundedMetricV1 {
+            label: "四件套 DPS".to_string(),
+            value: 329798.0,
+            unit: "damage_per_second".to_string(),
+            evidence_id: "e".repeat(64),
+            json_pointer: "/result/comparison/before_dps".to_string(),
+        };
+
+        validate_report(&value, &store).unwrap();
     }
 
     #[test]

@@ -19,6 +19,7 @@
     newSession: document.getElementById('agent_new_session'),
     goSim: document.getElementById('agent_go_sim'),
     simPage: document.getElementById('page-sim'),
+    equipPage: document.getElementById('page-equip'),
     dock: document.getElementById('sim_ai_dock'),
     dockFab: document.getElementById('sim_ai_fab'),
     dockClose: document.getElementById('sim_ai_close'),
@@ -39,7 +40,15 @@
     dockContextText: document.getElementById('sim_ai_context_text'),
     dockSession: document.getElementById('sim_ai_session_label'),
     dockCopy: document.getElementById('sim_ai_copy'),
+    dockTitle: document.getElementById('sim_ai_title'),
+    dockQuick: document.getElementById('sim_ai_quick'),
+    dockFabContext: document.getElementById('sim_ai_fab_context'),
   };
+
+  // The same assistant serves both workspaces. Detach it from page-sim so a hidden
+  // page cannot hide the fixed dock when the equipment configurator is active.
+  if (els.dock) document.body.appendChild(els.dock);
+  if (els.dockFab) document.body.appendChild(els.dockFab);
 
   let initialized = false;
   let currentSessionId = null;
@@ -53,6 +62,7 @@
   let activeThinking = null;
   let dockThinking = null;
   let sessionSummaries = [];
+  let dockMode = 'simulation';
 
   const traceLabels = {
     planning: '拆解问题',
@@ -102,6 +112,10 @@
     read_saved_artifact: '读取已保存资料',
     compare_saved_macros: '对比已保存宏',
     compare_saved_scenarios: '对比已保存方案',
+    inspect_equipment_workspace: '读取当前配装',
+    compare_focused_equipment: '实测换装方案',
+    search_equipment_catalog: '检索装备库',
+    compare_equipment_strategies: '实测四件套与四切糕',
   };
 
   const versionLabels = {
@@ -251,6 +265,17 @@
   }
 
   function updateScenarioState() {
+    if (dockMode === 'equipment') {
+      const config = window.Jx3Equip?.getCurrentConfig?.();
+      const count = Object.keys(config?.slots || {}).length;
+      if (els.dockContext) {
+        els.dockContext.classList.toggle('ready', count > 0);
+        els.dockContextText.textContent = count > 0
+          ? `当前配装已就绪 · ${count} 个部位 · 只读分析`
+          : '请先在配装器选择装备与 DPS 来源';
+      }
+      return;
+    }
     const scenario = window._lastSimBody;
     if (!scenario) {
       els.scenario.classList.remove('ready');
@@ -838,6 +863,7 @@
       card.appendChild(notice);
     }
     card.appendChild(element('div', 'agent-report-summary', readableProse(report.content?.summary, allMetrics)));
+    appendEquipmentComparisons(card, report.equipment_comparisons || [], false);
 
     (report.content?.findings || []).forEach(finding => {
       const block = element('section', 'agent-finding');
@@ -898,6 +924,56 @@
     parent.appendChild(block);
   }
 
+  function formatEquipmentValue(value, unit) {
+    const number = Number(value || 0);
+    if (unit === '%') return `${number.toFixed(2)}%`;
+    return Math.abs(number) >= 1000
+      ? Math.round(number).toLocaleString('zh-CN')
+      : number.toLocaleString('zh-CN', { maximumFractionDigits: 2 });
+  }
+
+  function appendEquipmentComparisons(parent, comparisons, compact) {
+    comparisons.slice(0, compact ? 1 : 3).forEach(comparison => {
+      const block = element(compact ? 'div' : 'section', compact
+        ? 'sim-ai-equipment-compare' : 'agent-equipment-compare');
+      const head = element('div', 'agent-eq-compare-head');
+      head.appendChild(element('b', '', '换装实测'));
+      head.appendChild(element('span', '', comparison.source_label || '当前循环'));
+      block.appendChild(head);
+      const itemGrid = element('div', 'agent-eq-item-grid');
+      const before = element('div', 'agent-eq-item');
+      before.appendChild(element('small', '', '换前'));
+      before.appendChild(element('b', '', comparison.before_item || '当前装备'));
+      const after = element('div', 'agent-eq-item');
+      after.appendChild(element('small', '', '换后'));
+      after.appendChild(element('b', '', comparison.after_item || '候选装备'));
+      itemGrid.append(before, after);
+      block.appendChild(itemGrid);
+      const table = element('div', 'agent-eq-diff-table');
+      const tableHead = element('div', 'agent-eq-diff-row is-head');
+      ['属性', '换前', '换后', '变化'].forEach(label => tableHead.appendChild(element('span', '', label)));
+      table.appendChild(tableHead);
+      (comparison.panel_rows || []).filter(row => Math.abs(Number(row.delta || 0)) > 0.0001).slice(0, compact ? 7 : 10).forEach(row => {
+        const line = element('div', 'agent-eq-diff-row');
+        const delta = Number(row.delta || 0);
+        const changeClass = delta > 0 ? 'is-up' : delta < 0 ? 'is-down' : 'is-flat';
+        line.appendChild(element('span', '', row.label || row.key));
+        line.appendChild(element('span', '', formatEquipmentValue(row.before, row.unit)));
+        line.appendChild(element('span', '', formatEquipmentValue(row.after, row.unit)));
+        line.appendChild(element('span', changeClass, `${delta > 0 ? '↑ +' : delta < 0 ? '↓ ' : '→ '}${formatEquipmentValue(delta, row.unit)}`));
+        table.appendChild(line);
+      });
+      block.appendChild(table);
+      const dps = element('div', 'agent-eq-dps');
+      dps.appendChild(element('span', '', `DPS ${formatEquipmentValue(comparison.before_dps)} → ${formatEquipmentValue(comparison.after_dps)}`));
+      const delta = Number(comparison.dps_delta || 0);
+      dps.appendChild(element('b', delta > 0 ? 'is-up' : delta < 0 ? 'is-down' : 'is-flat',
+        `${delta > 0 ? '↑ +' : delta < 0 ? '↓ ' : '→ '}${formatEquipmentValue(delta)}（${Number(comparison.dps_delta_percent || 0).toFixed(2)}%）`));
+      block.appendChild(dps);
+      parent.appendChild(block);
+    });
+  }
+
   function scrollTranscript() {
     requestAnimationFrame(() => { els.transcript.scrollTop = els.transcript.scrollHeight; });
   }
@@ -905,8 +981,13 @@
   function clearDockChat() {
     clear(els.dockChat);
     const welcome = element('div', 'sim-ai-welcome');
-    welcome.appendChild(element('span', '', 'AI 只读当前循环、版本知识库与确定性模拟器。'));
-    welcome.appendChild(element('small', '', '资料会标注赛季和来源，不会修改任何游戏数据。'));
+    if (dockMode === 'equipment') {
+      welcome.appendChild(element('span', '', 'AI 只读当前配装、装备库与确定性模拟器。'));
+      welcome.appendChild(element('small', '', '换装实验会重算面板和当前循环 DPS，不会应用或覆盖配装。'));
+    } else {
+      welcome.appendChild(element('span', '', 'AI 只读当前循环、版本知识库与确定性模拟器。'));
+      welcome.appendChild(element('small', '', '资料会标注赛季和来源，不会修改任何游戏数据。'));
+    }
     els.dockChat.appendChild(welcome);
     dockTrace = null;
     dockLatestResult = null;
@@ -1050,6 +1131,7 @@
         ? providerErrorText(result?.error)
         : result.error?.message || '本次任务没有生成可展示的结论。';
     card.appendChild(element('div', 'sim-ai-result-summary', summary));
+    appendEquipmentComparisons(card, report?.equipment_comparisons || [], true);
     (report?.content?.findings || []).slice(0, 4).forEach(finding => {
       const block = element('div', 'sim-ai-result-finding');
       block.appendChild(element('b', '', finding.title));
@@ -1194,7 +1276,13 @@
     }
   }
 
-  async function captureScenario() {
+  async function captureScenario(surface = 'simulation') {
+    if (surface === 'equipment') {
+      const captured = await window.Jx3Equip?.captureAgentContext?.();
+      if (!captured?.simulation) throw new Error('无法读取当前配装。请先完成配装并选择有效的 DPS 来源。');
+      updateScenarioState();
+      return captured;
+    }
     if (!window._lastSimBody && typeof window.runSimulate === 'function') {
       await window.runSimulate();
     } else if (!window._lastSimBody && typeof runSimulate === 'function') {
@@ -1207,7 +1295,7 @@
     delete scenario.lite;
     delete scenario.lite_keep_timeline;
     updateScenarioState();
-    return scenario;
+    return { simulation: scenario, equipment_workspace: null };
   }
 
   function setDockOpen(open, focusInput) {
@@ -1239,14 +1327,15 @@
     setBusy(true);
     setStatus('正在冻结当前循环…');
     try {
-      const simulation = await captureScenario();
+      const captured = await captureScenario(dockMode);
       appendDockBubble('user', question);
       dockTrace = createDockTrace('准备创建 run');
       dockThinking = createThinking(els.dockChat);
       const payload = {
         question,
         provider_profile: els.dockProvider.value,
-        simulation,
+        simulation: captured.simulation,
+        equipment_workspace: captured.equipment_workspace || undefined,
       };
       if (currentSessionId) payload.session_id = currentSessionId;
       const response = await fetch('/api/agent/runs', {
@@ -1347,14 +1436,14 @@
     setBusy(true);
     setStatus('正在冻结当前场景…');
     try {
-      const simulation = await captureScenario();
+      const captured = await captureScenario('simulation');
       appendMessage('user', question);
       activeTrace = createTrace('准备创建 run');
       activeThinking = createThinking(els.transcript);
       const payload = {
         question,
         provider_profile: els.provider.value,
-        simulation,
+        simulation: captured.simulation,
       };
       if (currentSessionId) payload.session_id = currentSessionId;
       const response = await fetch('/api/agent/runs', {
@@ -1535,6 +1624,46 @@
     loadSessions();
   }
 
+  const dockQuestions = {
+    simulation: [
+      ['基线分析', '分析当前循环的输出基线，并说明证据边界。'],
+      ['时间轴诊断', '诊断当前循环的时间轴，找出值得进一步验证的空转、怒气或增益覆盖问题。'],
+      ['版本攻略', '结合当前版本资料，说明这套循环的核心思路，并标注来源和版本边界。'],
+      ['下一步实验', '说明当前循环还缺少哪些证据，并给出下一步最小验证实验。'],
+    ],
+    equipment: [
+      ['当前配装', '分析我当前配装的属性结构、套装与特效，并说明适配当前循环的证据边界。'],
+      ['这件换那件', '这件装备换成我在列表中标记的候选怎么样？请展示换前换后面板，并用当前循环实测 DPS 和伤害构成。'],
+      ['四件套 vs 四切糕', '穿四件套好还是穿四切糕好？先解释黑话，再结合当前配装识别缺少的具体候选并执行可验证的对比路径。'],
+      ['属性短板', '结合当前循环和配装面板，判断目前最值得补的属性，并区分面板收益、循环档位和未验证假设。'],
+    ],
+  };
+
+  function syncDockMode() {
+    const next = els.equipPage?.classList.contains('active') ? 'equipment'
+      : els.simPage?.classList.contains('active') ? 'simulation' : null;
+    if (!next) {
+      if (els.dockFab) els.dockFab.hidden = true;
+      if (els.dock?.classList.contains('open') && !activeRun) setDockOpen(false);
+      return;
+    }
+    if (els.dockFab) els.dockFab.hidden = false;
+    const changed = dockMode !== next;
+    dockMode = next;
+    if (els.dockTitle) els.dockTitle.textContent = next === 'equipment' ? '配装分析助手' : '循环分析助手';
+    if (els.dockFabContext) els.dockFabContext.textContent = next === 'equipment' ? '基于当前配装' : '基于当前循环';
+    if (els.dockQuestion) els.dockQuestion.placeholder = next === 'equipment'
+      ? '问装备替换、套装取舍、属性和当前循环 DPS…'
+      : '问当前攻略、循环基线、时间轴或候选改动…';
+    if (els.dockQuick) {
+      els.dockQuick.innerHTML = dockQuestions[next].map(([label, question]) =>
+        `<button type="button" class="sim-btn" data-agent-dock-question="${question.replaceAll('&', '&amp;').replaceAll('"', '&quot;')}">${label}</button>`
+      ).join('');
+    }
+    updateScenarioState();
+    if (changed && !activeRun) clearDockChat();
+  }
+
   async function initialize() {
     if (initialized) return;
     initialized = true;
@@ -1582,12 +1711,19 @@
       startDockRun();
     }
   });
-  document.querySelectorAll('[data-sim-ai-question]').forEach(button => {
-    button.addEventListener('click', () => {
-      setDockOpen(true);
-      els.dockQuestion.value = button.dataset.simAiQuestion;
-      els.dockQuestion.focus();
-    });
+  els.dockQuick?.addEventListener('click', event => {
+    const button = event.target.closest('[data-agent-dock-question], [data-sim-ai-question]');
+    if (!button) return;
+    setDockOpen(true);
+    els.dockQuestion.value = button.dataset.agentDockQuestion || button.dataset.simAiQuestion || '';
+    els.dockQuestion.focus();
+  });
+  window.addEventListener('jx3-equip-ai-focus', event => {
+    syncDockMode();
+    const focus = event.detail || {};
+    setDockOpen(true);
+    els.dockQuestion.value = `把当前${focus.position || '部位'}的“${focus.current_name || '当前装备'}”换成“${focus.candidate_name || '候选装备'}”怎么样？展示换前换后面板，并用当前循环实测 DPS 和伤害构成。`;
+    els.dockQuestion.focus();
   });
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape' && els.dock?.classList.contains('open') && !activeRun) {
@@ -1615,7 +1751,11 @@
       loadSessions();
     }
   }).observe(page, { attributes: true, attributeFilter: ['class'] });
+  [els.simPage, els.equipPage].filter(Boolean).forEach(workspacePage => {
+    new MutationObserver(syncDockMode).observe(workspacePage, { attributes: true, attributeFilter: ['class'] });
+  });
   syncAgentPageLayout();
+  syncDockMode();
   initialize();
   try {
     if (localStorage.getItem('sim_ai_dock_open') === '1' && els.simPage?.classList.contains('active')) {

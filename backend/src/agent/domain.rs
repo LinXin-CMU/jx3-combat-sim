@@ -25,6 +25,7 @@ pub enum AnalysisTaskType {
     HasteDecision,
     OrangeWeaponTiming,
     MacroAnalysis,
+    EquipmentAnalysis,
     EncounterAdvice,
     MechanismExplanation,
     ReferenceLookup,
@@ -891,6 +892,7 @@ fn task_type_for_playbook(playbook_id: &str) -> Option<AnalysisTaskType> {
         "haste_band_decision" => AnalysisTaskType::HasteDecision,
         "orange_weapon_timing" => AnalysisTaskType::OrangeWeaponTiming,
         "macro_and_manual_analysis" => AnalysisTaskType::MacroAnalysis,
+        "equipment_build_analysis" => AnalysisTaskType::EquipmentAnalysis,
         "encounter_advice" => AnalysisTaskType::EncounterAdvice,
         "mechanism_explanation" => AnalysisTaskType::MechanismExplanation,
         "reference_lookup" => AnalysisTaskType::ReferenceLookup,
@@ -969,6 +971,9 @@ pub fn knowledge_prefetch(plan: &AnalysisPlanV1, question: &str) -> Option<Knowl
         (AnalysisTaskType::MacroAnalysis, _) => {
             "旗舰端 分山劲 一键宏 判定 延迟 单走绝刀 援戈 手动循环"
         }
+        (AnalysisTaskType::EquipmentAnalysis, _) => {
+            "旗舰端 分山劲 配装 套装 切糕 属性收益"
+        }
         (AnalysisTaskType::EncounterAdvice, _) if normalized.contains("老四") => {
             "阆风悬城 老四 提前倒数10秒 开业火 第二次斩 破 卡轴"
         }
@@ -1028,6 +1033,10 @@ fn classify_task(question: &str) -> (AnalysisTaskType, Vec<String>) {
         (
             AnalysisTaskType::OrangeWeaponTiming,
             &["橙武", "天下宏愿", "裂伤"],
+        ),
+        (
+            AnalysisTaskType::EquipmentAnalysis,
+            &["装备", "配装", "换这件", "换那件", "四件套", "4件套", "四切糕", "4切糕", "切糕", "套装"],
         ),
         (
             AnalysisTaskType::HasteDecision,
@@ -1307,6 +1316,22 @@ fn playbook(task: AnalysisTaskType, client: DomainClient) -> AnalysisPlaybookV1 
                 ),
             ],
         ),
+        AnalysisTaskType::EquipmentAnalysis => (
+            "equipment_build_analysis",
+            "配装与装备取舍",
+            "先读取当前配装和候选，再计算换前换后面板，并在同一循环下实测 DPS 与伤害构成。",
+            &["scope", "scenario", "equipment_context", "candidate_comparison"],
+            &["versioned_knowledge", "baseline_metrics"],
+            &["get_current_scenario", "inspect_equipment_workspace", "compare_focused_equipment", "compare_equipment_strategies", "search_equipment_catalog", "search_knowledge_base"],
+            &["当前分山 配装 套装 切糕 属性收益", "四件套 四切糕 取舍"],
+            &["装备名和装分不能替代同循环实测", "四件套指普通套装四件效果；四切糕指四件切糕装备，不得混为同一套装", "没有明确候选方案时不能虚构完整配装或 DPS"],
+            &[
+                ("scope", "读取当前配装", "确认心法、版本、当前装备与循环来源。"),
+                ("equipment", "识别装备方案", "解析具体装备名、套装件数与切糕等领域黑话。"),
+                ("compare", "执行换装对比", "重算两侧面板，并用同一循环实测 DPS 与伤害构成。"),
+                ("tradeoff", "解释属性取舍", "区分面板变化、套装特效、循环适配和证据边界。"),
+            ],
+        ),
         AnalysisTaskType::EncounterAdvice => (
             "encounter_advice",
             "指定副本实战建议",
@@ -1562,6 +1587,8 @@ fn satisfied_dimensions(
         || tools.contains("compare_scenarios")
         || tools.contains("compare_saved_macros")
         || tools.contains("compare_saved_scenarios")
+        || tools.contains("compare_focused_equipment")
+        || tools.contains("compare_equipment_strategies")
     {
         dimensions.insert("baseline_metrics".to_string());
     }
@@ -1577,11 +1604,16 @@ fn satisfied_dimensions(
     if tools.contains("compare_scenarios")
         || tools.contains("compare_saved_macros")
         || tools.contains("compare_saved_scenarios")
+        || tools.contains("compare_focused_equipment")
+        || tools.contains("compare_equipment_strategies")
     {
         dimensions.insert("candidate_comparison".to_string());
     }
     if tools.contains("list_saved_artifacts") || tools.contains("read_saved_artifact") {
         dimensions.insert("saved_artifacts".to_string());
+    }
+    if tools.contains("inspect_equipment_workspace") || tools.contains("search_equipment_catalog") {
+        dimensions.insert("equipment_context".to_string());
     }
     if !boundaries.is_empty() {
         dimensions.insert("implementation_boundary".to_string());
@@ -1678,6 +1710,10 @@ pub fn trace_annotation(
         ("tool_started" | "tool_finished", Some("read_saved_artifact")) => "saved",
         ("tool_started" | "tool_finished", Some("compare_saved_macros")) => "compare",
         ("tool_started" | "tool_finished", Some("compare_saved_scenarios")) => "compare",
+        ("tool_started" | "tool_finished", Some("inspect_equipment_workspace")) => "equipment",
+        ("tool_started" | "tool_finished", Some("search_equipment_catalog")) => "equipment",
+        ("tool_started" | "tool_finished", Some("compare_focused_equipment")) => "compare",
+        ("tool_started" | "tool_finished", Some("compare_equipment_strategies")) => "compare",
         ("evidence_gap_requires_tool", Some("analyze_timeline")) => "locate",
         ("evidence_gap_requires_tool", Some("compare_scenarios")) => "compare",
         ("evidence_coverage_checked", _) => "coverage",

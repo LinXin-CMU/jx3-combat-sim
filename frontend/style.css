@@ -8123,6 +8123,25 @@ button.eq-mini-btn:hover {
 .eq-list-table tbody tr:hover { background: var(--surface-hover); }
 .eq-list-table tbody tr.selected { background: var(--selected-bg); color: var(--selected-fg); }
 .eq-cur-tag { font-size: 10px; color: var(--gold); margin-left: 4px; font-weight: normal; }
+.eq-list-table td:first-child { position: relative; }
+.eq-ai-compare {
+  float: right;
+  margin: -2px 0 -2px 6px;
+  padding: 2px 5px;
+  border: 1px solid var(--gold-dim);
+  border-radius: 4px;
+  color: var(--gold);
+  background: var(--gold-tint);
+  font: inherit;
+  font-size: 10px;
+  line-height: 1.4;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .15s ease, transform .15s ease, background .15s ease;
+}
+.eq-list-table tr:hover .eq-ai-compare,
+.eq-ai-compare:focus-visible { opacity: 1; }
+.eq-ai-compare:hover { background: var(--surface-hover); transform: translateY(-1px); }
 .eq-list-table tbody tr.selected .eq-cur-tag { color: var(--selected-fg); }
 .eq-list-table .eq-name-orange { color: var(--eq-quality-orange); }
 .eq-list-table .eq-name-purple { color: var(--eq-quality-purple); }

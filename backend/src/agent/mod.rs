@@ -7,6 +7,7 @@
 pub mod compare;
 pub mod domain;
 pub mod evidence;
+pub mod equipment;
 pub mod hash;
 pub mod http;
 pub mod knowledge;
@@ -36,6 +37,7 @@ pub use domain::{
     KnowledgePrefetchV1,
 };
 pub use evidence::{EvidenceEnvelopeV1, ToolProvenance, EVIDENCE_SCHEMA_V1};
+pub use equipment::{EquipmentComparisonPresentationV1, EquipmentWorkspaceV1};
 pub use knowledge::{
     KnowledgeAudience, KnowledgeClientScope, KnowledgeIndex, KnowledgeIndexError,
     KnowledgeMountScope, KnowledgeQuality, KnowledgeRetrievalInfo, KnowledgeSearchQuery,

@@ -1,5 +1,5 @@
 use crate::{
-    FormationEntry, GameVersion, Mount, MountConstants, RecipeEntry, SharedState, SkillSpec,
+    equip, FormationEntry, GameVersion, Mount, MountConstants, RecipeEntry, SharedState, SkillSpec,
     TeamBuffEntry,
 };
 
@@ -21,6 +21,9 @@ pub struct AgentRuntime {
     formations: Vec<FormationEntry>,
     provenance: ToolProvenance,
     knowledge: Option<Arc<KnowledgeIndex>>,
+    equip_data: Option<Arc<equip::EquipData>>,
+    base_stats: equip::MountBaseStats,
+    mount_conversions: equip::MountConversions,
 }
 
 impl AgentRuntime {
@@ -36,6 +39,9 @@ impl AgentRuntime {
             formations: state.formations.read().await.clone(),
             provenance: state.agent_provenance.read().await.clone(),
             knowledge: state.agent_knowledge.clone(),
+            equip_data: Some(state.equip_data.clone()),
+            base_stats: state.base_stats.read().await.clone(),
+            mount_conversions: state.mount_conversions.read().await.clone(),
         }
     }
 
@@ -67,6 +73,30 @@ impl AgentRuntime {
         self.knowledge.as_deref()
     }
 
+    pub fn calculate_equipment(
+        &self,
+        slots: &std::collections::HashMap<String, equip::SlotConfig>,
+        stone_id: u32,
+        talents: &[u32],
+    ) -> equip::CalcResponse {
+        let data = self.equip_data.as_deref().expect("equipment data is available in live runtime");
+        equip::calculate(data, &equip::CalcRequest {
+            slots: slots.clone(), stone_id, mount: match self.mount { Mount::FenShanJin => 10390, Mount::TieGuYi => 10389 }, talents: talents.to_vec(),
+        }, &self.base_stats, &self.mount_conversions)
+    }
+
+    pub fn equipment_item(&self, subtype: u8, id: u32) -> Option<&equip::EquipItem> {
+        self.equip_data.as_deref()?.get_item(subtype, id)
+    }
+
+    pub fn equipment_items(&self) -> impl Iterator<Item = &equip::EquipItem> {
+        self.equip_data.as_deref().into_iter().flat_map(|data| data.items.values())
+    }
+
+    pub fn equipment_set_name(&self, set_id: u32) -> Option<String> {
+        self.equip_data.as_deref()?.sets.get(&set_id).map(|set| set.name.clone())
+    }
+
     #[cfg(test)]
     pub fn fixture() -> Self {
         use crate::{
@@ -93,6 +123,9 @@ impl AgentRuntime {
             formations,
             provenance,
             knowledge: None,
+            equip_data: None,
+            base_stats: equip::MountBaseStats::default(),
+            mount_conversions: equip::MountConversions::default(),
         }
     }
 

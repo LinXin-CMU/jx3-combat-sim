@@ -22579,6 +22579,7 @@ window.Jx3Nav = {
     baselineDps: null,
     lastListRaw: [],   // 上次 renderList 的过滤后原始数据，DPS 重排时按 id 查
     lastCalcResp: null,
+    aiCandidate: null,
   };
 
   // 镶嵌"连锁"开关（默认开启）：开启时改一个孔位会同步所有其他孔位
@@ -22853,7 +22854,7 @@ window.Jx3Nav = {
       const selected = isCur ? 'selected' : '';
       const curTag = isCur ? ' <span class="eq-cur-tag" title="本部位当前装备">[当前]</span>' : '';
       return `<tr data-id="${it.id}" data-name="${escapeHtml(it.name)}" data-quality="${it.quality || 0}" class="${selected}">
-        <td class="${cls}">${escapeHtml(it.name)}${curTag}</td>
+        <td class="${cls}"><span>${escapeHtml(it.name)}${curTag}</span>${isCur ? '' : `<button type="button" class="eq-ai-compare" data-ai-id="${it.id}" title="不换装，交给 AI 做面板与同循环实测">✦ AI</button>`}</td>
         <td>${escapeHtml(it.magic_type || '')}</td>
         <td>${escapeHtml(it.belong_school || '')}</td>
         <td>${escapeHtml(it.set_name || '')}</td>
@@ -22867,6 +22868,23 @@ window.Jx3Nav = {
         const name = tr.dataset.name || '';
         const quality = parseInt(tr.dataset.quality, 10) || 0;
         selectItem(id, { name, quality });
+      });
+    });
+    tbody.querySelectorAll('.eq-ai-compare').forEach(button => {
+      button.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        const row = button.closest('tr');
+        const id = parseInt(button.dataset.aiId, 10);
+        const current = state.slots[state.currentPos];
+        if (!current?.equip_id || !id) return;
+        state.aiCandidate = {
+          position: state.currentPos,
+          candidate_id: id,
+          candidate_name: row?.dataset.name || `#${id}`,
+          current_name: current.name || `#${current.equip_id}`,
+        };
+        window.dispatchEvent(new CustomEvent('jx3-equip-ai-focus', { detail: state.aiCandidate }));
       });
     });
     updateSortIndicators();
@@ -24910,6 +24928,63 @@ window.Jx3Nav = {
         slots: JSON.parse(JSON.stringify(state.slots || {})),
         stoneId: state.stoneId || 0,
         stoneName: state.stoneName || '',
+      };
+    },
+    /** 为配装 Agent 冻结当前配装、候选和 DPS 来源。只读，不应用候选。 */
+    async captureAgentContext() {
+      const src = await resolvePreviewSource();
+      if (!src) throw new Error('当前 DPS 来源不可用。请先在循环模拟页准备循环，或选择一个已保存循环。');
+      const mountId = getCurrentMountId();
+      const talents = src.talents || getCurrentTalents();
+      const calc = await apiPost('/api/equip/calculate', {
+        slots: state.slots, stone_id: state.stoneId || 0, mount: mountId, talents,
+      });
+      if (!calc?.raw) throw new Error('当前配装面板计算失败。');
+      const raw = calc.raw;
+      const equipment = {};
+      for (const [pos, slot] of Object.entries(state.slots || {})) {
+        if (slot?.equip_id) equipment[pos] = slot.equip_id;
+        if (slot?.enchant_id) equipment[`ENCHANT_${pos}`] = slot.enchant_id;
+      }
+      const simulation = {
+        haste_level: Math.round(raw.haste_level || 0),
+        sequence: src.sequence,
+        macro_text: src.macro_text || undefined,
+        macro_duration: src.macro_duration || undefined,
+        talents,
+        recipes: src.recipes || [],
+        channel_ticks: {}, timing_offsets: {}, qijin_buffs: {},
+        network_delay: src.network_delay || 0,
+        attributes: {
+          vitality: raw.vitality || 45, li_dao: raw.strength || 44, shen_fa: raw.agility || 44,
+          base_attack: raw.base_attack || 0, base_magical_attack: raw.base_magical_attack || 0,
+          weapon_damage: raw.weapon_damage || 0, surplus_value: raw.surplus_value || 0,
+          crit_level: raw.crit_level || 0, crit_effect_level: raw.crit_effect_level || 0,
+          overcome_level: raw.overcome_level || 0, strain_level: raw.strain_level || 0,
+          haste_level: raw.haste_level || 0, parry_value: raw.parry_value || 0,
+          parry_level: raw.parry_level || 0,
+        },
+        target: src.target,
+        initial_rage: src.initial_rage || 0,
+        boss_attack_interval: src.boss_attack_interval || undefined,
+        equipment,
+        team_buffs: src.team_buffs || [],
+        formation: src.formation || null,
+      };
+      const sourceSelect = document.getElementById('eq_dps_source');
+      const sourceLabel = sourceSelect?.selectedOptions?.[0]?.textContent?.trim() || '当前循环';
+      return {
+        simulation,
+        equipment_workspace: {
+          slots: JSON.parse(JSON.stringify(state.slots || {})),
+          stone_id: state.stoneId || 0,
+          source_label: sourceLabel,
+          focus: state.aiCandidate && state.aiCandidate.position === state.currentPos
+            ? { position: state.aiCandidate.position, candidate_id: state.aiCandidate.candidate_id }
+            : null,
+        },
+        focus: state.aiCandidate,
+        panel: calc.panel || null,
       };
     },
     /** 构造装备 hover tooltip HTML（异步：要拉装备详情）。

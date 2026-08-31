@@ -80,6 +80,8 @@ pub enum ToolError {
         label: String,
     },
     TimelineDetailsUnavailable,
+    EquipmentFocusUnavailable,
+    EquipmentStrategyUnavailable,
 }
 
 impl std::fmt::Display for ToolError {
@@ -113,6 +115,12 @@ impl std::fmt::Display for ToolError {
             }
             Self::TimelineDetailsUnavailable => {
                 write!(f, "full timeline details are required for deterministic analysis")
+            }
+            Self::EquipmentFocusUnavailable => {
+                write!(f, "equipment workspace or focused candidate is unavailable")
+            }
+            Self::EquipmentStrategyUnavailable => {
+                write!(f, "four-piece set or qiegao candidates are unavailable")
             }
         }
     }

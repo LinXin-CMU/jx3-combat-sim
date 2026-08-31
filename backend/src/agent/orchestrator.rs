@@ -14,7 +14,7 @@ use super::domain::{
     select_analysis_plan_with_history, trace_annotation, AnalysisPlanV1,
 };
 use super::evidence::validate_trace_id;
-use super::prompt::agent_prompt_v18;
+use super::prompt::agent_prompt_v19;
 use super::provider::{
     FinishReason, LlmProvider, ModelMessage, ModelRequest, ProviderToolCall,
     StructuredOutputDefinition, TokenUsage,
@@ -83,6 +83,8 @@ pub struct AgentRunInput {
     pub session_context: Option<String>,
     /// The last server-selected playbook. This is trusted routing state, not model prose.
     pub session_playbook_id: Option<String>,
+    /// Structured, bounded context captured by the equipment configurator.
+    pub equipment_workspace: Option<super::EquipmentWorkspaceV1>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -302,7 +304,7 @@ pub async fn run_agent_recorded(
     replay_sink: Option<AgentReplaySink>,
 ) -> AgentRunResultV1 {
     let started = Instant::now();
-    let prompt = agent_prompt_v18();
+    let prompt = agent_prompt_v19();
     let analysis_plan = select_analysis_plan_with_history(
         &input.question,
         input.session_playbook_id.as_deref(),
@@ -318,6 +320,7 @@ pub async fn run_agent_recorded(
             "scenario": &input.scenario,
             "session_context": &input.session_context,
             "session_playbook_id": &input.session_playbook_id,
+            "equipment_workspace": &input.equipment_workspace,
             "provider_profile": provider.profile_id(),
             "model": provider.model(),
             "limits": &limits,
@@ -349,11 +352,12 @@ pub async fn run_agent_recorded(
         );
     }
 
-    let mut registry = AgentToolRegistry::new_with_knowledge(
+    let mut registry = AgentToolRegistry::new_with_context(
         &input.scenario,
         runtime,
         limits.max_simulations,
         runtime.knowledge(),
+        input.equipment_workspace.clone(),
     );
     registry.set_knowledge_question(&input.question);
     let definitions = if let Some(knowledge) = runtime.knowledge() {
@@ -519,6 +523,65 @@ pub async fn run_agent_recorded(
         call_id: PREFETCH_CALL_ID.to_string(),
         output: prefetched.output,
     });
+
+    // Equipment-page runs eagerly capture the build and, when a list candidate is
+    // focused, execute the exact two-simulation swap. This prevents a provider from
+    // answering an equipment question from item names or item level alone.
+    if input.equipment_workspace.is_some() {
+        const EQUIPMENT_INSPECT_CALL_ID: &str = "server-prefetch-equipment";
+        const EQUIPMENT_INSPECT_TOOL: &str = "inspect_equipment_workspace";
+        trace.push("tool_started", Some(EQUIPMENT_INSPECT_TOOL.to_string()), Vec::new(), Some("server_equipment_prefetch".to_string()));
+        let inspected = registry.dispatch(&input.run_id, EQUIPMENT_INSPECT_TOOL, serde_json::json!({}));
+        accounting.tool_calls += 1;
+        trace.push("tool_finished", Some(EQUIPMENT_INSPECT_TOOL.to_string()), inspected.evidence_ids.clone(), inspected.output.pointer("/error/code").and_then(|value| value.as_str()).map(str::to_string));
+        record_replay(&replay_sink, "tool_dispatch", serde_json::json!({
+            "call_id": EQUIPMENT_INSPECT_CALL_ID, "tool_name": EQUIPMENT_INSPECT_TOOL,
+            "arguments": {}, "output": &inspected.output, "evidence_ids": &inspected.evidence_ids,
+            "budget_exhausted": inspected.budget_exhausted, "server_initiated": true,
+        }));
+        messages.push(ModelMessage::Assistant { content: None, tool_calls: vec![ProviderToolCall {
+            call_id: EQUIPMENT_INSPECT_CALL_ID.to_string(), name: EQUIPMENT_INSPECT_TOOL.to_string(), arguments: serde_json::json!({}),
+        }]});
+        messages.push(ModelMessage::ToolResult { call_id: EQUIPMENT_INSPECT_CALL_ID.to_string(), output: inspected.output });
+
+        let strategy_question = ["四件套", "4件套", "四切糕", "4切糕"]
+            .iter().any(|term| input.question.contains(term));
+        if strategy_question && accounting.tool_calls < limits.max_tool_calls {
+            const EQUIPMENT_STRATEGY_CALL_ID: &str = "server-compare-equipment-strategies";
+            const EQUIPMENT_STRATEGY_TOOL: &str = "compare_equipment_strategies";
+            trace.push("tool_started", Some(EQUIPMENT_STRATEGY_TOOL.to_string()), Vec::new(), Some("server_equipment_strategy".to_string()));
+            let compared = registry.dispatch(&input.run_id, EQUIPMENT_STRATEGY_TOOL, serde_json::json!({}));
+            accounting.tool_calls += 1;
+            trace.push("tool_finished", Some(EQUIPMENT_STRATEGY_TOOL.to_string()), compared.evidence_ids.clone(), compared.output.pointer("/error/code").and_then(|value| value.as_str()).map(str::to_string));
+            record_replay(&replay_sink, "tool_dispatch", serde_json::json!({
+                "call_id": EQUIPMENT_STRATEGY_CALL_ID, "tool_name": EQUIPMENT_STRATEGY_TOOL,
+                "arguments": {}, "output": &compared.output, "evidence_ids": &compared.evidence_ids,
+                "budget_exhausted": compared.budget_exhausted, "server_initiated": true,
+            }));
+            messages.push(ModelMessage::Assistant { content: None, tool_calls: vec![ProviderToolCall {
+                call_id: EQUIPMENT_STRATEGY_CALL_ID.to_string(), name: EQUIPMENT_STRATEGY_TOOL.to_string(), arguments: serde_json::json!({}),
+            }]});
+            messages.push(ModelMessage::ToolResult { call_id: EQUIPMENT_STRATEGY_CALL_ID.to_string(), output: compared.output });
+        } else if input.equipment_workspace.as_ref().and_then(|workspace| workspace.focus.as_ref()).is_some()
+            && accounting.tool_calls < limits.max_tool_calls
+        {
+            const EQUIPMENT_COMPARE_CALL_ID: &str = "server-compare-equipment";
+            const EQUIPMENT_COMPARE_TOOL: &str = "compare_focused_equipment";
+            trace.push("tool_started", Some(EQUIPMENT_COMPARE_TOOL.to_string()), Vec::new(), Some("server_equipment_comparison".to_string()));
+            let compared = registry.dispatch(&input.run_id, EQUIPMENT_COMPARE_TOOL, serde_json::json!({}));
+            accounting.tool_calls += 1;
+            trace.push("tool_finished", Some(EQUIPMENT_COMPARE_TOOL.to_string()), compared.evidence_ids.clone(), compared.output.pointer("/error/code").and_then(|value| value.as_str()).map(str::to_string));
+            record_replay(&replay_sink, "tool_dispatch", serde_json::json!({
+                "call_id": EQUIPMENT_COMPARE_CALL_ID, "tool_name": EQUIPMENT_COMPARE_TOOL,
+                "arguments": {}, "output": &compared.output, "evidence_ids": &compared.evidence_ids,
+                "budget_exhausted": compared.budget_exhausted, "server_initiated": true,
+            }));
+            messages.push(ModelMessage::Assistant { content: None, tool_calls: vec![ProviderToolCall {
+                call_id: EQUIPMENT_COMPARE_CALL_ID.to_string(), name: EQUIPMENT_COMPARE_TOOL.to_string(), arguments: serde_json::json!({}),
+            }]});
+            messages.push(ModelMessage::ToolResult { call_id: EQUIPMENT_COMPARE_CALL_ID.to_string(), output: compared.output });
+        }
+    }
 
     const KNOWLEDGE_PREFETCH_CALL_ID: &str = "server-prefetch-knowledge";
     const KNOWLEDGE_PREFETCH_TOOL: &str = "search_knowledge_base";
@@ -1601,6 +1664,7 @@ fn terminal_with_report(
         provider_profile: provider.profile_id().to_string(),
         model: provider.model().to_string(),
         sources,
+        equipment_comparisons: registry.equipment_comparisons().to_vec(),
         evidence_ids,
         content,
         accounting: accounting.clone(),
@@ -2389,6 +2453,7 @@ mod tests {
             scenario: scenario(runtime),
             session_context: None,
             session_playbook_id: None,
+            equipment_workspace: None,
         }
     }
 
@@ -2545,7 +2610,7 @@ mod tests {
         .await;
 
         assert_eq!(result.status, AgentRunStatus::Completed);
-        assert_eq!(result.prompt_version, "agent-system/v18");
+        assert_eq!(result.prompt_version, "agent-system/v19");
         assert_eq!(result.accounting.knowledge_searches, 1);
         assert_eq!(result.accounting.simulations, 0);
         let report = result.report.unwrap();
@@ -2624,7 +2689,7 @@ mod tests {
         .await;
 
         assert_eq!(result.status, AgentRunStatus::Completed);
-        assert_eq!(result.prompt_version, "agent-system/v18");
+        assert_eq!(result.prompt_version, "agent-system/v19");
         assert_eq!(result.accounting.knowledge_searches, 1);
         assert_eq!(result.accounting.simulations, 1);
         let report = result.report.unwrap();

@@ -1092,7 +1092,7 @@ pub struct StoneAttrResp {
 
 // ─── 属性计算请求/响应 ───
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SlotConfig {
     pub equip_id: u32,
     #[serde(default = "default_strength")]
@@ -1120,7 +1120,7 @@ pub struct CalcRequest {
 
 fn default_mount() -> u32 { 10390 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct CalcResponse {
     /// 装分（S_score + ΔS_score）
     pub score: i64,

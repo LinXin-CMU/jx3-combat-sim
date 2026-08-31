@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>剑网3 苍云PVE循环模拟器</title>
   <link rel="icon" href="favicon.ico" type="image/x-icon">
-  <link rel="stylesheet" href="style.css">
-  <link rel="stylesheet" href="agent.css?v=20260827-trace2">
+  <link rel="stylesheet" href="style.css?v=20260901-equipai1">
+  <link rel="stylesheet" href="agent.css?v=20260901-equipai1">
 </head>
 <body>
   <div class="container">
@@ -2001,7 +2001,7 @@
           <div class="sim-ai-dock-brand">
             <span class="sim-ai-mark" aria-hidden="true">✦</span>
             <div>
-              <strong>循环分析助手</strong>
+              <strong id="sim_ai_title">循环分析助手</strong>
               <span id="sim_ai_session_label">新对话</span>
             </div>
           </div>
@@ -2026,7 +2026,7 @@
           <span id="sim_ai_context_text">等待当前循环完成一次模拟</span>
         </div>
 
-        <div class="sim-ai-quick" aria-label="常用分析">
+        <div class="sim-ai-quick" id="sim_ai_quick" aria-label="常用分析">
           <button type="button" class="sim-btn" data-sim-ai-question="分析当前循环的输出基线，并说明证据边界。">基线分析</button>
           <button type="button" class="sim-btn" data-sim-ai-question="诊断当前循环的时间轴，找出值得进一步验证的空转、怒气或增益覆盖问题。">时间轴诊断</button>
           <button type="button" class="sim-btn" data-sim-ai-question="结合当前版本资料，说明这套循环的核心思路，并标注来源和版本边界。">版本攻略</button>
@@ -2063,7 +2063,7 @@
 
       <button type="button" class="sim-ai-fab" id="sim_ai_fab" aria-controls="sim_ai_dock" aria-expanded="false">
         <span class="sim-ai-fab-icon" aria-hidden="true">✦</span>
-        <span class="sim-ai-fab-label"><b>AI 分析</b><small>基于当前循环</small></span>
+        <span class="sim-ai-fab-label"><b>AI 分析</b><small id="sim_ai_fab_context">基于当前循环</small></span>
       </button>
 
     </div>
@@ -2819,7 +2819,7 @@
       s.onload = next; s.onerror = next;
       document.body.appendChild(s);
     }
-    var SCRIPTS = ['state.js', 'app.js', 'agent.js?v=20260831-saved1'];
+    var SCRIPTS = ['state.js', 'app.js?v=20260901-equipai1', 'agent.js?v=20260901-equipai1'];
     var go = function () { loadSeq(SCRIPTS); };
     try {
       fetch('/api/settings', { cache: 'no-store' })

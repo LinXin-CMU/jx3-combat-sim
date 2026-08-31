@@ -47,6 +47,8 @@ pub struct CreateAgentRunRequest {
     #[serde(default)]
     pub session_id: Option<String>,
     pub simulation: SimulateRequest,
+    #[serde(default)]
+    pub equipment_workspace: Option<super::EquipmentWorkspaceV1>,
 }
 
 #[derive(Debug, Serialize)]
@@ -560,6 +562,7 @@ pub async fn create_run_handler(
         scenario: scenario.clone(),
         session_context: None,
         session_playbook_id: None,
+        equipment_workspace: request.equipment_workspace,
     };
     match state
         .agent_runs
@@ -769,6 +772,7 @@ mod tests {
             scenario,
             session_context: None,
             session_playbook_id: None,
+            equipment_workspace: None,
         };
         let record = manager
             .start(
@@ -856,6 +860,7 @@ mod tests {
             scenario: runtime.fixture_scenario(),
             session_context: None,
             session_playbook_id: None,
+            equipment_workspace: None,
         };
         let record = manager
             .start(
@@ -875,6 +880,7 @@ mod tests {
             scenario: second_runtime.fixture_scenario(),
             session_context: None,
             session_playbook_id: None,
+            equipment_workspace: None,
         };
         let error = match manager
             .start(

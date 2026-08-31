@@ -329,6 +329,14 @@ fn tool_error_response(
             StatusCode::UNPROCESSABLE_ENTITY,
             "timeline_details_unavailable",
         ),
+        ToolError::EquipmentFocusUnavailable => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "equipment_focus_unavailable",
+        ),
+        ToolError::EquipmentStrategyUnavailable => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "equipment_strategy_unavailable",
+        ),
     };
     error_response(
         status,

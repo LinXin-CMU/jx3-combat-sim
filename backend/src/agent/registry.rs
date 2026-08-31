@@ -3,6 +3,11 @@ use serde_json::{json, Value};
 use std::time::Instant;
 
 use super::provider::ToolDefinition;
+use super::equipment::{
+    compare_focus, compare_strategies, inspect_workspace, search_catalog, EquipmentCatalogQueryV1,
+    EquipmentComparisonPresentationV1, EquipmentWorkspaceV1, COMPARE_FOCUSED_EQUIPMENT,
+    INSPECT_EQUIPMENT_WORKSPACE, SEARCH_EQUIPMENT_CATALOG, COMPARE_EQUIPMENT_STRATEGIES,
+};
 use super::report::EvidenceStore;
 use super::{
     analyze_timeline, compare_scenarios, get_current_scenario, simulate_scenario, AgentRuntime,
@@ -59,6 +64,8 @@ pub struct AgentToolRegistry<'a> {
     knowledge_audience: KnowledgeAudience,
     scenario_read: bool,
     evidence: EvidenceStore,
+    equipment_workspace: Option<EquipmentWorkspaceV1>,
+    equipment_comparisons: Vec<EquipmentComparisonPresentationV1>,
 }
 
 impl<'a> AgentToolRegistry<'a> {
@@ -67,7 +74,7 @@ impl<'a> AgentToolRegistry<'a> {
         runtime: &'a AgentRuntime,
         max_simulations: u32,
     ) -> Self {
-        Self::new_with_knowledge(scenario, runtime, max_simulations, None)
+        Self::new_with_context(scenario, runtime, max_simulations, None, None)
     }
 
     pub fn new_with_knowledge(
@@ -75,6 +82,16 @@ impl<'a> AgentToolRegistry<'a> {
         runtime: &'a AgentRuntime,
         max_simulations: u32,
         knowledge: Option<&'a KnowledgeIndex>,
+    ) -> Self {
+        Self::new_with_context(scenario, runtime, max_simulations, knowledge, None)
+    }
+
+    pub fn new_with_context(
+        scenario: &'a ScenarioSnapshotV1,
+        runtime: &'a AgentRuntime,
+        max_simulations: u32,
+        knowledge: Option<&'a KnowledgeIndex>,
+        equipment_workspace: Option<EquipmentWorkspaceV1>,
     ) -> Self {
         let mount = match runtime.mount() {
             Mount::FenShanJin => KnowledgeMountScope::Fenshanjin,
@@ -89,6 +106,8 @@ impl<'a> AgentToolRegistry<'a> {
             knowledge_audience: KnowledgeAudience::from_question("", Some(mount)),
             scenario_read: false,
             evidence: EvidenceStore::new(),
+            equipment_workspace,
+            equipment_comparisons: Vec::new(),
         }
     }
 
@@ -142,6 +161,26 @@ impl<'a> AgentToolRegistry<'a> {
                 description: "Run a deterministic comparison of two complete saved loop or battle-plaza scenarios. The server validates version and mount and reports the actual changed fields. IDs must come from list_saved_artifacts.".to_string(),
                 parameters: compare_saved_schema(),
             },
+            ToolDefinition {
+                name: INSPECT_EQUIPMENT_WORKSPACE.to_string(),
+                description: "Read the current equipment workspace, exact equipped item names, computed panel and the focused candidate. Use for equipment questions; it is read-only.".to_string(),
+                parameters: empty_object_schema(),
+            },
+            ToolDefinition {
+                name: COMPARE_FOCUSED_EQUIPMENT.to_string(),
+                description: "Recalculate the focused item swap and run the before/after builds with the same frozen rotation. Returns exact two-column panel deltas and deterministic DPS/skill results. Use this before judging whether the focused replacement is better.".to_string(),
+                parameters: empty_object_schema(),
+            },
+            ToolDefinition {
+                name: SEARCH_EQUIPMENT_CATALOG.to_string(),
+                description: "Search the local equipment catalog by exact name or common jargon. '四件套/4件套' means normal set pieces; '四切糕/4切糕' means crafted 切糕 set pieces. Results are candidates, not proof of DPS.".to_string(),
+                parameters: equipment_search_schema(),
+            },
+            ToolDefinition {
+                name: COMPARE_EQUIPMENT_STRATEGIES.to_string(),
+                description: "Build a current-catalog four-piece ordinary set and four-piece crafted 切糕 variant on the frozen workspace, recalculate both panels, and simulate both with the same rotation. Use only for 四件套 versus 四切糕 questions.".to_string(),
+                parameters: empty_object_schema(),
+            },
         ]
     }
 
@@ -160,6 +199,10 @@ impl<'a> AgentToolRegistry<'a> {
 
     pub fn evidence(&self) -> &EvidenceStore {
         &self.evidence
+    }
+
+    pub fn equipment_comparisons(&self) -> &[EquipmentComparisonPresentationV1] {
+        &self.equipment_comparisons
     }
 
     pub fn used_simulations(&self) -> u32 {
@@ -410,6 +453,66 @@ impl<'a> AgentToolRegistry<'a> {
                             tool_name,
                             vec![context_evidence, serialize_evidence(execution.evidence)],
                         )
+                    }
+                    Err(error) => tool_failure(tool_name, error),
+                }
+            }
+            INSPECT_EQUIPMENT_WORKSPACE => {
+                if serde_json::from_value::<EmptyArguments>(arguments.clone()).is_err() {
+                    return invalid_arguments(tool_name);
+                }
+                let Some(workspace) = self.equipment_workspace.as_ref() else {
+                    return failure(tool_name, "equipment_workspace_unavailable", "open the equipment page and capture its current build first", false);
+                };
+                let started = Instant::now();
+                let result = inspect_workspace(
+                    self.runtime,
+                    workspace,
+                    &self.scenario.simulation.talents,
+                );
+                match EvidenceEnvelopeV1::new(trace_id, tool_name, &self.scenario.scenario_hash, arguments, result, self.runtime.provenance(), started.elapsed().as_millis() as u64) {
+                    Ok(evidence) => self.success(tool_name, vec![serialize_evidence(evidence)]),
+                    Err(_) => failure(tool_name, "equipment_evidence_failed", "equipment evidence could not be created", false),
+                }
+            }
+            COMPARE_FOCUSED_EQUIPMENT => {
+                if serde_json::from_value::<EmptyArguments>(arguments).is_err() {
+                    return invalid_arguments(tool_name);
+                }
+                let Some(workspace) = self.equipment_workspace.as_ref() else {
+                    return failure(tool_name, "equipment_workspace_unavailable", "open the equipment page and focus a candidate first", false);
+                };
+                match compare_focus(trace_id, self.scenario, self.runtime, workspace, &mut self.budget) {
+                    Ok((evidence, presentation)) => {
+                        self.equipment_comparisons.push(presentation);
+                        self.success(tool_name, vec![serialize_evidence(evidence)])
+                    }
+                    Err(error) => tool_failure(tool_name, error),
+                }
+            }
+            SEARCH_EQUIPMENT_CATALOG => {
+                let args = match serde_json::from_value::<EquipmentCatalogQueryV1>(arguments.clone()) {
+                    Ok(args) if !args.query.trim().is_empty() && args.query.chars().count() <= 80 => args,
+                    _ => return invalid_arguments(tool_name),
+                };
+                let started = Instant::now();
+                let result = search_catalog(self.runtime, &args);
+                match EvidenceEnvelopeV1::new(trace_id, tool_name, &self.scenario.scenario_hash, arguments, result, self.runtime.provenance(), started.elapsed().as_millis() as u64) {
+                    Ok(evidence) => self.success(tool_name, vec![serialize_evidence(evidence)]),
+                    Err(_) => failure(tool_name, "equipment_evidence_failed", "equipment evidence could not be created", false),
+                }
+            }
+            COMPARE_EQUIPMENT_STRATEGIES => {
+                if serde_json::from_value::<EmptyArguments>(arguments).is_err() {
+                    return invalid_arguments(tool_name);
+                }
+                let Some(workspace) = self.equipment_workspace.as_ref() else {
+                    return failure(tool_name, "equipment_workspace_unavailable", "open the equipment page and capture its current build first", false);
+                };
+                match compare_strategies(trace_id, self.scenario, self.runtime, workspace, &mut self.budget) {
+                    Ok((evidence, presentation)) => {
+                        self.equipment_comparisons.push(presentation);
+                        self.success(tool_name, vec![serialize_evidence(evidence)])
                     }
                     Err(error) => tool_failure(tool_name, error),
                 }
@@ -854,6 +957,16 @@ fn tool_failure(tool_name: &str, error: ToolError) -> ToolDispatchOutcome {
             "timeline details are unavailable",
             false,
         ),
+        ToolError::EquipmentFocusUnavailable => (
+            "equipment_focus_unavailable",
+            "select a different candidate from the equipment list before requesting a swap comparison",
+            false,
+        ),
+        ToolError::EquipmentStrategyUnavailable => (
+            "equipment_strategy_unavailable",
+            "the local catalog does not contain enough compatible set and qiegao pieces for an automatic four-piece comparison",
+            false,
+        ),
         ToolError::Scenario(_) | ToolError::Evidence(_) => (
             "invalid_scenario_or_evidence",
             "tool input is invalid",
@@ -1008,6 +1121,18 @@ fn compare_saved_schema() -> Value {
     })
 }
 
+fn equipment_search_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "query": {"type":"string","minLength":1,"maxLength":80},
+            "position": {"type":["string","null"],"enum":[null,"HAT","JACKET","BELT","WRIST","BOTTOMS","SHOES","NECKLACE","PENDANT","RING_1","RING_2","PRIMARY_WEAPON","SECONDARY_WEAPON"]}
+        },
+        "required": ["query", "position"],
+        "additionalProperties": false
+    })
+}
+
 fn knowledge_search_schema(seasons: &[String], categories: &[String]) -> Value {
     let season_values = std::iter::once(Value::Null)
         .chain(seasons.iter().cloned().map(Value::String))
@@ -1056,7 +1181,11 @@ mod tests {
                 "list_saved_artifacts",
                 "read_saved_artifact",
                 "compare_saved_macros",
-                "compare_saved_scenarios"
+                "compare_saved_scenarios",
+                "inspect_equipment_workspace",
+                "compare_focused_equipment",
+                "search_equipment_catalog",
+                "compare_equipment_strategies"
             ]
         );
         let encoded = serde_json::to_string(&definitions).unwrap();
@@ -1085,7 +1214,7 @@ mod tests {
         ];
         let categories = vec!["基础".to_string(), "白皮书".to_string()];
         let definitions = AgentToolRegistry::definitions_with_knowledge(&seasons, &categories);
-        assert_eq!(definitions.len(), 9);
+        assert_eq!(definitions.len(), 13);
         let knowledge = definitions.last().unwrap();
         assert_eq!(knowledge.name, "search_knowledge_base");
         assert_eq!(knowledge.parameters["additionalProperties"], false);
