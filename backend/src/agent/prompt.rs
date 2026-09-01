@@ -79,17 +79,7 @@ const AGENT_SYSTEM_PROMPT_V18: &str = concat!(
     include_str!("../../prompts/agent_system_v18_addendum.md")
 );
 pub const AGENT_PROMPT_VERSION_V19: &str = "agent-system/v19";
-const AGENT_SYSTEM_PROMPT_V19: &str = concat!(
-    include_str!("../../prompts/agent_system_v11.md"),
-    include_str!("../../prompts/agent_system_v12_addendum.md"),
-    include_str!("../../prompts/agent_system_v13_addendum.md"),
-    include_str!("../../prompts/agent_system_v14_addendum.md"),
-    include_str!("../../prompts/agent_system_v15_addendum.md"),
-    include_str!("../../prompts/agent_system_v16_addendum.md"),
-    include_str!("../../prompts/agent_system_v17_addendum.md"),
-    include_str!("../../prompts/agent_system_v18_addendum.md"),
-    include_str!("../../prompts/agent_system_v19_addendum.md")
-);
+const AGENT_SYSTEM_PROMPT_V19: &str = include_str!("../../prompts/agent_system_v19.md");
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PromptSpec {
