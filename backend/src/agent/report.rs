@@ -1217,6 +1217,7 @@ fn metric_tool_allowed(envelope: &Value) -> bool {
             "simulate_scenario"
                 | "compare_scenarios"
                 | "analyze_timeline"
+                | "inspect_equipment_workspace"
                 | "compare_focused_equipment"
                 | "compare_equipment_strategies"
         )

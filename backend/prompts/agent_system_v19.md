@@ -235,6 +235,10 @@ score; inspect only task-relevant dimensions exposed by evidence.
 - Equipment questions use the current equipment workspace, current scenario,
   current talents, and selected DPS source. Item level and gear score do not
   prove a winner.
+- A current-build inspection is complete after reading the workspace and any
+  prefetched current-version knowledge. Do not invent a candidate, search the
+  catalog, or run a comparison unless the user explicitly asks for a replacement
+  or strategy comparison.
 - For a focused item replacement use `compare_focused_equipment`. It recalculates
   both panels and simulates both builds with the same frozen rotation, target,
   talents, recipes, latency, buffs, and formation.
@@ -248,6 +252,14 @@ score; inspect only task-relevant dimensions exposed by evidence.
   material skill-composition changes, set/effect or haste implications,
   recommendation, and limits. Do not infer color or quality unless evidence
   exposes it.
+- Current workspace panel metrics are publishable from exact
+  `inspect_equipment_workspace` paths under `/result/panel/{key}`. For a
+  current-build inspection, include the task-relevant core panel values as
+  metrics instead of leaving them only in prose.
+- Use directional words such as high, low, excess, or insufficient only when a
+  cited guide breakpoint or measured comparison establishes that direction.
+  Keep the summary directionally consistent with the findings; for example,
+  never compress “会心高、破招低” into the ambiguous “偏会心破招”.
 - Equipment comparison metrics are publishable from exact comparison evidence,
   including `/result/comparison/before_dps`, `after_dps`, `dps_delta`,
   `dps_delta_percent`, and numeric `panel_rows/{index}/*` paths. Exact baseline

@@ -11,7 +11,9 @@ use tokio::sync::Notify;
 use super::domain::select_analysis_plan;
 use super::domain::{
     build_evidence_pack, evidence_pack_model_context, knowledge_prefetch, plan_model_context,
-    select_analysis_plan_with_history, trace_annotation, AnalysisPlanV1,
+    select_analysis_plan_with_history, trace_annotation, AnalysisPlanV1, AnalysisTaskType,
+    EvidenceSufficiency, equipment_focused_comparison_requested,
+    equipment_strategy_comparison_requested,
 };
 use super::evidence::validate_trace_id;
 use super::prompt::agent_prompt_v19;
@@ -371,6 +373,11 @@ pub async fn run_agent_recorded(
         AgentToolRegistry::definitions()
     };
     let knowledge_only_client_scope = requires_knowledge_only_client_scope(&input.question);
+    let equipment_focus_available = input
+        .equipment_workspace
+        .as_ref()
+        .and_then(|workspace| workspace.focus.as_ref())
+        .is_some();
     let mut tools = definitions
         .into_iter()
         .filter(|tool| {
@@ -388,6 +395,7 @@ pub async fn run_agent_recorded(
                     .iter()
                     .any(|preferred| preferred == &tool.name)
         })
+        .filter(|tool| tool.name != "compare_focused_equipment" || equipment_focus_available)
         .collect::<Vec<_>>();
     tools.sort_by_key(|tool| {
         analysis_plan
@@ -544,8 +552,8 @@ pub async fn run_agent_recorded(
         }]});
         messages.push(ModelMessage::ToolResult { call_id: EQUIPMENT_INSPECT_CALL_ID.to_string(), output: inspected.output });
 
-        let strategy_question = ["四件套", "4件套", "四切糕", "4切糕"]
-            .iter().any(|term| input.question.contains(term));
+        let strategy_question = equipment_strategy_comparison_requested(&input.question);
+        let focused_question = equipment_focused_comparison_requested(&input.question);
         if strategy_question && accounting.tool_calls < limits.max_tool_calls {
             const EQUIPMENT_STRATEGY_CALL_ID: &str = "server-compare-equipment-strategies";
             const EQUIPMENT_STRATEGY_TOOL: &str = "compare_equipment_strategies";
@@ -562,7 +570,8 @@ pub async fn run_agent_recorded(
                 call_id: EQUIPMENT_STRATEGY_CALL_ID.to_string(), name: EQUIPMENT_STRATEGY_TOOL.to_string(), arguments: serde_json::json!({}),
             }]});
             messages.push(ModelMessage::ToolResult { call_id: EQUIPMENT_STRATEGY_CALL_ID.to_string(), output: compared.output });
-        } else if input.equipment_workspace.as_ref().and_then(|workspace| workspace.focus.as_ref()).is_some()
+        } else if focused_question
+            && input.equipment_workspace.as_ref().and_then(|workspace| workspace.focus.as_ref()).is_some()
             && accounting.tool_calls < limits.max_tool_calls
         {
             const EQUIPMENT_COMPARE_CALL_ID: &str = "server-compare-equipment";
@@ -650,6 +659,17 @@ pub async fn run_agent_recorded(
     messages.push(ModelMessage::User {
         content: evidence_pack_model_context(&initial_evidence_pack),
     });
+    if analysis_plan.task_type == AnalysisTaskType::EquipmentAnalysis
+        && initial_evidence_pack.coverage.sufficiency == EvidenceSufficiency::Sufficient
+    {
+        final_report_only = true;
+        trace.push(
+            "evidence_ready_for_report",
+            None,
+            initial_evidence_pack.evidence_ids.clone(),
+            Some("equipment_contract_satisfied".to_string()),
+        );
+    }
 
     loop {
         if cancellation.is_cancelled() {
@@ -684,6 +704,33 @@ pub async fn run_agent_recorded(
             );
         }
         if accounting.model_turns >= limits.max_model_turns {
+            if let Some(content) = evidence_preserving_provider_fallback(
+                &analysis_plan,
+                registry.evidence(),
+                "模型已用完本轮规划次数；下方保留已取得的本地证据，不把未完成的解释伪装成结论。",
+            ) {
+                trace.push(
+                    "model_turn_budget_evidence_preserved",
+                    None,
+                    cited_evidence_ids(&content),
+                    Some("model_turn_budget".to_string()),
+                );
+                return terminal_with_report(
+                    provider,
+                    &input,
+                    &prompt,
+                    AgentRunStatus::PartiallyVerified,
+                    accounting,
+                    content,
+                    Some(fixed_error(
+                        "model_turn_budget",
+                        "Model turn budget is exhausted",
+                    )),
+                    trace,
+                    started,
+                    &registry,
+                );
+            }
             return terminal_with_registry(
                 provider,
                 &input,
@@ -1029,6 +1076,33 @@ pub async fn run_agent_recorded(
             let effective_tool_calls =
                 (response.tool_calls.len() as u32).saturating_sub(coalesced_knowledge_calls);
             if accounting.tool_calls.saturating_add(effective_tool_calls) > limits.max_tool_calls {
+                if let Some(content) = evidence_preserving_provider_fallback(
+                    &analysis_plan,
+                    registry.evidence(),
+                    "模型请求的工具超过本轮上限；下方保留预算内已经取得的本地证据。",
+                ) {
+                    trace.push(
+                        "tool_call_budget_evidence_preserved",
+                        None,
+                        cited_evidence_ids(&content),
+                        Some("tool_call_budget".to_string()),
+                    );
+                    return terminal_with_report(
+                        provider,
+                        &input,
+                        &prompt,
+                        AgentRunStatus::PartiallyVerified,
+                        accounting,
+                        content,
+                        Some(fixed_error(
+                            "tool_call_budget",
+                            "Tool call budget is exhausted",
+                        )),
+                        trace,
+                        started,
+                        &registry,
+                    );
+                }
                 return terminal_with_registry(
                     provider,
                     &input,
@@ -1246,6 +1320,17 @@ pub async fn run_agent_recorded(
             // their cheap one-experiment or one-point-lookup termination behavior.
             if !adaptive_experiments {
                 final_report_only = domain_experiment_completed && !needs_knowledge_followup;
+                if analysis_plan.task_type == AnalysisTaskType::EquipmentAnalysis
+                    && evidence_pack.coverage.sufficiency == EvidenceSufficiency::Sufficient
+                {
+                    final_report_only = true;
+                    trace.push(
+                        "evidence_ready_for_report",
+                        None,
+                        evidence_pack.evidence_ids.clone(),
+                        Some("equipment_contract_satisfied".to_string()),
+                    );
+                }
                 if registry.used_knowledge_searches() >= MAX_KNOWLEDGE_SEARCHES
                     || knowledge_calls_coalesced > 0
                     || reference_lookup_requested
@@ -1797,6 +1882,69 @@ fn evidence_preserving_provider_fallback(
         return None;
     }
     let mut diagnostic_findings = Vec::new();
+    let mut has_equipment_evidence = false;
+    if let Some((evidence_id, envelope)) = evidence.iter().find(|(_, envelope)| {
+        envelope
+            .get("tool_name")
+            .and_then(serde_json::Value::as_str)
+            == Some("inspect_equipment_workspace")
+            && envelope.pointer("/result/equipped").is_some()
+    }) {
+        has_equipment_evidence = true;
+        let equipped = envelope
+            .pointer("/result/equipped")
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let mut set_counts = HashMap::<String, usize>::new();
+        for item in &equipped {
+            if let Some(set_name) = item.get("set_name").and_then(serde_json::Value::as_str) {
+                *set_counts.entry(set_name.to_string()).or_default() += 1;
+            }
+        }
+        let mut sets = set_counts.into_iter().collect::<Vec<_>>();
+        sets.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+        let set_summary = if sets.is_empty() {
+            "未识别到成套装备".to_string()
+        } else {
+            sets.into_iter()
+                .map(|(name, count)| format!("{name}：{count} 件"))
+                .collect::<Vec<_>>()
+                .join("；")
+        };
+        let metric_specs = [
+            ("attack", "攻击", "attack"),
+            ("crit", "会心", "percent"),
+            ("overcome", "破防", "percent"),
+            ("strain", "无双", "percent"),
+            ("haste", "加速", "percent"),
+            ("surplus", "破招", "rating"),
+        ];
+        let metrics = metric_specs
+            .into_iter()
+            .filter_map(|(key, label, unit)| {
+                envelope
+                    .pointer(&format!("/result/panel/{key}"))
+                    .and_then(serde_json::Value::as_f64)
+                    .map(|value| GroundedMetricV1 {
+                        label: label.to_string(),
+                        value,
+                        unit: unit.to_string(),
+                        evidence_id: evidence_id.clone(),
+                        json_pointer: format!("/result/panel/{key}"),
+                    })
+            })
+            .collect::<Vec<_>>();
+        diagnostic_findings.push(AgentFindingV1 {
+            title: "当前配装结构".to_string(),
+            explanation: format!(
+                "配装器已读取全部 {} 个装备槽。套装构成：{}。这些数值描述当前面板，不代表任何未实测换装方案的收益。",
+                equipped.len(), set_summary
+            ),
+            evidence_ids: vec![evidence_id.clone()],
+            metrics,
+        });
+    }
     if let Some((evidence_id, envelope)) = evidence.iter().find(|(_, envelope)| {
         envelope
             .get("tool_name")
@@ -1965,7 +2113,12 @@ fn evidence_preserving_provider_fallback(
     };
     Some(AgentReportContentV1 {
         schema_version: AGENT_REPORT_CONTENT_SCHEMA_V1.to_string(),
-        summary: if has_diagnostic_evidence {
+        summary: if has_equipment_evidence {
+            format!(
+                "已读取“{}”的当前装备、面板与套装构成。模型未完成解释，因此这里只发布配装器可直接证明的内容。",
+                plan.playbook.label
+            )
+        } else if has_diagnostic_evidence {
             format!(
                 "已完成“{}”的模拟器基线与时间线诊断。模型解释未通过发布校验，因此这里只保留模拟器可直接证明的结果。",
                 plan.playbook.label
@@ -2999,6 +3152,95 @@ mod tests {
                 .map(|tool| tool.name.as_str())
                 .collect::<Vec<_>>()
         );
+    }
+
+    #[tokio::test]
+    async fn model_turn_budget_preserves_completed_tool_evidence() {
+        let runtime = AgentRuntime::fixture();
+        let provider = ScriptedProvider::new(vec![Ok(tool_call(
+            "call-diagnose",
+            "analyze_timeline",
+            json!({}),
+        ))]);
+        let limits = AgentRunLimits {
+            max_model_turns: 1,
+            ..AgentRunLimits::default()
+        };
+        let result = run_agent(
+            &provider,
+            &runtime,
+            input(&runtime, "run-model-budget-evidence"),
+            limits,
+            AgentCancellation::default(),
+        )
+        .await;
+
+        assert_eq!(result.status, AgentRunStatus::PartiallyVerified);
+        assert_eq!(result.error.as_ref().unwrap().code, "model_turn_budget");
+        let report = result.report.unwrap();
+        assert!(!report.evidence_ids.is_empty());
+        assert!(report
+            .content
+            .findings
+            .iter()
+            .any(|finding| finding.title.contains("当前输出基线")));
+        assert!(result
+            .trace
+            .iter()
+            .any(|event| event.kind == "model_turn_budget_evidence_preserved"));
+    }
+
+    #[tokio::test]
+    async fn current_equipment_question_is_report_only_after_server_prefetch() {
+        let runtime = AgentRuntime::fixture().with_equipment_fixture();
+        let provider = ScriptedProvider::new(vec![Ok(ModelResponse {
+            assistant_text: Some(
+                serde_json::to_string(&refusal_content(
+                    "仅验证当前配装读取。",
+                    "测试不生成玩法解释。",
+                ))
+                .unwrap(),
+            ),
+            tool_calls: Vec::new(),
+            finish_reason: FinishReason::Stop,
+            usage: TokenUsage::default(),
+        })]);
+        let mut run_input = input(&runtime, "run-current-equipment");
+        run_input.question = "查看我当前配装。".to_string();
+        run_input.equipment_workspace = Some(crate::agent::EquipmentWorkspaceV1 {
+            slots: HashMap::from([(
+                "PRIMARY_WEAPON".to_string(),
+                crate::equip::SlotConfig {
+                    equip_id: 45320,
+                    strength: 6,
+                    embedding: Vec::new(),
+                    enhance_id: 0,
+                    enchant_id: 0,
+                },
+            )]),
+            stone_id: 0,
+            source_label: "当前循环".to_string(),
+            focus: None,
+        });
+        let result = run_agent(
+            &provider,
+            &runtime,
+            run_input,
+            AgentRunLimits::default(),
+            AgentCancellation::default(),
+        )
+        .await;
+
+        assert_eq!(result.status, AgentRunStatus::Refused);
+        assert_eq!(result.accounting.tool_calls, 2);
+        assert_eq!(result.accounting.simulations, 0);
+        let requests = provider.requests();
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].tools.is_empty());
+        assert!(result
+            .trace
+            .iter()
+            .any(|event| event.kind == "evidence_ready_for_report"));
     }
 
     #[tokio::test]

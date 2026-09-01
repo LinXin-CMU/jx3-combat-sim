@@ -631,6 +631,7 @@ pub fn select_analysis_plan(question: &str, scenario: &ScenarioSnapshotV1) -> An
         plan.routing_signals
             .push("scenario_has_no_equipment_context".to_string());
     }
+    apply_equipment_contract(&mut plan, &normalized);
     apply_saved_artifact_contract(&mut plan, &normalized);
     if !plan
         .routing_signals
@@ -640,6 +641,96 @@ pub fn select_analysis_plan(question: &str, scenario: &ScenarioSnapshotV1) -> An
         apply_rotation_diagnosis_contract(&mut plan, &normalized, scenario);
     }
     plan
+}
+
+pub(crate) fn equipment_strategy_comparison_requested(question: &str) -> bool {
+    let normalized = question.to_lowercase();
+    let mentions_set = contains_any(&normalized, &["四件套", "4件套", "套装四件"]);
+    let mentions_qiegao = contains_any(&normalized, &["四切糕", "4切糕", "切糕"]);
+    let asks_comparison = contains_any(
+        &normalized,
+        &["还是", "哪个好", "对比", "比较", "取舍", "差异", " vs ", "vs."],
+    );
+    mentions_set && mentions_qiegao && asks_comparison
+}
+
+pub(crate) fn equipment_focused_comparison_requested(question: &str) -> bool {
+    let normalized = question.to_lowercase();
+    !equipment_strategy_comparison_requested(&normalized)
+        && (contains_any(&normalized, &["换成", "换掉", "替换", "更换", "候选装备"])
+            || (contains_any(&normalized, &["这件", "那件", "当前装备", "装备"])
+                && contains_any(
+                    &normalized,
+                    &["换", "对比", "比较", "哪个好", "怎么样", "差异"],
+                )))
+}
+
+fn apply_equipment_contract(plan: &mut AnalysisPlanV1, normalized_question: &str) {
+    if plan.task_type != AnalysisTaskType::EquipmentAnalysis {
+        return;
+    }
+
+    // Reading the current build is a complete, useful equipment task by itself.
+    // A candidate experiment is required only when the user actually asks for one.
+    demote_required_dimension(&mut plan.playbook, "candidate_comparison");
+    let strategy = equipment_strategy_comparison_requested(normalized_question);
+    let focused = equipment_focused_comparison_requested(normalized_question);
+    let needs_versioned_explanation = contains_any(
+        normalized_question,
+        &["特效", "适配", "收益", "取舍", "为什么", "机制"],
+    );
+    plan.playbook.preferred_tools.retain(|tool| match tool.as_str() {
+        "compare_equipment_strategies" => strategy,
+        "compare_focused_equipment" => focused,
+        "search_equipment_catalog" => strategy || focused,
+        _ => true,
+    });
+    if needs_versioned_explanation || strategy {
+        plan.playbook
+            .optional_dimensions
+            .retain(|dimension| dimension != "versioned_knowledge");
+        if !plan
+            .playbook
+            .required_dimensions
+            .iter()
+            .any(|dimension| dimension == "versioned_knowledge")
+        {
+            plan.playbook
+                .required_dimensions
+                .push("versioned_knowledge".to_string());
+        }
+        plan.routing_signals
+            .push("equipment_versioned_explanation_requested".to_string());
+    }
+
+    if strategy || focused {
+        plan.playbook
+            .required_dimensions
+            .push("candidate_comparison".to_string());
+        plan.routing_signals.push(
+            if strategy {
+                "equipment_strategy_comparison_requested"
+            } else {
+                "equipment_focused_comparison_requested"
+            }
+            .to_string(),
+        );
+    } else {
+        plan.playbook.goal =
+            "读取当前配装、面板、套装与装备特效，解释属性结构及其证据边界。".to_string();
+        if let Some(stage) = plan
+            .playbook
+            .stages
+            .iter_mut()
+            .find(|stage| stage.stage_id == "compare")
+        {
+            stage.label = "解释当前配装".to_string();
+            stage.purpose = "结合面板、套装组成与当前循环说明已知适配关系，不虚构换装收益。"
+                .to_string();
+        }
+        plan.routing_signals
+            .push("equipment_current_build_inspection".to_string());
+    }
 }
 
 fn apply_saved_artifact_contract(plan: &mut AnalysisPlanV1, normalized_question: &str) {
@@ -874,6 +965,7 @@ pub fn select_analysis_plan_with_history(
     plan.playbook = playbook(task_type, plan.resolved_scope.client);
     plan.routing_signals
         .push("inherited_session_playbook".to_string());
+    apply_equipment_contract(&mut plan, &question.to_lowercase());
     apply_saved_artifact_contract(&mut plan, &question.to_lowercase());
     if !plan
         .routing_signals
@@ -1865,6 +1957,72 @@ mod tests {
         assert!(!plan
             .routing_signals
             .contains(&"rotation_diagnosis_first".to_string()));
+    }
+
+    #[test]
+    fn current_equipment_inspection_does_not_require_a_fabricated_candidate() {
+        let runtime = AgentRuntime::fixture();
+        let scenario = runtime.fixture_scenario();
+        let plan = select_analysis_plan(
+            "分析我当前配装的属性结构、套装与特效，并说明适配当前循环的证据边界。",
+            &scenario,
+        );
+
+        assert_eq!(plan.task_type, AnalysisTaskType::EquipmentAnalysis);
+        assert!(!plan
+            .playbook
+            .required_dimensions
+            .contains(&"candidate_comparison".to_string()));
+        assert!(plan
+            .playbook
+            .required_dimensions
+            .contains(&"versioned_knowledge".to_string()));
+        assert!(plan
+            .routing_signals
+            .contains(&"equipment_current_build_inspection".to_string()));
+        for unavailable in [
+            "compare_focused_equipment",
+            "compare_equipment_strategies",
+            "search_equipment_catalog",
+        ] {
+            assert!(!plan
+                .playbook
+                .preferred_tools
+                .contains(&unavailable.to_string()));
+        }
+    }
+
+    #[test]
+    fn explicit_equipment_comparisons_keep_only_the_matching_experiment() {
+        let runtime = AgentRuntime::fixture();
+        let scenario = runtime.fixture_scenario();
+        let strategy = select_analysis_plan("穿四件套好还是穿四切糕好？", &scenario);
+        assert!(strategy
+            .playbook
+            .required_dimensions
+            .contains(&"candidate_comparison".to_string()));
+        assert!(strategy
+            .playbook
+            .preferred_tools
+            .contains(&"compare_equipment_strategies".to_string()));
+        assert!(!strategy
+            .playbook
+            .preferred_tools
+            .contains(&"compare_focused_equipment".to_string()));
+
+        let focused = select_analysis_plan("这件装备换成候选装备怎么样？", &scenario);
+        assert!(focused
+            .playbook
+            .required_dimensions
+            .contains(&"candidate_comparison".to_string()));
+        assert!(focused
+            .playbook
+            .preferred_tools
+            .contains(&"compare_focused_equipment".to_string()));
+        assert!(!focused
+            .playbook
+            .preferred_tools
+            .contains(&"compare_equipment_strategies".to_string()));
     }
 
     #[test]

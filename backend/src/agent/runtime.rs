@@ -136,6 +136,20 @@ impl AgentRuntime {
     }
 
     #[cfg(test)]
+    pub fn with_equipment_fixture(mut self) -> Self {
+        use std::path::Path;
+
+        let (_, base_stats, mount_conversions, _, _) =
+            crate::load_school_toml(self.game_version, self.mount).unwrap();
+        self.equip_data = Some(Arc::new(equip::load_equip_smart(Path::new(
+            crate::data_root(),
+        ))));
+        self.base_stats = base_stats;
+        self.mount_conversions = mount_conversions;
+        self
+    }
+
+    #[cfg(test)]
     pub fn fixture_scenario(&self) -> super::ScenarioSnapshotV1 {
         use crate::{Attributes, TargetConfig};
         use std::collections::HashMap;
