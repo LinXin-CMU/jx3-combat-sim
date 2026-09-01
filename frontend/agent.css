@@ -447,8 +447,7 @@ body.agent-fullheight #page-agent.active {
 .sim-ai-dock.is-loading .sim-ai-context.ready .sim-ai-context-dot { animation: sim-ai-context-pulse 1.35s ease-in-out infinite; }
 .sim-ai-context span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.sim-ai-quick { display: flex; gap: 6px; padding: 8px 10px; overflow-x: auto; border-bottom: 1px solid var(--agent-line); scrollbar-width: none; }
-.sim-ai-quick::-webkit-scrollbar { display: none; }
+.sim-ai-quick { display: flex; max-height: 78px; flex-wrap: wrap; gap: 6px; padding: 8px 10px; overflow-x: hidden; overflow-y: auto; border-bottom: 1px solid var(--agent-line); scrollbar-width: thin; }
 .sim-ai-quick .sim-btn { flex: 0 0 auto; padding: 4px 9px; font-size: 11px; }
 
 .sim-ai-chat { min-height: 0; overflow: auto; padding: 14px 12px 20px; scroll-behavior: smooth; }

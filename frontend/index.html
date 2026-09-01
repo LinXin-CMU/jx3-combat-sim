@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>剑网3 苍云PVE循环模拟器</title>
   <link rel="icon" href="favicon.ico" type="image/x-icon">
-  <link rel="stylesheet" href="style.css?v=20260901-equipai1">
-  <link rel="stylesheet" href="agent.css?v=20260901-equipai1">
+  <link rel="stylesheet" href="style.css?v=20260902-prompts1">
+  <link rel="stylesheet" href="agent.css?v=20260902-prompts1">
 </head>
 <body>
   <div class="container">
@@ -246,6 +246,10 @@
                 <button class="sim-btn" data-agent-question="找出当前循环中值得进一步验证的时间轴问题。">诊断时间轴</button>
                 <button class="sim-btn" data-agent-question="结合当前版本资料，说明这套循环的核心思路，并标注来源和版本边界。">查询版本攻略</button>
                 <button class="sim-btn" data-agent-question="说明这个场景还缺少哪些证据，避免给出未经验证的结论。">检查证据边界</button>
+                <button class="sim-btn" data-agent-question="先分析当前循环已经做得好的地方，再找出有证据支持的主要风险；不要在诊断前直接给修改方案。">分析循环优缺点</button>
+                <button class="sim-btn" data-agent-question="识别当前循环是宏还是手动操作，解释其执行结构、适合的优化方式和目前可验证的限制。">识别输入模式</button>
+                <button class="sim-btn" data-agent-question="列出与当前心法相关的已保存宏和完整循环，说明哪些可以做同场景对比，并让我选择。">选择保存方案</button>
+                <button class="sim-btn" data-agent-question="结合当前版本资料，分析当前循环在实战中的移动、转火、停手和延迟适应性，并区分模拟证据与攻略建议。">分析实战适配</button>
               </div>
             </div>
           </section>
@@ -2819,7 +2823,7 @@
       s.onload = next; s.onerror = next;
       document.body.appendChild(s);
     }
-    var SCRIPTS = ['state.js', 'app.js?v=20260901-equipai1', 'agent.js?v=20260901-equipai1'];
+    var SCRIPTS = ['state.js', 'app.js?v=20260902-prompts1', 'agent.js?v=20260902-prompts1'];
     var go = function () { loadSeq(SCRIPTS); };
     try {
       fetch('/api/settings', { cache: 'no-store' })
