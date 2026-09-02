@@ -43,6 +43,7 @@ const MAX_QUESTION_BYTES: usize = 16 * 1024;
 const MAX_SESSION_CONTEXT_BYTES: usize = 16 * 1024;
 const MAX_REPORT_REPAIRS: u32 = 1;
 const MAX_EMPTY_RESPONSE_RETRIES: u32 = 1;
+const MAX_PROVIDER_PROTOCOL_RETRIES: u32 = 1;
 const MAX_TOOL_SELECTION_RETRIES: u32 = 1;
 const MODEL_TOOL_OUTPUT_BYTES: usize = 16 * 1024;
 const MODEL_EVIDENCE_HANDOFF_BYTES: usize = 24 * 1024;
@@ -455,6 +456,7 @@ pub async fn run_agent_recorded(
     });
     let mut repairs = 0;
     let mut empty_response_retries = 0;
+    let mut provider_protocol_retries = 0;
     let mut tool_selection_retries = 0;
     let mut diagnosis_gap_reminders = 0_u8;
     let mut evidence_gap_reminders = 0_u8;
@@ -1024,6 +1026,22 @@ pub async fn run_agent_recorded(
                     }),
                 );
                 add_usage(&mut accounting, &error.usage);
+                if error.code == "provider_tool_arguments_invalid"
+                    && provider_protocol_retries < MAX_PROVIDER_PROTOCOL_RETRIES
+                    && accounting.model_turns < limits.max_model_turns
+                {
+                    provider_protocol_retries += 1;
+                    messages.push(ModelMessage::User {
+                        content: "The previous tool call arguments were malformed. Retry the next useful action once. Every tool call argument must be exactly one valid JSON object; use {} for a zero-argument tool. Put the decision summary in assistant content, never inside tool arguments. Reuse existing evidence and do not repeat completed tools.".to_string(),
+                    });
+                    trace.push(
+                        "provider_tool_arguments_retry",
+                        None,
+                        Vec::new(),
+                        Some("bounded_protocol_retry".to_string()),
+                    );
+                    continue;
+                }
                 if error.code == "provider_response_empty" {
                     if empty_response_retries < MAX_EMPTY_RESPONSE_RETRIES
                         && !registry.evidence().is_empty()
@@ -4534,6 +4552,49 @@ mod tests {
             .trace
             .iter()
             .any(|event| event.kind == "provider_empty_retry"));
+    }
+
+    #[tokio::test]
+    async fn malformed_tool_arguments_get_one_bounded_protocol_retry() {
+        let runtime = AgentRuntime::fixture();
+        let provider = ScriptedProvider::new(vec![
+            Err(ProviderError::invalid_response_protocol(
+                "provider_tool_arguments_invalid",
+                "provider returned invalid JSON tool arguments",
+            )),
+            Ok(tool_call("call-diagnose", "analyze_timeline", json!({}))),
+            Ok(ModelResponse {
+                assistant_text: Some(
+                    serde_json::to_string(&refusal_content(
+                        "已完成受控重试。",
+                        "本测试只验证协议恢复路径。",
+                    ))
+                    .unwrap(),
+                ),
+                tool_calls: Vec::new(),
+                finish_reason: FinishReason::Stop,
+                usage: TokenUsage::default(),
+            }),
+        ]);
+        let result = run_agent(
+            &provider,
+            &runtime,
+            input(&runtime, "run-tool-arguments-retry"),
+            AgentRunLimits::default(),
+            AgentCancellation::default(),
+        )
+        .await;
+
+        assert_eq!(provider.requests().len(), 3);
+        assert!(provider.requests()[1].messages.iter().any(|message| matches!(
+            message,
+            ModelMessage::User { content } if content.contains("tool call arguments were malformed")
+        )));
+        assert!(result
+            .trace
+            .iter()
+            .any(|event| event.kind == "provider_tool_arguments_retry"));
+        assert_ne!(result.status, AgentRunStatus::ProviderFailed);
     }
 
     #[tokio::test]

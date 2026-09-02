@@ -382,5 +382,14 @@ mod tests {
         assert!(prompt.instructions.contains("condition_ast"));
         assert!(prompt.instructions.contains("四切糕"));
         assert!(prompt.instructions.contains("AgentReportContentV1"));
+        assert!(prompt
+            .instructions
+            .contains("Pausing input does not reset stance"));
+        assert!(prompt
+            .instructions
+            .contains("runtime selects that page automatically"));
+        assert!(prompt
+            .instructions
+            .contains("must locally cite the evidence"));
     }
 }

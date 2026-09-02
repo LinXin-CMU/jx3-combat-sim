@@ -79,7 +79,9 @@ pub fn build_reasoning_state(
     );
     let equipment_ids = evidence_ids_for_tools(evidence, &["inspect_equipment_workspace"]);
 
-    let mut checkpoints = if is_rotation {
+    let mut checkpoints = if plan.task_type == AnalysisTaskType::PracticalAdaptation {
+        practical_adaptation_checkpoints(&scenario_ids, &timeline_ids, &knowledge_ids)
+    } else if is_rotation {
         rotation_checkpoints(
             wants_experiment,
             &scenario_ids,
@@ -346,16 +348,16 @@ pub fn audit_reasoning_contract(
                 .chain(std::iter::once(content.summary.clone()))
                 .collect::<Vec<_>>()
                 .join(" ");
-            if contains_any(
-                &assertive_text,
-                &[
-                    "怒气溢出",
-                    "资源浪费",
-                    "执行层面的浪费",
-                    "拖低dps",
-                    "拖低 dps",
-                ],
-            ) {
+            if [
+                "怒气溢出",
+                "资源浪费",
+                "执行层面的浪费",
+                "拖低dps",
+                "拖低 dps",
+            ]
+            .iter()
+            .any(|term| contains_unnegated_term(&assertive_text, term))
+            {
                 return Err(reasoning_error(
                     "rotation_causality_overstated",
                     "Rotation report converted an observed signal into untested loss or waste",
@@ -474,6 +476,64 @@ fn rotation_checkpoints(
             },
             comparison,
             "固定环境并只改变一个声明变量；同时解释 DPS、伤害构成和时序差异。",
+        ),
+    ]
+}
+
+fn practical_adaptation_checkpoints(
+    scenario: &[String],
+    timeline: &[String],
+    knowledge: &[String],
+) -> Vec<ReasoningCheckpointV1> {
+    vec![
+        checkpoint(
+            "scope",
+            "锁定实战口径",
+            "当前版本、心法、宏或手动输入以及冻结环境是什么？",
+            &["scenario".to_string(), "rotation_input".to_string()],
+            completed_if(!scenario.is_empty()),
+            scenario,
+            "以冻结场景与服务端解析出的输入方式为准。",
+        ),
+        checkpoint(
+            "runtime",
+            "还原停手恢复语义",
+            "分体态宏停手后从哪一页继续，盾飞和盾回如何改变体态？",
+            &["rotation_input".to_string()],
+            completed_if(!scenario.is_empty()),
+            scenario,
+            "停手本身不重置体态；按恢复时的实际体态选择宏页。",
+        ),
+        checkpoint(
+            "timeline",
+            "读取木桩执行事实",
+            "当前冻结循环实际记录了哪些节奏、等待和输入跳过？",
+            &["timeline".to_string(), "rotation_diagnosis".to_string()],
+            completed_if(!timeline.is_empty()),
+            timeline,
+            "木桩时间轴只证明当前冻结条件，不能冒充移动或转火实验。",
+        ),
+        checkpoint(
+            "knowledge",
+            "对齐当前版本资料",
+            "攻略如何解释距离、目标状态、盾飞回返和延迟调节？",
+            &["versioned_knowledge".to_string()],
+            completed_if(!knowledge.is_empty()),
+            knowledge,
+            "攻略是机制与玩家实践证据，不能冒充本场景实测。",
+        ),
+        checkpoint(
+            "adaptation",
+            "逐项回答实战适配",
+            "移动、转火、停手、延迟四项分别能确认什么，边界是什么？",
+            &[
+                "rotation_input".to_string(),
+                "timeline".to_string(),
+                "versioned_knowledge".to_string(),
+            ],
+            completed_if(!scenario.is_empty() && !timeline.is_empty() && !knowledge.is_empty()),
+            &merge_ids(&merge_ids(scenario, timeline), knowledge),
+            "四项分开回答；明确标记运行规则、模拟观测、攻略建议和未模拟条件。",
         ),
     ]
 }
@@ -603,6 +663,7 @@ fn is_rotation_task(task: AnalysisTaskType) -> bool {
         task,
         AnalysisTaskType::BaselineAnalysis
             | AnalysisTaskType::RotationStallDiagnosis
+            | AnalysisTaskType::PracticalAdaptation
             | AnalysisTaskType::MacroAnalysis
             | AnalysisTaskType::HasteDecision
             | AnalysisTaskType::OrangeWeaponTiming
@@ -681,6 +742,23 @@ fn compact_question(question: &str) -> String {
 
 fn contains_any(value: &str, terms: &[&str]) -> bool {
     terms.iter().any(|term| value.contains(term))
+}
+
+fn contains_unnegated_term(value: &str, term: &str) -> bool {
+    value.match_indices(term).any(|(index, _)| {
+        let context = value[..index]
+            .chars()
+            .rev()
+            .take(12)
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect::<String>();
+        !contains_any(
+            &context,
+            &["不", "未", "无法", "不能", "并非", "没有", "尚未", "不足以"],
+        )
+    })
 }
 
 fn reasoning_error(code: &'static str, message: &'static str) -> ReportValidationError {
@@ -946,6 +1024,19 @@ mod tests {
                 .code,
             "rotation_causality_overstated"
         );
+    }
+
+    #[test]
+    fn semantic_audit_distinguishes_negated_loss_language() {
+        assert!(contains_unnegated_term("当前存在资源浪费", "资源浪费"));
+        assert!(!contains_unnegated_term(
+            "怒气触顶不能等同于资源浪费",
+            "资源浪费"
+        ));
+        assert!(!contains_unnegated_term(
+            "现有证据不足以证明怒气溢出",
+            "怒气溢出"
+        ));
     }
 
     #[test]

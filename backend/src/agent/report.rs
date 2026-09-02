@@ -229,7 +229,9 @@ pub fn parse_and_validate_report(
             "final answer must be valid AgentReportContentV1 JSON",
         )
     })?;
-    let normalized_metric_citations = normalize_metric_citations(&mut report, evidence);
+    let normalized_evidence_ids = normalize_evidence_id_references(&mut report, evidence);
+    let normalized_metric_citations =
+        normalized_evidence_ids + normalize_metric_citations(&mut report, evidence);
     validate_report(&report, evidence)?;
     Ok(ValidatedReportContentV1 {
         content: report,
@@ -262,7 +264,9 @@ pub fn parse_and_salvage_report(
     sanitized_claims += truncate_vec(&mut report.recommendations, MAX_RECOMMENDATIONS);
     sanitized_claims += truncate_vec(&mut report.rotation_changes, MAX_ROTATION_CHANGES);
     sanitized_claims += truncate_vec(&mut report.limitations, MAX_RECOMMENDATIONS);
-    let normalized_metric_citations = normalize_metric_citations(&mut report, evidence);
+    let normalized_evidence_ids = normalize_evidence_id_references(&mut report, evidence);
+    let normalized_metric_citations =
+        normalized_evidence_ids + normalize_metric_citations(&mut report, evidence);
 
     let mut retained_findings = Vec::with_capacity(report.findings.len());
     for mut finding in report.findings.drain(..) {
@@ -749,6 +753,52 @@ fn normalize_metric_citations(
         }
     }
     normalized
+}
+
+fn normalize_evidence_id_references(
+    report: &mut AgentReportContentV1,
+    evidence: &EvidenceStore,
+) -> usize {
+    fn normalize(ids: &mut [String], evidence: &EvidenceStore) -> usize {
+        let mut changed = 0;
+        for id in ids {
+            if evidence.contains_key(id) || id.len() != 64 {
+                continue;
+            }
+            let prefix = &id[..12];
+            let suffix = &id[52..];
+            let mut matches = evidence
+                .keys()
+                .filter(|candidate| {
+                    candidate.len() == 64
+                        && candidate.starts_with(prefix)
+                        && candidate.ends_with(suffix)
+                });
+            let Some(candidate) = matches.next() else {
+                continue;
+            };
+            if matches.next().is_none() {
+                *id = candidate.clone();
+                changed += 1;
+            }
+        }
+        changed
+    }
+
+    let mut changed = 0;
+    for finding in &mut report.findings {
+        changed += normalize(&mut finding.evidence_ids, evidence);
+        for metric in &mut finding.metrics {
+            changed += normalize(std::slice::from_mut(&mut metric.evidence_id), evidence);
+        }
+    }
+    for recommendation in &mut report.recommendations {
+        changed += normalize(&mut recommendation.evidence_ids, evidence);
+    }
+    for change in &mut report.rotation_changes {
+        changed += normalize(&mut change.evidence_ids, evidence);
+    }
+    changed
 }
 
 pub fn validate_report(
@@ -1526,7 +1576,7 @@ fn cited_tool_numeric_values(evidence_ids: &[String], evidence: &EvidenceStore) 
     for evidence_id in evidence_ids {
         let Some(envelope) = evidence
             .get(evidence_id)
-            .filter(|item| metric_tool_allowed(item))
+            .filter(|item| prose_numeric_tool_allowed(item))
         else {
             continue;
         };
@@ -1535,6 +1585,11 @@ fn cited_tool_numeric_values(evidence_ids: &[String], evidence: &EvidenceStore) 
         }
     }
     values
+}
+
+fn prose_numeric_tool_allowed(envelope: &Value) -> bool {
+    metric_tool_allowed(envelope)
+        || envelope.get("tool_name").and_then(Value::as_str) == Some("get_current_scenario")
 }
 
 fn collect_tool_numeric_values(value: &Value, field: Option<&str>, values: &mut Vec<f64>) {
@@ -2287,6 +2342,38 @@ mod tests {
         value.limitations = vec!["这是 2026 赛季知识资料，未运行战斗模拟。".to_string()];
 
         validate_report(&value, &knowledge_evidence()).unwrap();
+    }
+
+    #[test]
+    fn current_scenario_input_numbers_are_allowed_in_prose_but_not_as_metrics() {
+        let mut value = report();
+        value.summary = "当前宏判定已由场景证据确认。".to_string();
+        value.findings[0].title = "当前宏原句".to_string();
+        value.findings[0].explanation =
+            "当前条件为 rage>64 且 bufftime:嗜血<6。".to_string();
+        value.findings[0].metrics.clear();
+        let mut scenario_evidence = evidence();
+        let envelope = scenario_evidence.get_mut(&"a".repeat(64)).unwrap();
+        envelope["tool_name"] = json!("get_current_scenario");
+        envelope["result"] = json!({
+            "rotation_input": {
+                "macro_statements": [{
+                    "statement": "/cast [rage>64&bufftime:嗜血<6] 盾飞"
+                }]
+            }
+        });
+
+        validate_report(&value, &scenario_evidence).unwrap();
+    }
+
+    #[test]
+    fn a_uniquely_matching_evidence_id_prefix_and_suffix_repairs_middle_corruption() {
+        let mut value = report();
+        value.findings[0].evidence_ids[0] =
+            format!("{}{}{}", "a".repeat(12), "b".repeat(40), "a".repeat(12));
+        let changed = normalize_evidence_id_references(&mut value, &evidence());
+        assert_eq!(changed, 1);
+        assert_eq!(value.findings[0].evidence_ids[0], "a".repeat(64));
     }
 
     #[test]

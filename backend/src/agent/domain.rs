@@ -22,6 +22,7 @@ pub enum DomainClient {
 pub enum AnalysisTaskType {
     BaselineAnalysis,
     RotationStallDiagnosis,
+    PracticalAdaptation,
     HasteDecision,
     OrangeWeaponTiming,
     MacroAnalysis,
@@ -853,6 +854,7 @@ fn apply_rotation_diagnosis_contract(
             plan.task_type,
             AnalysisTaskType::BaselineAnalysis
                 | AnalysisTaskType::RotationStallDiagnosis
+                | AnalysisTaskType::PracticalAdaptation
                 | AnalysisTaskType::MacroAnalysis
         )
         || !has_any_rotation_input
@@ -886,7 +888,8 @@ fn apply_rotation_diagnosis_contract(
             .push("analyze_timeline".to_string());
     }
     let has_meaningful_rotation = scenario.simulation.sequence.len() >= 6 || is_macro;
-    if has_meaningful_rotation
+    if plan.task_type != AnalysisTaskType::PracticalAdaptation
+        && has_meaningful_rotation
         && !plan
             .playbook
             .preferred_tools
@@ -1013,6 +1016,7 @@ fn task_type_for_playbook(playbook_id: &str) -> Option<AnalysisTaskType> {
     Some(match playbook_id {
         "current_rotation_baseline" => AnalysisTaskType::BaselineAnalysis,
         "rotation_stall_diagnosis" => AnalysisTaskType::RotationStallDiagnosis,
+        "rotation_practical_adaptation" => AnalysisTaskType::PracticalAdaptation,
         "haste_band_decision" => AnalysisTaskType::HasteDecision,
         "orange_weapon_timing" => AnalysisTaskType::OrangeWeaponTiming,
         "macro_and_manual_analysis" => AnalysisTaskType::MacroAnalysis,
@@ -1085,6 +1089,9 @@ pub fn knowledge_prefetch(plan: &AnalysisPlanV1, question: &str) -> Option<Knowl
         }
         (AnalysisTaskType::RotationStallDiagnosis, _) => {
             "旗舰端 分山劲 循环 盾击 斩刀 业火 援戈 怒气 血怒"
+        }
+        (AnalysisTaskType::PracticalAdaptation, _) => {
+            "旗舰端 分山劲 实战 移动 转火 停手 延迟 分体态宏 盾飞 盾回"
         }
         (AnalysisTaskType::HasteDecision, _) => {
             "旗舰端 分山劲 206 14156 30158 加速 水特效 一键宏 单走绝刀"
@@ -1165,6 +1172,22 @@ fn classify_task(question: &str) -> (AnalysisTaskType, Vec<String>) {
         (
             AnalysisTaskType::HasteDecision,
             &["加速", "14156", "30158", "206档", "206 和", "206和"],
+        ),
+        (
+            AnalysisTaskType::PracticalAdaptation,
+            &[
+                "实战适配",
+                "移动、转火",
+                "移动转火",
+                "移动、停手",
+                "移动停手",
+                "转火和停手",
+                "转火、停手",
+                "延迟适应",
+                "网络延迟变化",
+                "停手恢复",
+                "攻击距离或面向",
+            ],
         ),
         (AnalysisTaskType::MacroAnalysis, &["一键宏", "宏", "macro"]),
         (
@@ -1304,6 +1327,57 @@ fn playbook(task: AnalysisTaskType, client: DomainClient) -> AnalysisPlaybookV1 
                     "experiment",
                     "收束为验证实验",
                     "无法证明因果时只提出一个变量的对照实验。",
+                ),
+            ],
+        ),
+        AnalysisTaskType::PracticalAdaptation => (
+            "rotation_practical_adaptation",
+            "循环实战适配",
+            "分别解释移动、转火、停手和延迟变化下的执行语义，并严格区分木桩观测、宏运行规则、攻略经验与尚未模拟的实战条件。",
+            &[
+                "scope",
+                "scenario",
+                "rotation_input",
+                "timeline",
+                "versioned_knowledge",
+            ],
+            &["baseline_metrics", "implementation_boundary"],
+            &[
+                "get_current_scenario",
+                "analyze_timeline",
+                "search_knowledge_base",
+            ],
+            &[
+                "分山 分体态宏 盾飞 盾回 停手 恢复",
+                "移动 转火 距离 面向 延迟 实战",
+            ],
+            &[
+                "木桩时间轴不能证明移动、距离、面向、目标死亡或转火结果",
+                "分体态宏停手不会重置体态；恢复按键时应按当时体态选择宏页",
+                "盾飞持续期间短暂停手不会被动回到盾宏，除非已经主动盾回；盾飞自然结束才回盾体态",
+                "延迟资料只能解释风险与调节方向，未经同场景对照不得量化损失",
+                "每项含数字的实战建议必须在本项局部引用包含该数字的证据，不能借用其他段落的引用",
+            ],
+            &[
+                (
+                    "scope",
+                    "锁定实战问题",
+                    "确认客户端、版本、输入方式以及用户关心的移动、转火、停手与延迟条件。",
+                ),
+                (
+                    "runtime",
+                    "还原宏运行语义",
+                    "读取体态分页、语句顺序、盾飞与盾回规则，说明停手后从哪一页继续。",
+                ),
+                (
+                    "adaptation",
+                    "逐项分析适配性",
+                    "把时间轴可观察事实与距离、面向、目标切换等未模拟条件分开说明。",
+                ),
+                (
+                    "boundary",
+                    "给出实战观察点",
+                    "只给能由当前证据支持的判断与下一步观察点，不虚构移动战损失。",
                 ),
             ],
         ),
@@ -1962,6 +2036,14 @@ mod tests {
         let cases = [
             ("分析当前循环输出基线", "current_rotation_baseline"),
             ("为什么这里空转？", "rotation_stall_diagnosis"),
+            (
+                "这套循环在移动、转火、停手和网络延迟变化时表现怎么样？",
+                "rotation_practical_adaptation",
+            ),
+            (
+                "分析这个分体态宏的停手恢复和延迟适应性",
+                "rotation_practical_adaptation",
+            ),
             ("这个循环应该如何调优？", "current_rotation_baseline"),
             ("206 和 14156 怎么选？", "haste_band_decision"),
             ("橙武为什么少伤害？", "orange_weapon_timing"),
@@ -1977,6 +2059,47 @@ mod tests {
                 expected
             );
         }
+    }
+
+    #[test]
+    fn practical_adaptation_uses_runtime_timeline_and_knowledge_without_forcing_an_ab() {
+        let runtime = AgentRuntime::fixture();
+        let scenario = runtime.fixture_scenario();
+        let plan = select_analysis_plan(
+            "结合当前版本资料，分析当前循环在实战中的移动、转火、停手和延迟适应性，并区分模拟证据与攻略建议。",
+            &scenario,
+        );
+
+        assert_eq!(plan.task_type, AnalysisTaskType::PracticalAdaptation);
+        for dimension in ["rotation_input", "timeline", "versioned_knowledge"] {
+            assert!(plan
+                .playbook
+                .required_dimensions
+                .contains(&dimension.to_string()));
+        }
+        for tool in [
+            "get_current_scenario",
+            "analyze_timeline",
+            "search_knowledge_base",
+        ] {
+            assert!(plan.playbook.preferred_tools.contains(&tool.to_string()));
+        }
+        assert!(!plan
+            .playbook
+            .required_dimensions
+            .contains(&"candidate_comparison".to_string()));
+        assert!(!plan
+            .playbook
+            .preferred_tools
+            .contains(&"compare_scenarios".to_string()));
+    }
+
+    #[test]
+    fn a_plain_stall_question_still_uses_stall_diagnosis() {
+        let runtime = AgentRuntime::fixture();
+        let scenario = runtime.fixture_scenario();
+        let plan = select_analysis_plan("这个循环为什么会停手空转？", &scenario);
+        assert_eq!(plan.task_type, AnalysisTaskType::RotationStallDiagnosis);
     }
 
     #[test]

@@ -191,6 +191,11 @@ pub struct MacroSemanticsSummary {
     pub associativity: String,
     pub line_selection: String,
     pub absent_bufftime_result: bool,
+    pub stance_pages_present: bool,
+    pub page_selection: String,
+    pub page_selection_is_automatic: bool,
+    pub pause_stance_rule: String,
+    pub dun_fei_stance_rule: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -442,6 +447,9 @@ fn summarize_rotation_input(simulation: &crate::SimulateRequest) -> RotationInpu
             })
             .collect::<Vec<_>>()
     });
+    let stance_pages_present = parsed.as_ref().ok().is_some_and(|config| {
+        config.pages.iter().any(|page| page.stance_filter.is_some())
+    });
     let mut parsed_statement_index = 0usize;
     let mut page = 0usize;
     let mut stance = None;
@@ -520,6 +528,11 @@ fn summarize_rotation_input(simulation: &crate::SimulateRequest) -> RotationInpu
             associativity: "right".to_string(),
             line_selection: "source_order_first_condition_true_and_castable".to_string(),
             absent_bufftime_result: false,
+            stance_pages_present,
+            page_selection: "first_unfiltered_or_current_stance_page_in_source_order".to_string(),
+            page_selection_is_automatic: true,
+            pause_stance_rule: "pausing_input_does_not_change_stance; resume_uses_the_page_for_the_stance_after_buff_time_has_advanced".to_string(),
+            dun_fei_stance_rule: "after_the_shield_flight_delay_stance_is_blade; before_the_shield_flight_buff_expires_a_short_pause_resumes_on_the_blade_page_unless_shield_return_was_cast; natural_expiration_returns_shield".to_string(),
         }),
         macro_statements: statements,
         manual_operations: Vec::new(),
@@ -785,6 +798,19 @@ mod tests {
                 .map(|semantics| semantics.associativity.as_str()),
             Some("right")
         );
+        let semantics = input.macro_semantics.as_ref().unwrap();
+        assert!(semantics.stance_pages_present);
+        assert_eq!(
+            semantics.page_selection,
+            "first_unfiltered_or_current_stance_page_in_source_order"
+        );
+        assert!(semantics.page_selection_is_automatic);
+        assert!(semantics
+            .pause_stance_rule
+            .contains("pausing_input_does_not_change_stance"));
+        assert!(semantics
+            .dun_fei_stance_rule
+            .contains("short_pause_resumes_on_the_blade_page"));
         assert_eq!(
             input.macro_statements[0].statement,
             "/cast [rage>64&nobuff:嗜血] 盾飞"

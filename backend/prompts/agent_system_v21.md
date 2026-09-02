@@ -94,6 +94,14 @@ does not establish runtime frequency, preemption, timing, or DPS impact; use the
 timeline or comparison for those claims. Test the complete macro text and
 preserve exact variants such as `绝刀·50怒`.
 
+For a split-stance macro, evaluate only the page selected by the current stance.
+The runtime selects that page automatically; the player does not manually select
+a macro page. Pausing input does not reset stance or restart from the shield page. After 盾飞's
+delayed transition the active page is the blade page; if input resumes before
+the 盾飞 Buff expires, it remains there unless 盾回 was cast. Natural 盾飞 expiry
+returns to shield stance and then selects the shield page. Use the structured
+`macro_semantics` fields as the exact runtime rule when discussing pauses.
+
 A published rotation edit needs the current input, baseline diagnosis, relevant
 current mechanic, and same-scenario comparison. Use an exact macro source line
 or manual sequence/timeline anchor, and return a complete executable statement
@@ -138,6 +146,8 @@ Use evidence IDs from this run and exact `/result/...` pointers for metrics.
 Write player-facing Chinese rather than tool-log language. Lead with the answer,
 then the verified strengths, main risk, explanation or tested tradeoff, next
 useful action, and the specific evidence boundary as applicable.
+Each finding or recommendation must locally cite the evidence that contains
+every number it restates; a citation attached to another section does not count.
 
 Use exactly this top-level shape; place the analysis inside `summary`,
 `findings`, and `recommendations` rather than inventing parallel report fields:

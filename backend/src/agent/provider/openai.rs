@@ -703,7 +703,16 @@ fn parse_tool_call(
 /// those two transport-level defects; the closed tool schema and local typed
 /// validation still reject invented fields or invalid simulator inputs.
 fn parse_tool_arguments(arguments: &str) -> Result<Value, ProviderError> {
-    if let Ok(value) = serde_json::from_str(arguments) {
+    let trimmed = arguments.trim();
+    if trimmed.is_empty() {
+        return Ok(Value::Object(serde_json::Map::new()));
+    }
+    if let Ok(value) = serde_json::from_str(trimmed) {
+        if let Value::String(inner) = &value {
+            if let Ok(unwrapped) = serde_json::from_str(inner) {
+                return Ok(unwrapped);
+            }
+        }
         return Ok(value);
     }
     if arguments.len() > 64 * 1024 {
@@ -712,13 +721,48 @@ fn parse_tool_arguments(arguments: &str) -> Result<Value, ProviderError> {
             "provider returned invalid JSON tool arguments",
         ));
     }
-    let repaired = repair_common_json_transport_defects(arguments);
-    serde_json::from_str(&repaired).map_err(|_| {
-        ProviderError::invalid_response_protocol(
+    let repaired = repair_common_json_transport_defects(trimmed);
+    serde_json::from_str(&repaired)
+        .ok()
+        .or_else(|| {
+            extract_first_json_object(&repaired)
+                .and_then(|candidate| serde_json::from_str(candidate).ok())
+        })
+        .ok_or_else(|| ProviderError::invalid_response_protocol(
             "provider_tool_arguments_invalid",
             "provider returned invalid JSON tool arguments",
-        )
-    })
+        ))
+}
+
+fn extract_first_json_object(value: &str) -> Option<&str> {
+    let start = value.char_indices().find_map(|(index, character)| (character == '{').then_some(index))?;
+    let mut depth = 0_u32;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (offset, character) in value[start..].char_indices() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match character {
+            '"' => in_string = true,
+            '{' => depth += 1,
+            '}' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(&value[start..start + offset + character.len_utf8()]);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn repair_common_json_transport_defects(arguments: &str) -> String {
@@ -1165,6 +1209,20 @@ mod tests {
         assert_eq!(
             parsed.pointer("/candidates/0/patch/macro_text"),
             Some(&Value::String("/cast 血怒\n/cast 绝刀".to_string()))
+        );
+    }
+
+    #[test]
+    fn empty_wrapped_and_double_encoded_tool_arguments_are_repaired() {
+        assert_eq!(parse_tool_arguments("  ").unwrap(), serde_json::json!({}));
+        assert_eq!(
+            parse_tool_arguments("<decision_summary>next</decision_summary>\n{}")
+                .unwrap(),
+            serde_json::json!({})
+        );
+        assert_eq!(
+            parse_tool_arguments(r#""{\"candidates\":[]}""#).unwrap(),
+            serde_json::json!({"candidates": []})
         );
     }
 }
