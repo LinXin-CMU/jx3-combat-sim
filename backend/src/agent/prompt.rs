@@ -80,6 +80,8 @@ const AGENT_SYSTEM_PROMPT_V18: &str = concat!(
 );
 pub const AGENT_PROMPT_VERSION_V19: &str = "agent-system/v19";
 const AGENT_SYSTEM_PROMPT_V19: &str = include_str!("../../prompts/agent_system_v19.md");
+pub const AGENT_PROMPT_VERSION_V20: &str = "agent-system/v20";
+const AGENT_SYSTEM_PROMPT_V20: &str = include_str!("../../prompts/agent_system_v20.md");
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PromptSpec {
@@ -255,6 +257,15 @@ pub fn agent_prompt_v19() -> PromptSpec {
     PromptSpec { version: AGENT_PROMPT_VERSION_V19, sha256, instructions: AGENT_SYSTEM_PROMPT_V19 }
 }
 
+pub fn agent_prompt_v20() -> PromptSpec {
+    let sha256 = format!("{:x}", Sha256::digest(AGENT_SYSTEM_PROMPT_V20.as_bytes()));
+    PromptSpec {
+        version: AGENT_PROMPT_VERSION_V20,
+        sha256,
+        instructions: AGENT_SYSTEM_PROMPT_V20,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -331,5 +342,20 @@ mod tests {
             .instructions
             .contains("what the loop already does well"));
         assert!(prompt.instructions.contains("same evidence bar as a macro"));
+    }
+
+    #[test]
+    fn v20_prompt_defines_diagnostic_reasoning_and_critique() {
+        let prompt = agent_prompt_v20();
+        assert_eq!(prompt.version, "agent-system/v20");
+        assert_eq!(prompt.sha256.len(), 64);
+        assert!(prompt.instructions.contains("reasoning_state"));
+        assert!(prompt.instructions.contains("bounded hypothesis search"));
+        assert!(prompt.instructions.contains("verified strengths before risks"));
+        assert!(prompt.instructions.contains("Publication critique"));
+        assert!(prompt.instructions.contains("Buff coverage"));
+        assert!(prompt.instructions.contains("same-scenario comparison"));
+        assert!(prompt.instructions.contains("condition_ast"));
+        assert!(prompt.instructions.contains("四切糕"));
     }
 }

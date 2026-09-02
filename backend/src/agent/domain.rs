@@ -930,6 +930,10 @@ fn apply_rotation_diagnosis_contract(
             "具体宏语句",
             "对照",
             "对比候选",
+            "对比",
+            "比较",
+            "还是",
+            "哪个好",
         ],
     );
     if asks_for_candidate
@@ -1808,7 +1812,8 @@ pub fn trace_annotation(
         ("tool_started" | "tool_finished", Some("compare_equipment_strategies")) => "compare",
         ("evidence_gap_requires_tool", Some("analyze_timeline")) => "locate",
         ("evidence_gap_requires_tool", Some("compare_scenarios")) => "compare",
-        ("evidence_coverage_checked", _) => "coverage",
+        ("evidence_coverage_checked" | "reasoning_state_updated", _) => "coverage",
+        ("reasoning_critique_started" | "reasoning_critique_failed" | "reasoning_critique_passed", _) => "validation",
         ("validating", _) => "validation",
         ("model_started" | "model_finished", _) => "synthesis",
         _ => "result",
@@ -1845,6 +1850,22 @@ pub fn trace_annotation(
         "evidence_coverage_checked" => (
             "检查专业维度覆盖".to_string(),
             "按任务 Playbook 核对必需维度，缺失项只允许有界补证或明确写入边界。".to_string(),
+        ),
+        "reasoning_state_updated" => (
+            "更新问题推导状态".to_string(),
+            "逐项记录哪些判断已有证据、哪些可以开始分析、哪些仍需补证。".to_string(),
+        ),
+        "reasoning_critique_started" => (
+            "执行发布前批判检查".to_string(),
+            "检查任务完成度、证据归属、因果强度、范围漂移与干预必要性。".to_string(),
+        ),
+        "reasoning_critique_failed" => (
+            "批判检查要求修订".to_string(),
+            "报告需要基于已有证据修订，不新增事实或扩大工具范围。".to_string(),
+        ),
+        "reasoning_critique_passed" => (
+            "批判检查通过".to_string(),
+            "报告已满足当前任务的证据推导与发布边界。".to_string(),
         ),
         "model_started" => (
             "组织下一阶段".to_string(),

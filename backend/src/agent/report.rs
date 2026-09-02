@@ -349,12 +349,20 @@ pub fn parse_and_salvage_report(
             &mut recommendation.rationale,
             "建议通过新的确定性实验继续验证。",
         );
+        let rationale_fallback = comparison_decision_summary(
+            &recommendation.evidence_ids,
+            evidence,
+        )
+        .unwrap_or_else(|| {
+            "保持其余条件不变，只改这一项跑同场景 A/B；比较 DPS、核心技能次数和资源触顶，再决定是否采用。"
+                .to_string()
+        });
         sanitized_claims += sanitize_unsupported_numeric_prose(
             &mut recommendation.rationale,
             &metric_values,
             &recommendation.evidence_ids,
             evidence,
-            "保持其余条件不变，只改这一项跑同场景 A/B；比较 DPS、核心技能次数和资源触顶，再决定是否采用。",
+            &rationale_fallback,
         );
         retained_recommendations.push(recommendation);
     }
@@ -447,6 +455,48 @@ pub fn parse_and_salvage_report(
         normalized_metric_citations,
         sanitized_claims: sanitized_claims.max(1),
     })
+}
+
+fn comparison_decision_summary(
+    evidence_ids: &[String],
+    evidence: &EvidenceStore,
+) -> Option<String> {
+    for evidence_id in evidence_ids {
+        let envelope = evidence.get(evidence_id)?;
+        if envelope.get("tool_name").and_then(Value::as_str) != Some("compare_scenarios") {
+            continue;
+        }
+        let candidate = envelope.pointer("/result/candidates/0")?;
+        let label = candidate
+            .get("label")
+            .and_then(Value::as_str)
+            .unwrap_or("本次单变量候选");
+        let delta_dps = candidate.get("delta_dps").and_then(Value::as_f64)?;
+        let delta_percent = candidate
+            .get("delta_percent")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0);
+        let direction = if delta_dps > 0.0 {
+            "提升"
+        } else if delta_dps < 0.0 {
+            "下降"
+        } else {
+            "没有变化"
+        };
+        let decision = if delta_dps > 0.0 {
+            "该候选有采用价值，但仍只代表当前冻结场景。"
+        } else if delta_dps < 0.0 {
+            "该候选已被否定，因此保留原方案。"
+        } else {
+            "该候选没有改善基线，因此保留原方案。"
+        };
+        return Some(format!(
+            "同场景实测中，“{label}”使平均 DPS {direction} {:.0}（{:.2}%）；{decision}",
+            delta_dps.abs(),
+            delta_percent.abs(),
+        ));
+    }
+    None
 }
 
 /// Providers that advertise JSON mode may still wrap the object in a Markdown
@@ -1657,6 +1707,29 @@ mod tests {
                 }),
             ),
         ])
+    }
+
+    #[test]
+    fn comparison_fallback_explains_the_completed_decision() {
+        let id = "c".repeat(64);
+        let store = BTreeMap::from([(
+            id.clone(),
+            json!({
+                "evidence_id": id,
+                "tool_name": "compare_scenarios",
+                "result": {
+                    "candidates": [{
+                        "label": "阵云判定候选",
+                        "delta_dps": -21055.56,
+                        "delta_percent": -0.6968
+                    }]
+                }
+            }),
+        )]);
+        let summary = comparison_decision_summary(&["c".repeat(64)], &store).unwrap();
+        assert!(summary.contains("下降 21056（0.70%）"));
+        assert!(summary.contains("候选已被否定"));
+        assert!(!summary.contains("再决定"));
     }
 
     fn report() -> AgentReportContentV1 {

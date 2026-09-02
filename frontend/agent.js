@@ -68,6 +68,10 @@
     planning: '拆解问题',
     analysis_plan_selected: '选择专业分析路径',
     evidence_coverage_checked: '检查证据覆盖',
+    reasoning_state_updated: '更新问题推导状态',
+    reasoning_critique_started: '执行发布前批判检查',
+    reasoning_critique_failed: '批判检查要求修订',
+    reasoning_critique_passed: '批判检查通过',
     model_started: '模型处理中',
     model_finished: '模型响应完成',
     decision_checkpoint: '记录决策依据',
@@ -207,6 +211,7 @@
   function thinkingText(event) {
     const kind = event?.trace_kind || event?.kind;
     if (event?.overview && ['planning', 'analysis_plan_selected', 'evidence_coverage_checked',
+      'reasoning_state_updated', 'reasoning_critique_started',
       'tool_started', 'model_started', 'decision_checkpoint'].includes(kind)) return event.overview;
     if (kind === 'planning') return '正在拆解问题并选择验证路径…';
     if (kind === 'model_started' && event?.code === 'report_repair') return '模型正在依据校验反馈修复报告…';
@@ -219,6 +224,10 @@
         ? '当前证据还不足以判断循环优缺点，正在补做基线诊断。'
         : '当前证据还不足以发布修改方案，正在补做同场景候选对照。';
     }
+    if (kind === 'reasoning_state_updated') return '正在更新本题的证据检查点与下一步动作…';
+    if (kind === 'reasoning_critique_started') return '正在检查结论是否真正回答问题并满足证据边界…';
+    if (kind === 'reasoning_critique_failed') return '结论未通过任务完成度检查，正在依据已有证据修订…';
+    if (kind === 'reasoning_critique_passed') return '语义与证据检查通过，正在发布结论…';
     if (kind === 'tool_started') return `正在${toolLabel(event.tool_name)}…`;
     if (kind === 'tool_finished') return '已取得工具证据，正在继续分析…';
     if (kind === 'validating') return '正在校验数值、单位与证据引用…';
@@ -450,6 +459,8 @@
     if (kind === 'evidence_coverage_checked') {
       return `证据覆盖 · ${{ sufficient: '充分', partial: '部分', insufficient: '不足' }[event?.code] || '检查完成'}`;
     }
+    if (kind === 'reasoning_state_updated') return event?.code ? `当前检查点 · ${event.code}` : '检查点已更新';
+    if (kind === 'reasoning_critique_passed') return '语义契约已满足';
     if (kind === 'model_started') {
       return {
         tool_selection: '规划下一步',
@@ -467,6 +478,7 @@
     const kind = event?.trace_kind || event?.kind;
     return kind === 'tool_finished' && !!event?.code
       || ['report_repair_requested', 'report_claims_sanitized', 'provider_empty_retry',
+        'reasoning_critique_failed',
         'provider_empty_evidence_preserved', 'evidence_insufficient', 'budget_exhausted',
         'budget_limit_reached',
         'provider_failed', 'protocol_failed', 'timed_out', 'cancel_requested', 'cancelled']
@@ -520,6 +532,10 @@
       provider_empty_evidence_preserved: '模型未形成报告，但工具证据仍可复用；系统发布受限结论而非丢弃整轮。',
       knowledge_searches_coalesced: '检测到重复检索意图；复用已有结果并停止无效查询循环。',
       decision_checkpoint: '记录当前观察、证据缺口、工具选择理由与下一步判定条件。',
+      reasoning_state_updated: '逐项显示哪些判断已经有证据、哪些可以开始分析、哪些仍需补证。',
+      reasoning_critique_started: '从任务完成度、证据归属、因果强度、范围和干预必要性检查报告。',
+      reasoning_critique_failed: '报告通过了格式校验，但没有完成本题推导契约；只基于已有证据修订。',
+      reasoning_critique_passed: '报告已经回答当前任务，并通过语义与证据边界检查。',
       evidence_gap_requires_tool: event?.tool_name === 'analyze_timeline'
         ? '必须先取得基线时间轴诊断，才能判断循环哪里做得好、哪里存在风险。'
         : '修改方案还缺少同场景候选对照，暂不发布为已验证结论。',

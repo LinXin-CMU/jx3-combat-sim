@@ -88,7 +88,8 @@ $stream = Invoke-WebRequest `
   -Method Get `
   -UseBasicParsing `
   -TimeoutSec $TimeoutSec
-Assert-True ($stream.Headers.'Content-Type' -match '^text/event-stream') 'SSE content type is missing.'
+$streamContentType = [string]::Join(',', @($stream.Headers.'Content-Type'))
+Assert-True ($streamContentType -match '^text/event-stream') 'SSE content type is missing.'
 Assert-True ($stream.Content -match 'event: planning') 'Planning event was not replayed.'
 Assert-True ($stream.Content -match 'event: tool_started') 'Tool event was not replayed.'
 Assert-True ($stream.Content -match 'event: run_result') 'Terminal result event was not replayed.'

@@ -16,7 +16,7 @@ use super::domain::{
     equipment_strategy_comparison_requested,
 };
 use super::evidence::validate_trace_id;
-use super::prompt::agent_prompt_v19;
+use super::prompt::agent_prompt_v20;
 use super::provider::{
     FinishReason, LlmProvider, ModelMessage, ModelRequest, ProviderToolCall,
     StructuredOutputDefinition, TokenUsage,
@@ -24,10 +24,14 @@ use super::provider::{
 use super::registry::{
     normalize_reference_query, AgentToolRegistry, ToolDispatchOutcome, MAX_KNOWLEDGE_SEARCHES,
 };
+use super::reasoning::{
+    audit_reasoning_contract, build_reasoning_state, reasoning_state_model_context,
+    normalize_reasoning_contract,
+};
 use super::report::{
     cited_evidence_ids, cited_knowledge_sources, parse_and_salvage_report,
     parse_and_validate_report, report_content_json_schema, AgentFindingV1, AgentReportContentV1,
-    AgentReportV1, AgentRunAccountingV1, EvidenceStore, GroundedMetricV1,
+    AgentReportV1, AgentRunAccountingV1, EvidenceStore, GroundedMetricV1, ReportValidationError,
     AGENT_REPORT_CONTENT_SCHEMA_V1, AGENT_REPORT_SCHEMA_V1,
 };
 use super::{AgentRuntime, ScenarioSnapshotV1};
@@ -261,6 +265,32 @@ impl TraceCollector {
         self.events.push(event);
     }
 
+    fn push_checkpoint(
+        &mut self,
+        kind: &str,
+        label: &str,
+        overview: String,
+        code: Option<String>,
+        evidence_ids: Vec<String>,
+    ) {
+        let annotation = trace_annotation(&self.plan, kind, None, evidence_ids.len());
+        let event = AgentTraceEventV1 {
+            sequence: self.events.len() as u32 + 1,
+            kind: kind.to_string(),
+            tool_name: None,
+            evidence_ids,
+            code,
+            stage_id: Some(annotation.stage_id),
+            label: Some(label.to_string()),
+            overview: Some(overview),
+            playbook_id: Some(self.plan.playbook.playbook_id.clone()),
+        };
+        if let Some(sink) = &self.sink {
+            sink(event.clone());
+        }
+        self.events.push(event);
+    }
+
     fn into_events(self) -> Vec<AgentTraceEventV1> {
         self.events
     }
@@ -306,7 +336,7 @@ pub async fn run_agent_recorded(
     replay_sink: Option<AgentReplaySink>,
 ) -> AgentRunResultV1 {
     let started = Instant::now();
-    let prompt = agent_prompt_v19();
+    let prompt = agent_prompt_v20();
     let analysis_plan = select_analysis_plan_with_history(
         &input.question,
         input.session_playbook_id.as_deref(),
@@ -427,10 +457,14 @@ pub async fn run_agent_recorded(
     let mut repair_message = None;
     let mut final_report_only = false;
     let adaptive_experiments = analysis_plan
-        .playbook
-        .preferred_tools
+        .routing_signals
         .iter()
-        .any(|tool| tool == "analyze_timeline")
+        .any(|signal| signal == "candidate_comparison_explicitly_requested")
+        && analysis_plan
+            .playbook
+            .preferred_tools
+            .iter()
+            .any(|tool| tool == "analyze_timeline")
         && analysis_plan
             .playbook
             .preferred_tools
@@ -658,6 +692,27 @@ pub async fn run_agent_recorded(
     );
     messages.push(ModelMessage::User {
         content: evidence_pack_model_context(&initial_evidence_pack),
+    });
+    let initial_reasoning_state = build_reasoning_state(
+        &input.question,
+        &analysis_plan,
+        &initial_evidence_pack,
+        registry.evidence(),
+    );
+    trace.push_checkpoint(
+        "reasoning_state_updated",
+        "更新问题推导状态",
+        initial_reasoning_state.public_summary.clone(),
+        Some(initial_reasoning_state.next_checkpoint.clone()),
+        initial_evidence_pack.evidence_ids.clone(),
+    );
+    record_replay(
+        &replay_sink,
+        "reasoning_state",
+        serde_json::to_value(&initial_reasoning_state).unwrap_or_else(|_| serde_json::json!({})),
+    );
+    messages.push(ModelMessage::User {
+        content: reasoning_state_model_context(&initial_reasoning_state),
     });
     if analysis_plan.task_type == AnalysisTaskType::EquipmentAnalysis
         && initial_evidence_pack.coverage.sufficiency == EvidenceSufficiency::Sufficient
@@ -1303,6 +1358,28 @@ pub async fn run_agent_recorded(
             messages.push(ModelMessage::User {
                 content: evidence_pack_model_context(&evidence_pack),
             });
+            let reasoning_state = build_reasoning_state(
+                &input.question,
+                &analysis_plan,
+                &evidence_pack,
+                registry.evidence(),
+            );
+            trace.push_checkpoint(
+                "reasoning_state_updated",
+                "更新问题推导状态",
+                reasoning_state.public_summary.clone(),
+                Some(reasoning_state.next_checkpoint.clone()),
+                evidence_pack.evidence_ids.clone(),
+            );
+            record_replay(
+                &replay_sink,
+                "reasoning_state",
+                serde_json::to_value(&reasoning_state)
+                    .unwrap_or_else(|_| serde_json::json!({})),
+            );
+            messages.push(ModelMessage::User {
+                content: reasoning_state_model_context(&reasoning_state),
+            });
             let needs_knowledge_followup = runtime.knowledge().is_some()
                 && evidence_pack
                     .coverage
@@ -1438,10 +1515,103 @@ pub async fn run_agent_recorded(
             continue;
         }
 
+        trace.push_checkpoint(
+            "reasoning_critique_started",
+            "执行发布前批判检查",
+            "检查任务完成度、证据归属、因果强度、范围漂移与干预必要性。".to_string(),
+            None,
+            evidence_pack.evidence_ids.clone(),
+        );
         trace.push("validating", None, Vec::new(), None);
         let raw = response.assistant_text.as_deref().unwrap_or_default();
         match parse_and_validate_report(raw, registry.evidence()) {
-            Ok(validated) => {
+            Ok(mut validated) => {
+                let normalized =
+                    normalize_reasoning_contract(&input.question, &mut validated.content);
+                if normalized > 0 {
+                    trace.push(
+                        "reasoning_output_focused",
+                        None,
+                        cited_evidence_ids(&validated.content),
+                        Some(format!("removed_{normalized}_surplus_items")),
+                    );
+                }
+                if let Err(error) = audit_reasoning_contract(
+                    &input.question,
+                    &analysis_plan,
+                    &validated.content,
+                    registry.evidence(),
+                ) {
+                    record_replay(
+                        &replay_sink,
+                        "reasoning_critique",
+                        serde_json::json!({
+                            "status": "revise",
+                            "code": error.code,
+                            "message": error.message,
+                            "content": &validated.content,
+                        }),
+                    );
+                    trace.push_checkpoint(
+                        "reasoning_critique_failed",
+                        "批判检查要求修订",
+                        "报告虽通过结构校验，但没有完成本题的证据推导契约；仅修订报告，不新增事实。".to_string(),
+                        Some(error.code.to_string()),
+                        cited_evidence_ids(&validated.content),
+                    );
+                    if repairs < MAX_REPORT_REPAIRS
+                        && accounting.model_turns < limits.max_model_turns
+                    {
+                        repairs += 1;
+                        repair_message = Some(reasoning_repair_prompt(
+                            &error,
+                            registry.evidence(),
+                            raw,
+                        ));
+                        continue;
+                    }
+                    if let Some(content) = evidence_preserving_provider_fallback(
+                        &analysis_plan,
+                        registry.evidence(),
+                        "模型报告未通过任务完成度检查；下方仅保留本轮已取得的可验证证据。",
+                    ) {
+                        return terminal_with_report(
+                            provider,
+                            &input,
+                            &prompt,
+                            AgentRunStatus::PartiallyVerified,
+                            accounting,
+                            content,
+                            Some(fixed_error(error.code, error.message)),
+                            trace,
+                            started,
+                            &registry,
+                        );
+                    }
+                    let content = refusal_content(
+                        "现有证据不足以生成符合本题推导契约的报告。",
+                        "未通过批判检查的玩法判断不会作为结论展示。",
+                    );
+                    return terminal_with_report(
+                        provider,
+                        &input,
+                        &prompt,
+                        AgentRunStatus::EvidenceInsufficient,
+                        accounting,
+                        content,
+                        Some(fixed_error(error.code, error.message)),
+                        trace,
+                        started,
+                        &registry,
+                    );
+                }
+                trace.push_checkpoint(
+                    "reasoning_critique_passed",
+                    "批判检查通过",
+                    "报告已回答当前任务，并通过证据使用、因果强度、范围与干预必要性检查。".to_string(),
+                    Some("semantic_contract_satisfied".to_string()),
+                    cited_evidence_ids(&validated.content),
+                );
                 record_replay(
                     &replay_sink,
                     "report_validation",
@@ -1471,7 +1641,146 @@ pub async fn run_agent_recorded(
                 );
             }
             Err(error) => match parse_and_salvage_report(raw, registry.evidence()) {
-                Ok(salvaged) => {
+                Ok(mut salvaged) => {
+                    let normalized =
+                        normalize_reasoning_contract(&input.question, &mut salvaged.content);
+                    if normalized > 0 {
+                        trace.push(
+                            "reasoning_output_focused",
+                            None,
+                            cited_evidence_ids(&salvaged.content),
+                            Some(format!("removed_{normalized}_surplus_items")),
+                        );
+                    }
+                    if let Err(reasoning_error) = audit_reasoning_contract(
+                        &input.question,
+                        &analysis_plan,
+                        &salvaged.content,
+                        registry.evidence(),
+                    ) {
+                        if reasoning_error.code == "rotation_timeline_not_used" {
+                            if let Some(fallback) = evidence_preserving_provider_fallback(
+                                &analysis_plan,
+                                registry.evidence(),
+                                "模型原报告未使用时间轴诊断；已改用模拟器直接生成的可信摘要。",
+                            ) {
+                                if audit_reasoning_contract(
+                                    &input.question,
+                                    &analysis_plan,
+                                    &fallback,
+                                    registry.evidence(),
+                                )
+                                .is_ok()
+                                {
+                                    trace.push(
+                                        "report_claims_sanitized",
+                                        None,
+                                        cited_evidence_ids(&fallback),
+                                        Some(reasoning_error.code.to_string()),
+                                    );
+                                    trace.push_checkpoint(
+                                        "reasoning_critique_passed",
+                                        "批判检查通过",
+                                        "已用模拟器时间轴替换未完成推导的模型片段。".to_string(),
+                                        Some("deterministic_timeline_fallback".to_string()),
+                                        cited_evidence_ids(&fallback),
+                                    );
+                                    return terminal_with_report(
+                                        provider,
+                                        &input,
+                                        &prompt,
+                                        AgentRunStatus::PartiallyVerified,
+                                        accounting,
+                                        fallback,
+                                        Some(fixed_error(
+                                            reasoning_error.code,
+                                            reasoning_error.message,
+                                        )),
+                                        trace,
+                                        started,
+                                        &registry,
+                                    );
+                                }
+                            }
+                        }
+                        record_replay(
+                            &replay_sink,
+                            "reasoning_critique",
+                            serde_json::json!({
+                                "status": "revise_salvaged",
+                                "code": reasoning_error.code,
+                                "message": reasoning_error.message,
+                                "content": &salvaged.content,
+                            }),
+                        );
+                        trace.push_checkpoint(
+                            "reasoning_critique_failed",
+                            "批判检查要求修订",
+                            "报告的可信片段仍未完成本题推导契约；仅依据已有证据修订一次。"
+                                .to_string(),
+                            Some(reasoning_error.code.to_string()),
+                            cited_evidence_ids(&salvaged.content),
+                        );
+                        if repairs < MAX_REPORT_REPAIRS
+                            && accounting.model_turns < limits.max_model_turns
+                        {
+                            repairs += 1;
+                            repair_message = Some(reasoning_repair_prompt(
+                                &reasoning_error,
+                                registry.evidence(),
+                                raw,
+                            ));
+                            continue;
+                        }
+                        if let Some(content) = evidence_preserving_provider_fallback(
+                            &analysis_plan,
+                            registry.evidence(),
+                            "模型报告的可信片段仍未完成任务；下方仅保留本轮可验证证据。",
+                        ) {
+                            return terminal_with_report(
+                                provider,
+                                &input,
+                                &prompt,
+                                AgentRunStatus::PartiallyVerified,
+                                accounting,
+                                content,
+                                Some(fixed_error(
+                                    reasoning_error.code,
+                                    reasoning_error.message,
+                                )),
+                                trace,
+                                started,
+                                &registry,
+                            );
+                        }
+                        let content = refusal_content(
+                            "清理后的模型输出仍未完成本题所需的证据推导。",
+                            "未通过批判检查的玩法判断不会作为结论展示。",
+                        );
+                        return terminal_with_report(
+                            provider,
+                            &input,
+                            &prompt,
+                            AgentRunStatus::EvidenceInsufficient,
+                            accounting,
+                            content,
+                            Some(fixed_error(
+                                reasoning_error.code,
+                                reasoning_error.message,
+                            )),
+                            trace,
+                            started,
+                            &registry,
+                        );
+                    }
+                    trace.push_checkpoint(
+                        "reasoning_critique_passed",
+                        "批判检查通过",
+                        "已移除未验证表述；保留部分仍满足当前任务的推导与范围要求。"
+                            .to_string(),
+                        Some("semantic_contract_satisfied_after_salvage".to_string()),
+                        cited_evidence_ids(&salvaged.content),
+                    );
                     record_replay(
                         &replay_sink,
                         "report_validation",
@@ -1609,6 +1918,20 @@ fn public_decision_summary(
         .collect::<Vec<_>>()
         .join("、");
     format!("模型未提供公开决策摘要；本轮请求调用：{tools}。可在私有复现记录中检查供应商原始响应。")
+}
+
+fn reasoning_repair_prompt(
+    error: &ReportValidationError,
+    evidence: &EvidenceStore,
+    rejected: &str,
+) -> String {
+    format!(
+        "Revise the report because it failed the semantic reasoning audit. Audit code: {}. Audit message: {}. Return one corrected AgentReportContentV1 JSON object only. Do not call tools or add facts. Complete the user-requested checkpoints, cite the actual timeline for rotation diagnosis, cite the tested comparison for every published edit, use the inspected workspace for equipment conclusions, and remove unrelated strategy branches. Keep observations, diagnosis, experiment, and decision distinct. Respect an explicit request not to propose an intervention. Use at most 3 findings, 1 recommendation, 3 limitations, and 4 metrics total.\n\nREPAIR_EVIDENCE_BEGIN\n{}\nREPAIR_EVIDENCE_END\n\nREJECTED_OUTPUT_BEGIN\n{}\nREJECTED_OUTPUT_END",
+        error.code,
+        error.message,
+        repair_evidence_context(evidence),
+        rejected
+    )
 }
 
 fn is_domain_experiment(tool_name: &str) -> bool {
@@ -1934,6 +2257,7 @@ fn evidence_preserving_provider_fallback(
                         json_pointer: format!("/result/panel/{key}"),
                     })
             })
+            .take(4)
             .collect::<Vec<_>>();
         diagnostic_findings.push(AgentFindingV1 {
             title: "当前配装结构".to_string(),
@@ -2763,7 +3087,7 @@ mod tests {
         .await;
 
         assert_eq!(result.status, AgentRunStatus::Completed);
-        assert_eq!(result.prompt_version, "agent-system/v19");
+        assert_eq!(result.prompt_version, "agent-system/v20");
         assert_eq!(result.accounting.knowledge_searches, 1);
         assert_eq!(result.accounting.simulations, 0);
         let report = result.report.unwrap();
@@ -2842,7 +3166,7 @@ mod tests {
         .await;
 
         assert_eq!(result.status, AgentRunStatus::Completed);
-        assert_eq!(result.prompt_version, "agent-system/v19");
+        assert_eq!(result.prompt_version, "agent-system/v20");
         assert_eq!(result.accounting.knowledge_searches, 1);
         assert_eq!(result.accounting.simulations, 1);
         let report = result.report.unwrap();
@@ -3057,7 +3381,7 @@ mod tests {
         .await;
         assert_eq!(result.status, AgentRunStatus::Refused);
         let requests = provider.requests();
-        assert_eq!(requests[0].messages.len(), 6);
+        assert_eq!(requests[0].messages.len(), 7);
         assert!(matches!(
             &requests[0].messages[0],
             ModelMessage::User { content }
@@ -3089,6 +3413,12 @@ mod tests {
             ModelMessage::User { content }
                 if content.contains("<evidence_pack")
                     && content.contains("general_grounded_analysis")
+        ));
+        assert!(matches!(
+            &requests[0].messages[6],
+            ModelMessage::User { content }
+                if content.contains("<reasoning_state")
+                    && content.contains("next_checkpoint")
         ));
         assert!(requests[0]
             .tools
@@ -3244,16 +3574,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn repeated_deterministic_experiment_reuses_first_result() {
+    async fn diagnosis_contract_stops_before_a_repeated_deterministic_experiment() {
         let runtime = AgentRuntime::fixture();
         let provider = ScriptedProvider::new(vec![
             Ok(tool_call("call-timeline-1", "analyze_timeline", json!({}))),
-            Ok(tool_call("call-timeline-2", "analyze_timeline", json!({}))),
             Ok(ModelResponse {
                 assistant_text: Some(
                     serde_json::to_string(&refusal_content(
-                        "重复的确定性诊断已复用。",
-                        "本测试只验证重复实验不会再次消耗模拟预算。",
+                        "确定性诊断已完成。",
+                        "本测试验证诊断题在证据充分后停止，不重复消耗模拟预算。",
                     ))
                     .unwrap(),
                 ),
@@ -3264,7 +3593,7 @@ mod tests {
         ]);
 
         let mut repeated_input = input(&runtime, "run-deterministic-reuse");
-        repeated_input.question = "帮我比较当前一键宏和手动循环".to_string();
+        repeated_input.question = "分析当前循环的确定性输出。".to_string();
         let result = run_agent(
             &provider,
             &runtime,
@@ -3276,7 +3605,7 @@ mod tests {
 
         assert_eq!(result.status, AgentRunStatus::Refused);
         assert_eq!(result.accounting.simulations, 1);
-        assert_eq!(result.accounting.tool_calls, 3);
+        assert_eq!(result.accounting.tool_calls, 2);
         let timeline_results = result
             .trace
             .iter()
@@ -3285,11 +3614,7 @@ mod tests {
                     && event.tool_name.as_deref() == Some("analyze_timeline")
             })
             .collect::<Vec<_>>();
-        assert_eq!(timeline_results.len(), 2);
-        assert_eq!(
-            timeline_results[0].evidence_ids,
-            timeline_results[1].evidence_ids
-        );
+        assert_eq!(timeline_results.len(), 1);
     }
 
     #[tokio::test]

@@ -15,6 +15,7 @@ mod knowledge_dense;
 pub mod orchestrator;
 pub mod prompt;
 pub mod provider;
+pub mod reasoning;
 pub mod registry;
 pub mod report;
 pub mod run;
@@ -45,6 +46,11 @@ pub use knowledge::{
     KnowledgeVersionScope, MAX_KNOWLEDGE_RESULTS,
 };
 pub use runtime::AgentRuntime;
+pub use reasoning::{
+    audit_reasoning_contract, build_reasoning_state, reasoning_state_model_context,
+    normalize_reasoning_contract, ReasoningCheckpointStatus, ReasoningCheckpointV1,
+    ReasoningStateV1, REASONING_STATE_SCHEMA_V1,
+};
 pub use saved::{
     list_saved_artifacts, prepare_saved_macro_comparison, prepare_saved_scenario_comparison,
     read_saved_artifact, PreparedSavedComparison, SavedArtifactCatalog, SavedArtifactDocument,
