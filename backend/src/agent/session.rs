@@ -807,7 +807,7 @@ pub fn contains_likely_secret(value: &str) -> bool {
         || value.lines().any(line_has_secret_assignment)
 }
 
-fn redact_sensitive_text(value: &str) -> String {
+pub(super) fn redact_sensitive_text(value: &str) -> String {
     value
         .lines()
         .map(|line| {

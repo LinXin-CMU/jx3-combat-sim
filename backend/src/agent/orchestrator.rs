@@ -13,7 +13,7 @@ use super::domain::select_analysis_plan;
 use super::domain::{
     build_evidence_pack, evidence_pack_model_context, knowledge_prefetch, plan_model_context,
     select_analysis_plan_with_history, trace_annotation, AnalysisPlanV1, AnalysisTaskType,
-    EvidenceSufficiency, equipment_focused_comparison_requested,
+    EvidencePackV1, EvidenceSufficiency, equipment_focused_comparison_requested,
     equipment_strategy_comparison_requested,
 };
 use super::evidence::validate_trace_id;
@@ -39,6 +39,7 @@ use super::report::{
 use super::{AgentRuntime, ScenarioSnapshotV1};
 
 pub const AGENT_RUN_SCHEMA_V1: &str = "agent-run/v1";
+pub const AGENT_RUN_DEBUG_SCHEMA_V1: &str = "agent-run-debug/v1";
 const MAX_QUESTION_BYTES: usize = 16 * 1024;
 const MAX_SESSION_CONTEXT_BYTES: usize = 16 * 1024;
 const MAX_REPORT_REPAIRS: u32 = 1;
@@ -47,6 +48,7 @@ const MAX_PROVIDER_PROTOCOL_RETRIES: u32 = 1;
 const MAX_TOOL_SELECTION_RETRIES: u32 = 1;
 const MODEL_TOOL_OUTPUT_BYTES: usize = 16 * 1024;
 const MODEL_EVIDENCE_HANDOFF_BYTES: usize = 24 * 1024;
+const DEBUG_EVIDENCE_PROJECTION_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -105,6 +107,50 @@ pub struct AgentRunErrorV1 {
     pub message: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct AgentRunDebugV1 {
+    pub schema_version: String,
+    pub question: String,
+    pub analysis_plan: AnalysisPlanV1,
+    pub exposed_tools: Vec<String>,
+    pub limits: AgentRunLimits,
+    pub request_metrics: Vec<AgentModelRequestDebugV1>,
+    pub tool_calls: Vec<AgentToolCallDebugV1>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence_pack: Option<EvidencePackV1>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence_projection: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct AgentModelRequestDebugV1 {
+    pub turn: u32,
+    pub mode: String,
+    pub request_bytes: usize,
+    pub max_request_bytes: usize,
+    pub original_message_bytes: usize,
+    pub compacted_message_bytes: usize,
+    pub message_count: usize,
+    pub tool_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct AgentToolCallDebugV1 {
+    pub call_id: String,
+    pub tool_name: String,
+    pub arguments: Value,
+    pub evidence_ids: Vec<String>,
+    pub ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    pub budget_exhausted: bool,
+    pub server_initiated: bool,
+    pub reused: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct AgentTraceEventV1 {
@@ -143,6 +189,8 @@ pub struct AgentRunResultV1 {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<AgentRunErrorV1>,
     pub trace: Vec<AgentTraceEventV1>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug: Option<AgentRunDebugV1>,
 }
 
 pub type AgentTraceSink = Arc<dyn Fn(AgentTraceEventV1) + Send + Sync>;
@@ -214,14 +262,95 @@ struct TraceCollector {
     events: Vec<AgentTraceEventV1>,
     sink: Option<AgentTraceSink>,
     plan: AnalysisPlanV1,
+    exposed_tools: Vec<String>,
+    limits: AgentRunLimits,
+    evidence_pack: Option<EvidencePackV1>,
+    evidence_projection: Option<Value>,
+    request_metrics: Vec<AgentModelRequestDebugV1>,
+    tool_calls: Vec<AgentToolCallDebugV1>,
 }
 
 impl TraceCollector {
-    fn new(sink: Option<AgentTraceSink>, plan: AnalysisPlanV1) -> Self {
+    fn new(sink: Option<AgentTraceSink>, plan: AnalysisPlanV1, limits: AgentRunLimits) -> Self {
         Self {
             events: Vec::new(),
             sink,
             plan,
+            exposed_tools: Vec::new(),
+            limits,
+            evidence_pack: None,
+            evidence_projection: None,
+            request_metrics: Vec::new(),
+            tool_calls: Vec::new(),
+        }
+    }
+
+    fn set_exposed_tools(&mut self, exposed_tools: Vec<String>) {
+        self.exposed_tools = exposed_tools;
+    }
+
+    fn refresh_evidence_pack(&mut self, evidence: &EvidenceStore) {
+        self.evidence_pack = Some(build_evidence_pack(&self.plan, evidence));
+        self.evidence_projection = Some(debug_evidence_projection(evidence));
+    }
+
+    fn record_tool_call(
+        &mut self,
+        call_id: &str,
+        tool_name: &str,
+        arguments: &Value,
+        outcome: &ToolDispatchOutcome,
+        server_initiated: bool,
+        reused: bool,
+    ) {
+        self.tool_calls.push(AgentToolCallDebugV1 {
+            call_id: call_id.to_string(),
+            tool_name: tool_name.to_string(),
+            arguments: redact_debug_value(arguments),
+            evidence_ids: outcome.evidence_ids.clone(),
+            ok: outcome.output.get("ok").and_then(Value::as_bool) == Some(true),
+            code: outcome
+                .output
+                .pointer("/error/code")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            budget_exhausted: outcome.budget_exhausted,
+            server_initiated,
+            reused,
+        });
+    }
+
+    fn record_model_request(
+        &mut self,
+        turn: u32,
+        mode: &str,
+        request: &ModelRequest,
+        original_message_bytes: usize,
+        compacted_message_bytes: usize,
+    ) {
+        self.request_metrics.push(AgentModelRequestDebugV1 {
+            turn,
+            mode: mode.to_string(),
+            request_bytes: request_bytes(request),
+            max_request_bytes: MAX_MODEL_REQUEST_BYTES,
+            original_message_bytes,
+            compacted_message_bytes,
+            message_count: request.messages.len(),
+            tool_count: request.tools.len(),
+        });
+    }
+
+    fn debug(&self, question: &str) -> AgentRunDebugV1 {
+        AgentRunDebugV1 {
+            schema_version: AGENT_RUN_DEBUG_SCHEMA_V1.to_string(),
+            question: super::session::redact_sensitive_text(question),
+            analysis_plan: self.plan.clone(),
+            exposed_tools: self.exposed_tools.clone(),
+            limits: self.limits.clone(),
+            request_metrics: self.request_metrics.clone(),
+            tool_calls: self.tool_calls.clone(),
+            evidence_pack: self.evidence_pack.clone(),
+            evidence_projection: self.evidence_projection.clone(),
         }
     }
 
@@ -301,6 +430,73 @@ impl TraceCollector {
     }
 }
 
+fn redact_debug_value(value: &Value) -> Value {
+    match value {
+        Value::String(text) => Value::String(super::session::redact_sensitive_text(text)),
+        Value::Array(items) => Value::Array(items.iter().map(redact_debug_value).collect()),
+        Value::Object(items) => Value::Object(
+            items
+                .iter()
+                .map(|(key, value)| (key.clone(), redact_debug_value(value)))
+                .collect(),
+        ),
+        _ => value.clone(),
+    }
+}
+
+fn debug_evidence_projection(evidence: &EvidenceStore) -> Value {
+    let mut items = evidence
+        .values()
+        .map(|envelope| {
+            let wrapper = serde_json::json!({
+                "schema_version": "agent-tool-result/v1",
+                "ok": true,
+                "tool_name": envelope.get("tool_name"),
+                "evidence_ids": [envelope.get("evidence_id")],
+                "evidence": [envelope]
+            });
+            let projected = model_tool_output(&wrapper)
+                .get("evidence")
+                .and_then(Value::as_array)
+                .and_then(|values| values.first())
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({}));
+            (evidence_priority(envelope), redact_debug_value(&projected))
+        })
+        .collect::<Vec<_>>();
+    items.sort_by_key(|(priority, item)| {
+        (
+            *priority,
+            item.get("evidence_id")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+        )
+    });
+    let mut included = Vec::new();
+    let mut omitted = Vec::new();
+    for (_, item) in items {
+        let mut trial = included.clone();
+        trial.push(item.clone());
+        if serde_json::to_vec(&trial)
+            .map(|encoded| encoded.len())
+            .unwrap_or(usize::MAX)
+            <= DEBUG_EVIDENCE_PROJECTION_BYTES
+        {
+            included.push(item);
+        } else if let Some(id) = item.get("evidence_id").and_then(Value::as_str) {
+            omitted.push(id.to_string());
+        }
+    }
+    serde_json::json!({
+        "schema_version": "agent-debug-evidence/v1",
+        "items": included,
+        "omitted_evidence_ids": omitted,
+        "byte_budget": DEBUG_EVIDENCE_PROJECTION_BYTES,
+        "boundary": "Bounded and redacted shareable projection; immutable full evidence remains server-side."
+    })
+}
+
 pub async fn run_agent(
     provider: &dyn LlmProvider,
     runtime: &AgentRuntime,
@@ -348,7 +544,7 @@ pub async fn run_agent_recorded(
         &input.scenario,
     );
     let mut accounting = AgentRunAccountingV1::default();
-    let mut trace = TraceCollector::new(event_sink, analysis_plan.clone());
+    let mut trace = TraceCollector::new(event_sink, analysis_plan.clone(), limits.clone());
     record_replay(
         &replay_sink,
         "run_input",
@@ -440,6 +636,7 @@ pub async fn run_agent_recorded(
             .position(|preferred| preferred == &tool.name)
             .unwrap_or(usize::MAX)
     });
+    trace.set_exposed_tools(tools.iter().map(|tool| tool.name.clone()).collect());
     let mut messages = Vec::new();
     if let Some(context) = &input.session_context {
         messages.push(ModelMessage::User {
@@ -518,6 +715,14 @@ pub async fn run_agent_recorded(
         Some("server_prefetch".to_string()),
     );
     let prefetched = registry.dispatch(&input.run_id, PREFETCH_TOOL, serde_json::json!({}));
+    trace.record_tool_call(
+        PREFETCH_CALL_ID,
+        PREFETCH_TOOL,
+        &serde_json::json!({}),
+        &prefetched,
+        true,
+        false,
+    );
     record_replay(
         &replay_sink,
         "tool_dispatch",
@@ -572,6 +777,68 @@ pub async fn run_agent_recorded(
         output: model_tool_output(&prefetched.output),
     });
 
+    // Catalog questions should never depend on the model remembering to request
+    // the user's local saved data. Fetch the allow-listed catalog up front so a
+    // provider failure can still preserve the exact names and artifact kinds.
+    if analysis_plan.task_type == AnalysisTaskType::SavedArtifactAnalysis
+        && accounting.tool_calls < limits.max_tool_calls
+    {
+        const SAVED_CATALOG_CALL_ID: &str = "server-prefetch-saved-catalog";
+        const SAVED_CATALOG_TOOL: &str = "list_saved_artifacts";
+        let arguments = serde_json::json!({"query": "", "kinds": []});
+        trace.push(
+            "tool_started",
+            Some(SAVED_CATALOG_TOOL.to_string()),
+            Vec::new(),
+            Some("server_saved_catalog_prefetch".to_string()),
+        );
+        let catalog = registry.dispatch(&input.run_id, SAVED_CATALOG_TOOL, arguments.clone());
+        trace.record_tool_call(
+            SAVED_CATALOG_CALL_ID,
+            SAVED_CATALOG_TOOL,
+            &arguments,
+            &catalog,
+            true,
+            false,
+        );
+        accounting.tool_calls += 1;
+        trace.push(
+            "tool_finished",
+            Some(SAVED_CATALOG_TOOL.to_string()),
+            catalog.evidence_ids.clone(),
+            catalog
+                .output
+                .pointer("/error/code")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+        );
+        record_replay(
+            &replay_sink,
+            "tool_dispatch",
+            serde_json::json!({
+                "call_id": SAVED_CATALOG_CALL_ID,
+                "tool_name": SAVED_CATALOG_TOOL,
+                "arguments": &arguments,
+                "output": &catalog.output,
+                "evidence_ids": &catalog.evidence_ids,
+                "budget_exhausted": catalog.budget_exhausted,
+                "server_initiated": true,
+            }),
+        );
+        messages.push(ModelMessage::Assistant {
+            content: None,
+            tool_calls: vec![ProviderToolCall {
+                call_id: SAVED_CATALOG_CALL_ID.to_string(),
+                name: SAVED_CATALOG_TOOL.to_string(),
+                arguments,
+            }],
+        });
+        messages.push(ModelMessage::ToolResult {
+            call_id: SAVED_CATALOG_CALL_ID.to_string(),
+            output: model_tool_output(&catalog.output),
+        });
+    }
+
     // Equipment-page runs eagerly capture the build and, when a list candidate is
     // focused, execute the exact two-simulation swap. This prevents a provider from
     // answering an equipment question from item names or item level alone.
@@ -580,6 +847,7 @@ pub async fn run_agent_recorded(
         const EQUIPMENT_INSPECT_TOOL: &str = "inspect_equipment_workspace";
         trace.push("tool_started", Some(EQUIPMENT_INSPECT_TOOL.to_string()), Vec::new(), Some("server_equipment_prefetch".to_string()));
         let inspected = registry.dispatch(&input.run_id, EQUIPMENT_INSPECT_TOOL, serde_json::json!({}));
+        trace.record_tool_call(EQUIPMENT_INSPECT_CALL_ID, EQUIPMENT_INSPECT_TOOL, &serde_json::json!({}), &inspected, true, false);
         accounting.tool_calls += 1;
         trace.push("tool_finished", Some(EQUIPMENT_INSPECT_TOOL.to_string()), inspected.evidence_ids.clone(), inspected.output.pointer("/error/code").and_then(|value| value.as_str()).map(str::to_string));
         record_replay(&replay_sink, "tool_dispatch", serde_json::json!({
@@ -599,6 +867,7 @@ pub async fn run_agent_recorded(
             const EQUIPMENT_STRATEGY_TOOL: &str = "compare_equipment_strategies";
             trace.push("tool_started", Some(EQUIPMENT_STRATEGY_TOOL.to_string()), Vec::new(), Some("server_equipment_strategy".to_string()));
             let compared = registry.dispatch(&input.run_id, EQUIPMENT_STRATEGY_TOOL, serde_json::json!({}));
+            trace.record_tool_call(EQUIPMENT_STRATEGY_CALL_ID, EQUIPMENT_STRATEGY_TOOL, &serde_json::json!({}), &compared, true, false);
             accounting.tool_calls += 1;
             trace.push("tool_finished", Some(EQUIPMENT_STRATEGY_TOOL.to_string()), compared.evidence_ids.clone(), compared.output.pointer("/error/code").and_then(|value| value.as_str()).map(str::to_string));
             record_replay(&replay_sink, "tool_dispatch", serde_json::json!({
@@ -618,6 +887,7 @@ pub async fn run_agent_recorded(
             const EQUIPMENT_COMPARE_TOOL: &str = "compare_focused_equipment";
             trace.push("tool_started", Some(EQUIPMENT_COMPARE_TOOL.to_string()), Vec::new(), Some("server_equipment_comparison".to_string()));
             let compared = registry.dispatch(&input.run_id, EQUIPMENT_COMPARE_TOOL, serde_json::json!({}));
+            trace.record_tool_call(EQUIPMENT_COMPARE_CALL_ID, EQUIPMENT_COMPARE_TOOL, &serde_json::json!({}), &compared, true, false);
             accounting.tool_calls += 1;
             trace.push("tool_finished", Some(EQUIPMENT_COMPARE_TOOL.to_string()), compared.evidence_ids.clone(), compared.output.pointer("/error/code").and_then(|value| value.as_str()).map(str::to_string));
             record_replay(&replay_sink, "tool_dispatch", serde_json::json!({
@@ -645,6 +915,14 @@ pub async fn run_agent_recorded(
             let arguments = serde_json::to_value(&query).unwrap_or_else(|_| serde_json::json!({}));
             let prefetched_knowledge =
                 registry.dispatch(&input.run_id, KNOWLEDGE_PREFETCH_TOOL, arguments.clone());
+            trace.record_tool_call(
+                KNOWLEDGE_PREFETCH_CALL_ID,
+                KNOWLEDGE_PREFETCH_TOOL,
+                &arguments,
+                &prefetched_knowledge,
+                true,
+                false,
+            );
             record_replay(
                 &replay_sink,
                 "tool_dispatch",
@@ -684,6 +962,7 @@ pub async fn run_agent_recorded(
         }
     }
     let initial_evidence_pack = build_evidence_pack(&analysis_plan, registry.evidence());
+    trace.refresh_evidence_pack(registry.evidence());
     trace.push(
         "evidence_coverage_checked",
         None,
@@ -953,20 +1232,28 @@ pub async fn run_agent_recorded(
             );
         }
 
+        let request_mode = if is_repair {
+            "report_repair"
+        } else if final_report_only {
+            "final_report"
+        } else {
+            "tool_selection"
+        };
+        let final_message_bytes = serde_json::to_vec(&request.messages)
+            .map(|encoded| encoded.len())
+            .unwrap_or(usize::MAX);
+        trace.record_model_request(
+            accounting.model_turns + 1,
+            request_mode,
+            &request,
+            original_message_bytes,
+            final_message_bytes,
+        );
         trace.push(
             "model_started",
             None,
             Vec::new(),
-            Some(
-                if is_repair {
-                    "report_repair"
-                } else if final_report_only {
-                    "final_report"
-                } else {
-                    "tool_selection"
-                }
-                .to_string(),
-            ),
+            Some(request_mode.to_string()),
         );
         record_replay(
             &replay_sink,
@@ -1432,8 +1719,16 @@ pub async fn run_agent_recorded(
                 } else if diagnosis_deferred {
                     AgentToolRegistry::rotation_diagnosis_required(&call.name)
                 } else {
-                    registry.dispatch(&input.run_id, &call.name, call.arguments)
+                    registry.dispatch(&input.run_id, &call.name, call.arguments.clone())
                 };
+                trace.record_tool_call(
+                    &call.call_id,
+                    &call.name,
+                    &arguments,
+                    &outcome,
+                    false,
+                    reused,
+                );
                 if !reused
                     && !outcome.budget_exhausted
                     && outcome
@@ -1516,6 +1811,7 @@ pub async fn run_agent_recorded(
                 );
             }
             let evidence_pack = build_evidence_pack(&analysis_plan, registry.evidence());
+            trace.refresh_evidence_pack(registry.evidence());
             trace.push(
                 "evidence_coverage_checked",
                 None,
@@ -1625,6 +1921,7 @@ pub async fn run_agent_recorded(
         }
 
         let evidence_pack = build_evidence_pack(&analysis_plan, registry.evidence());
+        trace.refresh_evidence_pack(registry.evidence());
         let explicit_refusal = response
             .assistant_text
             .as_deref()
@@ -2615,6 +2912,7 @@ fn terminal_with_report(
     started: Instant,
     registry: &AgentToolRegistry<'_>,
 ) -> AgentRunResultV1 {
+    trace.refresh_evidence_pack(registry.evidence());
     accounting.simulations = registry.used_simulations();
     accounting.knowledge_searches = registry.used_knowledge_searches();
     accounting.duration_ms = elapsed_ms(started);
@@ -2667,6 +2965,7 @@ fn terminal_with_registry(
     started: Instant,
     registry: &AgentToolRegistry<'_>,
 ) -> AgentRunResultV1 {
+    trace.refresh_evidence_pack(registry.evidence());
     accounting.simulations = registry.used_simulations();
     accounting.knowledge_searches = registry.used_knowledge_searches();
     accounting.duration_ms = elapsed_ms(started);
@@ -2716,6 +3015,7 @@ fn result(
     error: Option<AgentRunErrorV1>,
     trace: TraceCollector,
 ) -> AgentRunResultV1 {
+    let debug = trace.debug(&input.question);
     AgentRunResultV1 {
         schema_version: AGENT_RUN_SCHEMA_V1.to_string(),
         run_id: input.run_id.clone(),
@@ -2729,6 +3029,7 @@ fn result(
         report,
         error,
         trace: trace.into_events(),
+        debug: Some(debug),
     }
 }
 
@@ -2763,7 +3064,52 @@ fn evidence_preserving_provider_fallback(
         return None;
     }
     let mut diagnostic_findings = Vec::new();
+    let mut has_saved_catalog = false;
     let mut has_equipment_evidence = false;
+    if let Some((evidence_id, envelope)) = evidence.iter().find(|(_, envelope)| {
+        envelope
+            .get("tool_name")
+            .and_then(serde_json::Value::as_str)
+            == Some("list_saved_artifacts")
+            && envelope.pointer("/result/items").is_some()
+    }) {
+        has_saved_catalog = true;
+        let items = envelope
+            .pointer("/result/items")
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let entries = items
+            .iter()
+            .filter_map(|item| {
+                let name = item.get("name").and_then(serde_json::Value::as_str)?;
+                let kind = match item.get("kind").and_then(serde_json::Value::as_str) {
+                    Some("macro") => "宏",
+                    Some("loop") => "循环",
+                    Some("plaza") => "战斗广场方案",
+                    Some("equipment") => "配装",
+                    Some("attributes") => "属性方案",
+                    _ => "方案",
+                };
+                Some(format!("{name}（{kind}）"))
+            })
+            .collect::<Vec<_>>();
+        let explanation = if entries.is_empty() {
+            "本地保存目录当前没有可供 Agent 读取的宏、循环或战斗广场方案。".to_string()
+        } else {
+            format!(
+                "本地保存目录返回 {} 个方案：{}。同类方案可直接进入对应比较；宏与完整场景需要先明确比较口径。",
+                entries.len(),
+                entries.join("；")
+            )
+        };
+        diagnostic_findings.push(AgentFindingV1 {
+            title: "当前已保存方案".to_string(),
+            explanation,
+            evidence_ids: vec![evidence_id.clone()],
+            metrics: Vec::new(),
+        });
+    }
     if let Some((evidence_id, envelope)) = evidence.iter().find(|(_, envelope)| {
         envelope
             .get("tool_name")
@@ -2995,7 +3341,12 @@ fn evidence_preserving_provider_fallback(
     };
     Some(AgentReportContentV1 {
         schema_version: AGENT_REPORT_CONTENT_SCHEMA_V1.to_string(),
-        summary: if has_equipment_evidence {
+        summary: if has_saved_catalog {
+            format!(
+                "已读取“{}”的本地保存目录；下方名称与类型均来自只读目录工具。",
+                plan.playbook.label
+            )
+        } else if has_equipment_evidence {
             format!(
                 "已读取“{}”的当前装备、面板与套装构成。模型未完成解释，因此这里只发布配装器可直接证明的内容。",
                 plan.playbook.label
@@ -3245,6 +3596,38 @@ mod tests {
         let handoff = model_evidence_handoff(&evidence, MODEL_EVIDENCE_HANDOFF_BYTES);
         assert!(handoff.len() <= MODEL_EVIDENCE_HANDOFF_BYTES + 4_096);
         assert!(handoff.contains("omitted_evidence_ids"));
+    }
+
+    #[test]
+    fn saved_catalog_fallback_keeps_real_names_when_provider_explanation_fails() {
+        let runtime = AgentRuntime::fixture();
+        let scenario = runtime.fixture_scenario();
+        let plan = select_analysis_plan("我保存了哪些可以互相比较的宏或循环？", &scenario);
+        let evidence_id = "a".repeat(64);
+        let mut evidence = EvidenceStore::new();
+        evidence.insert(
+            evidence_id.clone(),
+            json!({
+                "evidence_id": evidence_id,
+                "tool_name": "list_saved_artifacts",
+                "result": {
+                    "total_matches": 2,
+                    "items": [
+                        {"name": "分山绝云", "kind": "macro"},
+                        {"name": "木桩基线", "kind": "plaza"}
+                    ]
+                }
+            }),
+        );
+
+        let report = evidence_preserving_provider_fallback(&plan, &evidence, "模型失败")
+            .expect("saved catalog fallback");
+        assert!(report.summary.contains("本地保存目录"));
+        assert!(report.findings[0].explanation.contains("分山绝云（宏）"));
+        assert!(report.findings[0]
+            .explanation
+            .contains("木桩基线（战斗广场方案）"));
+        assert!(!report.findings[0].explanation.contains("知识库"));
     }
 
     #[test]
@@ -3623,6 +4006,18 @@ mod tests {
         assert!(!copy.is_cancelled());
         cancellation.cancel();
         assert!(copy.is_cancelled());
+    }
+
+    #[test]
+    fn shareable_debug_projection_redacts_nested_secret_values() {
+        let secret = "sk-123456789012345678901234567890";
+        let redacted = redact_debug_value(&json!({
+            "question": format!("测试 {secret}"),
+            "nested": [{"authorization": format!("Bearer {secret}")}]
+        }));
+        let encoded = serde_json::to_string(&redacted).unwrap();
+        assert!(!encoded.contains(secret));
+        assert!(encoded.contains("REDACTED"));
     }
 
     #[test]
@@ -4474,6 +4869,20 @@ mod tests {
             .trace
             .iter()
             .any(|event| event.kind == "model_finished"));
+        let debug = result.debug.as_ref().expect("shareable debug projection");
+        assert_eq!(debug.schema_version, AGENT_RUN_DEBUG_SCHEMA_V1);
+        assert_eq!(debug.request_metrics.len(), 1);
+        assert!(debug.request_metrics[0].request_bytes > 0);
+        assert!(debug.request_metrics[0].request_bytes <= MAX_MODEL_REQUEST_BYTES);
+        assert!(debug
+            .exposed_tools
+            .iter()
+            .any(|tool| tool == "get_current_scenario"));
+        assert!(debug
+            .tool_calls
+            .iter()
+            .any(|call| call.server_initiated && call.tool_name == "get_current_scenario"));
+        assert!(debug.evidence_pack.is_some());
         assert_eq!(result.error.unwrap().code, "provider_http_429");
     }
 

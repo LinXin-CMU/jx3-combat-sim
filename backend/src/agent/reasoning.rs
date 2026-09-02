@@ -78,6 +78,10 @@ pub fn build_reasoning_state(
         ],
     );
     let equipment_ids = evidence_ids_for_tools(evidence, &["inspect_equipment_workspace"]);
+    let saved_ids = evidence_ids_for_tools(
+        evidence,
+        &["list_saved_artifacts", "read_saved_artifact"],
+    );
 
     let mut checkpoints = if plan.task_type == AnalysisTaskType::PracticalAdaptation {
         practical_adaptation_checkpoints(&scenario_ids, &timeline_ids, &knowledge_ids)
@@ -90,6 +94,8 @@ pub fn build_reasoning_state(
             &knowledge_ids,
             &comparison_ids,
         )
+    } else if plan.task_type == AnalysisTaskType::SavedArtifactAnalysis {
+        saved_artifact_checkpoints(wants_experiment, &saved_ids, &comparison_ids)
     } else if plan.task_type == AnalysisTaskType::EquipmentAnalysis {
         equipment_checkpoints(
             &scenario_ids,
@@ -189,6 +195,41 @@ pub fn build_reasoning_state(
             .to_string(),
         public_summary,
     }
+}
+
+fn saved_artifact_checkpoints(
+    wants_comparison: bool,
+    saved: &[String],
+    comparison: &[String],
+) -> Vec<ReasoningCheckpointV1> {
+    vec![
+        checkpoint(
+            "saved",
+            "读取保存清单",
+            "当前账号实际保存了哪些宏、循环或完整场景？",
+            &["saved_artifacts".to_string()],
+            completed_if(!saved.is_empty()),
+            saved,
+            "只使用保存方案目录的实际返回，不用公开攻略或当前输入代替。",
+        ),
+        checkpoint(
+            "compare",
+            "确认比较方式",
+            "用户是否已经点名两个候选，它们应该按宏还是完整场景比较？",
+            &["candidate_comparison".to_string()],
+            if !wants_comparison {
+                ReasoningCheckpointStatus::NotRequired
+            } else if !comparison.is_empty() {
+                ReasoningCheckpointStatus::Complete
+            } else if !saved.is_empty() {
+                ReasoningCheckpointStatus::Ready
+            } else {
+                ReasoningCheckpointStatus::Pending
+            },
+            comparison,
+            "目录问题先列名称与可比组；只有两个候选明确时才运行对应对照。",
+        ),
+    ]
 }
 
 pub fn reasoning_state_model_context(state: &ReasoningStateV1) -> String {

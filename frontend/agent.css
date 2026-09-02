@@ -119,13 +119,15 @@ body.agent-fullheight #page-agent.active {
 .agent-starter-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 8px; margin-top: 16px; }
 .agent-starter-grid .sim-btn { min-height: 36px; font-size: 12px; }
 .agent-message { max-width: 900px; margin: 0 auto 14px; }
+.agent-message-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 5px; }
 .agent-message-label { margin-bottom: 5px; color: var(--agent-muted); font-size: 11px; }
+.agent-message-head .agent-message-label { margin-bottom: 0; }
 .agent-message-body { padding: 10px 12px; border: 1px solid var(--agent-line); border-radius: 6px; background: var(--agent-panel); font-size: 13px; line-height: 1.65; white-space: pre-wrap; }
 .agent-message.user .agent-message-body { border-left: 2px solid var(--warning); }
 .agent-message.agent .agent-message-body { border-left: 2px solid var(--gold); }
 .agent-trace { max-width: 900px; margin: 0 auto 14px; padding: 10px 12px; border: 1px dashed var(--agent-line); border-radius: 6px; }
 .agent-trace-title { display: flex; justify-content: space-between; gap: 8px; color: var(--agent-muted); font-size: 11px; }
-.agent-card-actions { display: inline-flex; min-width: 0; align-items: center; justify-content: flex-end; gap: 7px; }
+.agent-card-actions { display: inline-flex; min-width: 0; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 7px; }
 .agent-card-copy { min-height: 25px; padding: 3px 8px; border: 1px solid var(--agent-line); border-radius: 4px; background: transparent; color: var(--agent-muted); cursor: pointer; font: inherit; font-size: 10px; line-height: 1.2; white-space: nowrap; transition: border-color .16s ease,color .16s ease,background .16s ease; }
 .agent-card-copy:hover { border-color: var(--gold-dim); background: var(--gold-tint); color: var(--gold); }
 .agent-card-copy:focus-visible { outline: 2px solid rgba(var(--gold-rgb),.32); outline-offset: 1px; }

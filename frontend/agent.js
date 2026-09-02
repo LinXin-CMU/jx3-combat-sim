@@ -475,9 +475,12 @@
     }
   }
 
-  function appendMessage(role, text) {
+  function appendMessage(role, text, actions) {
     const wrap = element('article', `agent-message ${role}`);
-    wrap.appendChild(element('div', 'agent-message-label', role === 'user' ? '策划问题' : 'Agent 结论'));
+    const head = element('div', 'agent-message-head');
+    head.appendChild(element('div', 'agent-message-label', role === 'user' ? '策划问题' : 'Agent 结论'));
+    (actions || []).forEach(action => head.appendChild(action));
+    wrap.appendChild(head);
     wrap.appendChild(element('div', 'agent-message-body', text || '—'));
     els.transcript.appendChild(wrap);
     scrollTranscript();
@@ -903,7 +906,9 @@
       const reason = result?.status === 'provider_failed'
         ? providerErrorText(result?.error)
         : result?.error?.message || `任务状态：${statusLabels[result?.status] || result?.status || '未知'}`;
-      const message = appendMessage('agent', reason);
+      const message = appendMessage('agent', reason, [
+        cardCopyButton('复制调试信息', () => buildDebugBundle(result), false),
+      ]);
       appendDiagnostics(message, result, false);
       return;
     }
@@ -919,6 +924,7 @@
     const actions = element('span', 'agent-card-actions');
     actions.appendChild(element('span', '', `${report.provider_profile} / ${report.model} · ${result.accounting?.duration_ms || 0}ms`));
     actions.appendChild(cardCopyButton('复制结论', () => buildSummary(result), false));
+    actions.appendChild(cardCopyButton('复制调试信息', () => buildDebugBundle(result), false));
     head.appendChild(actions);
     card.appendChild(head);
     if (evidenceInsufficient) {
@@ -1181,6 +1187,7 @@
     const actions = element('span', 'agent-card-actions');
     actions.appendChild(element('span', '', `${result.provider_profile || '—'} · ${result.accounting?.duration_ms || 0}ms`));
     actions.appendChild(cardCopyButton('复制结论', () => buildSummary(result), true));
+    actions.appendChild(cardCopyButton('复制调试', () => buildDebugBundle(result), true));
     head.appendChild(actions);
     card.appendChild(head);
 
@@ -1674,6 +1681,55 @@
       });
     }
     return lines.join('\n');
+  }
+
+  function buildDebugBundle(result) {
+    const debug = result?.debug || {};
+    const legacyPlaybook = Array.isArray(result?.trace)
+      ? result.trace.find(event => event?.playbook_id)?.playbook_id || null
+      : null;
+    const plan = debug.analysis_plan || (legacyPlaybook ? { playbook_id: legacyPlaybook } : null);
+    const safeReport = result?.report
+      ? { ...result.report, question: debug.question || result.report.question }
+      : null;
+    const bundle = {
+      schema_version: 'agent-debug-export/v1',
+      security: {
+        redacted: true,
+        excluded: ['api_key', 'provider_raw_response', 'hidden_reasoning', 'private_path'],
+        note: '这是可分享的工程调试投影，不包含供应商密钥、原始响应、隐藏推理或服务端私有路径。',
+      },
+      identity: {
+        session_id: result?.session_id || null,
+        run_id: result?.run_id || null,
+        question: debug.question || safeReport?.question || null,
+        status: result?.status || null,
+        scenario_hash: result?.scenario_hash || null,
+        prompt_version: result?.prompt_version || null,
+        prompt_sha256: result?.prompt_sha256 || null,
+        provider_profile: result?.provider_profile || null,
+        model: result?.model || null,
+      },
+      routing: plan,
+      exposed_tools: debug.exposed_tools || null,
+      limits: debug.limits || null,
+      request_metrics: debug.request_metrics || null,
+      tool_calls: debug.tool_calls || null,
+      evidence_pack: debug.evidence_pack || null,
+      evidence_projection: debug.evidence_projection || null,
+      accounting: result?.accounting || null,
+      terminal_diagnostic: {
+        stage: diagnosticStage(result),
+        hint: diagnosticHint(result),
+        error: result?.error || null,
+      },
+      trace: result?.trace || null,
+      report: safeReport,
+      compatibility: result?.debug
+        ? 'full'
+        : 'legacy_run: this historical run predates the full debug projection',
+    };
+    return JSON.stringify(bundle, null, 2);
   }
 
   function newSession() {

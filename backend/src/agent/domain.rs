@@ -26,6 +26,7 @@ pub enum AnalysisTaskType {
     HasteDecision,
     OrangeWeaponTiming,
     MacroAnalysis,
+    SavedArtifactAnalysis,
     EquipmentAnalysis,
     EncounterAdvice,
     MechanismExplanation,
@@ -734,11 +735,15 @@ fn apply_equipment_contract(plan: &mut AnalysisPlanV1, normalized_question: &str
     }
 }
 
-fn apply_saved_artifact_contract(plan: &mut AnalysisPlanV1, normalized_question: &str) {
-    let refers_to_saved_data = contains_any(
+fn refers_to_saved_artifacts(normalized_question: &str) -> bool {
+    contains_any(
         normalized_question,
         &[
+            "我保存",
             "我保存的",
+            "保存了",
+            "保存过",
+            "保存哪些",
             "已保存",
             "保存的",
             "存档",
@@ -747,7 +752,11 @@ fn apply_saved_artifact_contract(plan: &mut AnalysisPlanV1, normalized_question:
             "战斗广场",
             "广场方案",
         ],
-    );
+    )
+}
+
+fn apply_saved_artifact_contract(plan: &mut AnalysisPlanV1, normalized_question: &str) {
+    let refers_to_saved_data = refers_to_saved_artifacts(normalized_question);
     if !refers_to_saved_data || plan.resolved_scope.client != DomainClient::Flagship {
         return;
     }
@@ -774,7 +783,11 @@ fn apply_saved_artifact_contract(plan: &mut AnalysisPlanV1, normalized_question:
             plan.playbook.preferred_tools.push(tool.to_string());
         }
     }
-    let asks_to_compare = contains_any(
+    let asks_for_catalog = contains_any(
+        normalized_question,
+        &["哪些", "有什么", "有哪些", "列表", "清单", "保存了", "保存过"],
+    );
+    let asks_to_compare = !asks_for_catalog && contains_any(
         normalized_question,
         &["对比", "比较", "优缺点", "差异", "哪个好", "哪套"],
     );
@@ -1020,6 +1033,7 @@ fn task_type_for_playbook(playbook_id: &str) -> Option<AnalysisTaskType> {
         "haste_band_decision" => AnalysisTaskType::HasteDecision,
         "orange_weapon_timing" => AnalysisTaskType::OrangeWeaponTiming,
         "macro_and_manual_analysis" => AnalysisTaskType::MacroAnalysis,
+        "saved_artifact_analysis" => AnalysisTaskType::SavedArtifactAnalysis,
         "equipment_build_analysis" => AnalysisTaskType::EquipmentAnalysis,
         "encounter_advice" => AnalysisTaskType::EncounterAdvice,
         "mechanism_explanation" => AnalysisTaskType::MechanismExplanation,
@@ -1102,6 +1116,7 @@ pub fn knowledge_prefetch(plan: &AnalysisPlanV1, question: &str) -> Option<Knowl
         (AnalysisTaskType::MacroAnalysis, _) => {
             "旗舰端 分山劲 一键宏 判定 延迟 单走绝刀 援戈 手动循环"
         }
+        (AnalysisTaskType::SavedArtifactAnalysis, _) => "旗舰端 本地保存方案",
         (AnalysisTaskType::EquipmentAnalysis, _) => {
             "旗舰端 分山劲 配装 套装 切糕 属性收益"
         }
@@ -1187,6 +1202,21 @@ fn classify_task(question: &str) -> (AnalysisTaskType, Vec<String>) {
                 "网络延迟变化",
                 "停手恢复",
                 "攻击距离或面向",
+            ],
+        ),
+        (
+            AnalysisTaskType::SavedArtifactAnalysis,
+            &[
+                "我保存",
+                "保存了",
+                "保存过",
+                "保存哪些",
+                "已保存",
+                "保存的宏",
+                "保存的循环",
+                "宏存档",
+                "循环存档",
+                "广场方案",
             ],
         ),
         (AnalysisTaskType::MacroAnalysis, &["一键宏", "宏", "macro"]),
@@ -1514,6 +1544,26 @@ fn playbook(task: AnalysisTaskType, client: DomainClient) -> AnalysisPlaybookV1 
                     "生成可执行对照",
                     "只修改当前工具允许的字段并保留回滚口径。",
                 ),
+            ],
+        ),
+        AnalysisTaskType::SavedArtifactAnalysis => (
+            "saved_artifact_analysis",
+            "已保存方案",
+            "先列出当前账号实际保存的宏、循环和广场方案，再按类型与环境判断哪些可以直接比较；只有用户点名候选后才运行数值对照。",
+            &["saved_artifacts"],
+            &["candidate_comparison"],
+            &["list_saved_artifacts", "read_saved_artifact"],
+            &[],
+            &[
+                "只能报告目录工具实际返回的保存方案",
+                "不能把知识库公开宏当作用户已保存方案",
+                "未点名两个候选时先列清单和可比组，不擅自运行对照",
+            ],
+            &[
+                ("saved", "读取保存清单", "列出当前账号实际保存的方案及其类型。"),
+                ("inspect", "确认可比关系", "按宏、循环或完整场景区分可以直接比较的组合。"),
+                ("compare", "执行点名对照", "仅在用户明确指定候选后运行对应的只读比较。"),
+                ("decision", "回答保存方案问题", "直接给出名称、类型和下一步可执行操作。"),
             ],
         ),
         AnalysisTaskType::EquipmentAnalysis => (
@@ -2142,6 +2192,43 @@ mod tests {
         assert!(!plan
             .routing_signals
             .contains(&"rotation_diagnosis_first".to_string()));
+    }
+
+    #[test]
+    fn saved_catalog_wording_routes_to_catalog_without_knowledge_or_forced_comparison() {
+        let runtime = AgentRuntime::fixture();
+        let scenario = runtime.fixture_scenario();
+        let plan = select_analysis_plan_with_history(
+            "我保存了哪些可以互相比较的宏或循环？",
+            Some("macro_and_manual_analysis"),
+            &scenario,
+        );
+
+        assert_eq!(plan.task_type, AnalysisTaskType::SavedArtifactAnalysis);
+        assert_eq!(plan.playbook.playbook_id, "saved_artifact_analysis");
+        assert!(plan
+            .playbook
+            .required_dimensions
+            .contains(&"saved_artifacts".to_string()));
+        assert!(!plan
+            .playbook
+            .required_dimensions
+            .contains(&"candidate_comparison".to_string()));
+        for tool in ["list_saved_artifacts", "read_saved_artifact"] {
+            assert!(plan.playbook.preferred_tools.contains(&tool.to_string()));
+        }
+        for unrelated in [
+            "search_knowledge_base",
+            "simulate_scenario",
+            "compare_saved_macros",
+            "compare_saved_scenarios",
+        ] {
+            assert!(!plan
+                .playbook
+                .preferred_tools
+                .contains(&unrelated.to_string()));
+        }
+        assert!(knowledge_prefetch(&plan, "我保存了哪些可以互相比较的宏或循环？").is_none());
     }
 
     #[test]
