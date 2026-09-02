@@ -1333,7 +1333,7 @@ fn playbook(task: AnalysisTaskType, client: DomainClient) -> AnalysisPlaybookV1 
         AnalysisTaskType::PracticalAdaptation => (
             "rotation_practical_adaptation",
             "循环实战适配",
-            "分别解释移动、转火、停手和延迟变化下的执行语义，并严格区分木桩观测、宏运行规则、攻略经验与尚未模拟的实战条件。",
+            "分别回答移动、转火、停手和延迟变化会怎样影响当前循环；内部区分信息来源，最终直接给玩家结论和必要条件。",
             &[
                 "scope",
                 "scenario",
@@ -1352,11 +1352,13 @@ fn playbook(task: AnalysisTaskType, client: DomainClient) -> AnalysisPlaybookV1 
                 "移动 转火 距离 面向 延迟 实战",
             ],
             &[
-                "木桩时间轴不能证明移动、距离、面向、目标死亡或转火结果",
+                "分析时不得把当前循环表现外推为未执行过的移动、距离、面向、目标死亡或转火结果",
                 "分体态宏停手不会重置体态；恢复按键时应按当时体态选择宏页",
                 "盾飞持续期间短暂停手不会被动回到盾宏，除非已经主动盾回；盾飞自然结束才回盾体态",
                 "延迟资料只能解释风险与调节方向，未经同场景对照不得量化损失",
                 "每项含数字的实战建议必须在本项局部引用包含该数字的证据，不能借用其他段落的引用",
+                "最终答复直接描述玩家会遇到的行为和影响，不解释服务端、解析器、结构化字段、工具或证据分类",
+                "不要用“规则已明确”“这是运行规则”“不依赖木桩”等取证状态充当玩法结论",
             ],
             &[
                 (
@@ -1366,13 +1368,13 @@ fn playbook(task: AnalysisTaskType, client: DomainClient) -> AnalysisPlaybookV1 
                 ),
                 (
                     "runtime",
-                    "还原宏运行语义",
-                    "读取体态分页、语句顺序、盾飞与盾回规则，说明停手后从哪一页继续。",
+                    "确认停手后的续招",
+                    "核对体态分页、语句顺序以及盾飞与盾回对下一次按键的影响。",
                 ),
                 (
                     "adaptation",
                     "逐项分析适配性",
-                    "把时间轴可观察事实与距离、面向、目标切换等未模拟条件分开说明。",
+                    "分别判断移动、转火、停手与延迟的实际影响，只保留会改变玩家决策的条件。",
                 ),
                 (
                     "boundary",
@@ -2092,6 +2094,17 @@ mod tests {
             .playbook
             .preferred_tools
             .contains(&"compare_scenarios".to_string()));
+        assert!(plan.playbook.forbidden_inferences.iter().any(|constraint| {
+            constraint.contains("最终答复直接描述玩家会遇到的行为和影响")
+        }));
+        assert!(plan.playbook.forbidden_inferences.iter().any(|constraint| {
+            constraint.contains("不要用“规则已明确”")
+        }));
+        assert!(plan
+            .playbook
+            .stages
+            .iter()
+            .any(|stage| stage.label == "确认停手后的续招"));
     }
 
     #[test]

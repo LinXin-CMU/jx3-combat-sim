@@ -84,6 +84,11 @@ pub const AGENT_PROMPT_VERSION_V20: &str = "agent-system/v20";
 const AGENT_SYSTEM_PROMPT_V20: &str = include_str!("../../prompts/agent_system_v20.md");
 pub const AGENT_PROMPT_VERSION_V21: &str = "agent-system/v21";
 const AGENT_SYSTEM_PROMPT_V21: &str = include_str!("../../prompts/agent_system_v21.md");
+pub const AGENT_PROMPT_VERSION_V22: &str = "agent-system/v22";
+const AGENT_SYSTEM_PROMPT_V22: &str = concat!(
+    include_str!("../../prompts/agent_system_v21.md"),
+    include_str!("../../prompts/agent_system_v22_addendum.md")
+);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PromptSpec {
@@ -277,6 +282,15 @@ pub fn agent_prompt_v21() -> PromptSpec {
     }
 }
 
+pub fn agent_prompt_v22() -> PromptSpec {
+    let sha256 = format!("{:x}", Sha256::digest(AGENT_SYSTEM_PROMPT_V22.as_bytes()));
+    PromptSpec {
+        version: AGENT_PROMPT_VERSION_V22,
+        sha256,
+        instructions: AGENT_SYSTEM_PROMPT_V22,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -391,5 +405,17 @@ mod tests {
         assert!(prompt
             .instructions
             .contains("must locally cite the evidence"));
+    }
+
+    #[test]
+    fn v22_prompt_keeps_provenance_out_of_player_facing_prose() {
+        let prompt = agent_prompt_v22();
+        assert_eq!(prompt.version, "agent-system/v22");
+        assert_eq!(prompt.sha256.len(), 64);
+        assert!(prompt.instructions.len() < 11_000);
+        assert!(prompt.instructions.contains("are internal controls"));
+        assert!(prompt.instructions.contains("not report prose"));
+        assert!(prompt.instructions.contains("服务端解析显示"));
+        assert!(prompt.instructions.contains("Finding titles must name the gameplay result"));
     }
 }

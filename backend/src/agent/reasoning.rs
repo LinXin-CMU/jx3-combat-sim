@@ -488,17 +488,17 @@ fn practical_adaptation_checkpoints(
     vec![
         checkpoint(
             "scope",
-            "锁定实战口径",
-            "当前版本、心法、宏或手动输入以及冻结环境是什么？",
+            "识别当前循环",
+            "当前版本、心法以及宏或手动输入是什么？",
             &["scenario".to_string(), "rotation_input".to_string()],
             completed_if(!scenario.is_empty()),
             scenario,
-            "以冻结场景与服务端解析出的输入方式为准。",
+            "以当前场景记录的输入方式为准。",
         ),
         checkpoint(
             "runtime",
-            "还原停手恢复语义",
-            "分体态宏停手后从哪一页继续，盾飞和盾回如何改变体态？",
+            "确认停手后的续招",
+            "分体态宏恢复按键后接哪一页，盾飞和盾回会怎样改变后续技能？",
             &["rotation_input".to_string()],
             completed_if(!scenario.is_empty()),
             scenario,
@@ -506,8 +506,8 @@ fn practical_adaptation_checkpoints(
         ),
         checkpoint(
             "timeline",
-            "读取木桩执行事实",
-            "当前冻结循环实际记录了哪些节奏、等待和输入跳过？",
+            "检查当前执行",
+            "当前循环记录了哪些节奏、等待和输入跳过？",
             &["timeline".to_string(), "rotation_diagnosis".to_string()],
             completed_if(!timeline.is_empty()),
             timeline,
@@ -515,7 +515,7 @@ fn practical_adaptation_checkpoints(
         ),
         checkpoint(
             "knowledge",
-            "对齐当前版本资料",
+            "参考当前版本资料",
             "攻略如何解释距离、目标状态、盾飞回返和延迟调节？",
             &["versioned_knowledge".to_string()],
             completed_if(!knowledge.is_empty()),
@@ -524,8 +524,8 @@ fn practical_adaptation_checkpoints(
         ),
         checkpoint(
             "adaptation",
-            "逐项回答实战适配",
-            "移动、转火、停手、延迟四项分别能确认什么，边界是什么？",
+            "回答实战影响",
+            "移动、转火、停手和延迟分别会怎样影响玩家操作？",
             &[
                 "rotation_input".to_string(),
                 "timeline".to_string(),
@@ -533,7 +533,7 @@ fn practical_adaptation_checkpoints(
             ],
             completed_if(!scenario.is_empty() && !timeline.is_empty() && !knowledge.is_empty()),
             &merge_ids(&merge_ids(scenario, timeline), knowledge),
-            "四项分开回答；明确标记运行规则、模拟观测、攻略建议和未模拟条件。",
+            "内部区分信息来源；最终直接回答玩法影响，只说明会改变玩家决策的未知条件。",
         ),
     ]
 }
