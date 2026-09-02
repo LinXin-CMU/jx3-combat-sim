@@ -17,7 +17,7 @@ use super::domain::{
     equipment_strategy_comparison_requested,
 };
 use super::evidence::validate_trace_id;
-use super::prompt::agent_prompt_v20;
+use super::prompt::agent_prompt_v21;
 use super::provider::{
     FinishReason, LlmProvider, ModelMessage, ModelRequest, ProviderToolCall,
     StructuredOutputDefinition, TokenUsage,
@@ -340,7 +340,7 @@ pub async fn run_agent_recorded(
     replay_sink: Option<AgentReplaySink>,
 ) -> AgentRunResultV1 {
     let started = Instant::now();
-    let prompt = agent_prompt_v20();
+    let prompt = agent_prompt_v21();
     let analysis_plan = select_analysis_plan_with_history(
         &input.question,
         input.session_playbook_id.as_deref(),
@@ -3252,7 +3252,7 @@ mod tests {
                 }),
             );
         }
-        let prompt = agent_prompt_v20();
+        let prompt = agent_prompt_v21();
         let request = ModelRequest {
             instructions: prompt.instructions.to_string(),
             messages: compact_handoff_messages(&input, &plan, &evidence, 6 * 1024),
@@ -3729,7 +3729,7 @@ mod tests {
         .await;
 
         assert_eq!(result.status, AgentRunStatus::Completed);
-        assert_eq!(result.prompt_version, "agent-system/v20");
+        assert_eq!(result.prompt_version, "agent-system/v21");
         assert_eq!(result.accounting.knowledge_searches, 1);
         assert_eq!(result.accounting.simulations, 0);
         let report = result.report.unwrap();
@@ -3808,7 +3808,7 @@ mod tests {
         .await;
 
         assert_eq!(result.status, AgentRunStatus::Completed);
-        assert_eq!(result.prompt_version, "agent-system/v20");
+        assert_eq!(result.prompt_version, "agent-system/v21");
         assert_eq!(result.accounting.knowledge_searches, 1);
         assert_eq!(result.accounting.simulations, 1);
         let report = result.report.unwrap();
