@@ -72,6 +72,10 @@
     reasoning_critique_started: '执行发布前批判检查',
     reasoning_critique_failed: '批判检查要求修订',
     reasoning_critique_passed: '批判检查通过',
+    model_context_compacted: '压缩模型上下文',
+    model_context_handoff: '重建紧凑上下文',
+    model_context_limit_evidence_preserved: '上下文已安全截停',
+    provider_failure_evidence_preserved: '保留失败前证据',
     model_started: '模型处理中',
     model_finished: '模型响应完成',
     decision_checkpoint: '记录决策依据',
@@ -228,6 +232,8 @@
     if (kind === 'reasoning_critique_started') return '正在检查结论是否真正回答问题并满足证据边界…';
     if (kind === 'reasoning_critique_failed') return '结论未通过任务完成度检查，正在依据已有证据修订…';
     if (kind === 'reasoning_critique_passed') return '语义与证据检查通过，正在发布结论…';
+    if (kind === 'model_context_compacted') return '正在压缩旧轮次与工具输出，完整证据仍保留在后台…';
+    if (kind === 'model_context_handoff') return '正在用最新证据状态重建紧凑上下文…';
     if (kind === 'tool_started') return `正在${toolLabel(event.tool_name)}…`;
     if (kind === 'tool_finished') return '已取得工具证据，正在继续分析…';
     if (kind === 'validating') return '正在校验数值、单位与证据引用…';
@@ -479,6 +485,8 @@
     return kind === 'tool_finished' && !!event?.code
       || ['report_repair_requested', 'report_claims_sanitized', 'provider_empty_retry',
         'reasoning_critique_failed',
+        'model_context_limit_evidence_preserved',
+        'provider_failure_evidence_preserved',
         'provider_empty_evidence_preserved', 'evidence_insufficient', 'budget_exhausted',
         'budget_limit_reached',
         'provider_failed', 'protocol_failed', 'timed_out', 'cancel_requested', 'cancelled']
@@ -536,6 +544,10 @@
       reasoning_critique_started: '从任务完成度、证据归属、因果强度、范围和干预必要性检查报告。',
       reasoning_critique_failed: '报告通过了格式校验，但没有完成本题推导契约；只基于已有证据修订。',
       reasoning_critique_passed: '报告已经回答当前任务，并通过语义与证据边界检查。',
+      model_context_compacted: '仅压缩发送给模型的副本；后台完整证据、复现记录和校验路径不变。',
+      model_context_handoff: '旧对话被替换为当前问题、分析计划、紧凑证据和最新检查点，避免上下文无限累积。',
+      model_context_limit_evidence_preserved: '请求在本地硬上限前停止，未把超长内容发送给供应商。',
+      provider_failure_evidence_preserved: '供应商后续请求失败，但失败前完成的本地工具证据和可校验报告仍然保留。',
       evidence_gap_requires_tool: event?.tool_name === 'analyze_timeline'
         ? '必须先取得基线时间轴诊断，才能判断循环哪里做得好、哪里存在风险。'
         : '修改方案还缺少同场景候选对照，暂不发布为已验证结论。',

@@ -9,6 +9,10 @@ pub const MAX_TOOL_OUTPUT_BYTES: usize = 256 * 1024;
 pub const MAX_TOOLS: usize = 16;
 pub const MAX_PROVIDER_TOOL_CALLS: usize = 8;
 pub const MAX_OUTPUT_TOKENS: u32 = 8192;
+/// Hard upper bound for the provider-neutral request before an adapter adds
+/// small transport fields such as the model name. Orchestrators must compact
+/// evidence before crossing this boundary.
+pub const MAX_MODEL_REQUEST_BYTES: usize = 72 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "role", rename_all = "snake_case", deny_unknown_fields)]
@@ -110,6 +114,15 @@ impl std::error::Error for ProtocolError {}
 
 impl ModelRequest {
     pub fn validate(&self) -> Result<(), ProtocolError> {
+        let encoded_bytes = serde_json::to_vec(self)
+            .map(|value| value.len())
+            .unwrap_or(usize::MAX);
+        if encoded_bytes > MAX_MODEL_REQUEST_BYTES {
+            return Err(protocol_error(
+                "model_request_too_large",
+                "model request exceeds the bounded context size",
+            ));
+        }
         if self.instructions.trim().is_empty() || self.instructions.len() > MAX_INSTRUCTIONS_BYTES {
             return Err(protocol_error(
                 "invalid_instructions",
@@ -346,6 +359,18 @@ mod tests {
     #[test]
     fn valid_request_passes() {
         request().validate().unwrap();
+    }
+
+    #[test]
+    fn total_request_size_is_bounded_before_provider_dispatch() {
+        let mut oversized = request();
+        oversized.messages = vec![ModelMessage::User {
+            content: "证".repeat(30_000),
+        }];
+        assert_eq!(
+            oversized.validate().unwrap_err().code,
+            "model_request_too_large"
+        );
     }
 
     #[test]

@@ -918,7 +918,7 @@ fn apply_rotation_diagnosis_contract(
     }
     plan.routing_signals
         .push("rotation_diagnosis_first".to_string());
-    let asks_for_candidate = contains_any(
+    let mentions_candidate = contains_any(
         normalized_question,
         &[
             "修改",
@@ -936,6 +936,34 @@ fn apply_rotation_diagnosis_contract(
             "哪个好",
         ],
     );
+    let negates_candidate = contains_any(
+        normalized_question,
+        &[
+            "不要改",
+            "不改宏",
+            "无需改",
+            "不需要改",
+            "先不改",
+            "暂不改",
+            "不要在诊断前直接给修改方案",
+            "不要直接给修改方案",
+        ],
+    );
+    let explicitly_resumes_candidate = contains_any(
+        normalized_question,
+        &[
+            "再给修改",
+            "然后给修改",
+            "之后给修改",
+            "诊断后给修改",
+            "诊断完给修改",
+            "再优化",
+            "然后优化",
+            "之后优化",
+        ],
+    );
+    let asks_for_candidate =
+        mentions_candidate && (!negates_candidate || explicitly_resumes_candidate);
     if asks_for_candidate
         && !plan
             .playbook
@@ -2111,6 +2139,18 @@ mod tests {
             .required_dimensions
             .contains(&"candidate_comparison".to_string()));
         assert!(edit_plan
+            .routing_signals
+            .contains(&"candidate_comparison_explicitly_requested".to_string()));
+
+        let diagnosis_only = select_analysis_plan(
+            "先分析当前循环已经做得好的地方，再找出有证据支持的主要风险；不要在诊断前直接给修改方案。",
+            &macro_scenario,
+        );
+        assert!(!diagnosis_only
+            .playbook
+            .required_dimensions
+            .contains(&"candidate_comparison".to_string()));
+        assert!(!diagnosis_only
             .routing_signals
             .contains(&"candidate_comparison_explicitly_requested".to_string()));
     }

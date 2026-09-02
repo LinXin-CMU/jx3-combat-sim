@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -21,6 +22,7 @@ use super::provider::{
     FinishReason, LlmProvider, ModelMessage, ModelRequest, ProviderToolCall,
     StructuredOutputDefinition, TokenUsage,
 };
+use super::provider::protocol::MAX_MODEL_REQUEST_BYTES;
 use super::registry::{
     normalize_reference_query, AgentToolRegistry, ToolDispatchOutcome, MAX_KNOWLEDGE_SEARCHES,
 };
@@ -42,6 +44,8 @@ const MAX_SESSION_CONTEXT_BYTES: usize = 16 * 1024;
 const MAX_REPORT_REPAIRS: u32 = 1;
 const MAX_EMPTY_RESPONSE_RETRIES: u32 = 1;
 const MAX_TOOL_SELECTION_RETRIES: u32 = 1;
+const MODEL_TOOL_OUTPUT_BYTES: usize = 16 * 1024;
+const MODEL_EVIDENCE_HANDOFF_BYTES: usize = 24 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -563,7 +567,7 @@ pub async fn run_agent_recorded(
     });
     messages.push(ModelMessage::ToolResult {
         call_id: PREFETCH_CALL_ID.to_string(),
-        output: prefetched.output,
+        output: model_tool_output(&prefetched.output),
     });
 
     // Equipment-page runs eagerly capture the build and, when a list candidate is
@@ -584,7 +588,7 @@ pub async fn run_agent_recorded(
         messages.push(ModelMessage::Assistant { content: None, tool_calls: vec![ProviderToolCall {
             call_id: EQUIPMENT_INSPECT_CALL_ID.to_string(), name: EQUIPMENT_INSPECT_TOOL.to_string(), arguments: serde_json::json!({}),
         }]});
-        messages.push(ModelMessage::ToolResult { call_id: EQUIPMENT_INSPECT_CALL_ID.to_string(), output: inspected.output });
+        messages.push(ModelMessage::ToolResult { call_id: EQUIPMENT_INSPECT_CALL_ID.to_string(), output: model_tool_output(&inspected.output) });
 
         let strategy_question = equipment_strategy_comparison_requested(&input.question);
         let focused_question = equipment_focused_comparison_requested(&input.question);
@@ -603,7 +607,7 @@ pub async fn run_agent_recorded(
             messages.push(ModelMessage::Assistant { content: None, tool_calls: vec![ProviderToolCall {
                 call_id: EQUIPMENT_STRATEGY_CALL_ID.to_string(), name: EQUIPMENT_STRATEGY_TOOL.to_string(), arguments: serde_json::json!({}),
             }]});
-            messages.push(ModelMessage::ToolResult { call_id: EQUIPMENT_STRATEGY_CALL_ID.to_string(), output: compared.output });
+            messages.push(ModelMessage::ToolResult { call_id: EQUIPMENT_STRATEGY_CALL_ID.to_string(), output: model_tool_output(&compared.output) });
         } else if focused_question
             && input.equipment_workspace.as_ref().and_then(|workspace| workspace.focus.as_ref()).is_some()
             && accounting.tool_calls < limits.max_tool_calls
@@ -622,7 +626,7 @@ pub async fn run_agent_recorded(
             messages.push(ModelMessage::Assistant { content: None, tool_calls: vec![ProviderToolCall {
                 call_id: EQUIPMENT_COMPARE_CALL_ID.to_string(), name: EQUIPMENT_COMPARE_TOOL.to_string(), arguments: serde_json::json!({}),
             }]});
-            messages.push(ModelMessage::ToolResult { call_id: EQUIPMENT_COMPARE_CALL_ID.to_string(), output: compared.output });
+            messages.push(ModelMessage::ToolResult { call_id: EQUIPMENT_COMPARE_CALL_ID.to_string(), output: model_tool_output(&compared.output) });
         }
     }
 
@@ -673,7 +677,7 @@ pub async fn run_agent_recorded(
             });
             messages.push(ModelMessage::ToolResult {
                 call_id: KNOWLEDGE_PREFETCH_CALL_ID.to_string(),
-                output: prefetched_knowledge.output,
+                output: model_tool_output(&prefetched_knowledge.output),
             });
         }
     }
@@ -805,12 +809,29 @@ pub async fn run_agent_recorded(
 
         let is_repair = repair_message.is_some();
         let tools_available = !is_repair && !final_report_only;
-        let request = ModelRequest {
+        let repair_content = repair_message.take();
+        let original_message_bytes = serde_json::to_vec(&messages)
+            .map(|encoded| encoded.len())
+            .unwrap_or(usize::MAX);
+        let mut request_messages = repair_content
+            .map(|content| vec![ModelMessage::User { content }])
+            .unwrap_or_else(|| compact_transcript_messages(&messages));
+        let compacted_message_bytes = serde_json::to_vec(&request_messages)
+            .map(|encoded| encoded.len())
+            .unwrap_or(usize::MAX);
+        if compacted_message_bytes < original_message_bytes {
+            trace.push(
+                "model_context_compacted",
+                None,
+                registry.evidence().keys().cloned().collect(),
+                Some(format!(
+                    "message_bytes_{original_message_bytes}_to_{compacted_message_bytes}"
+                )),
+            );
+        }
+        let mut request = ModelRequest {
             instructions: prompt.instructions.to_string(),
-            messages: repair_message
-                .take()
-                .map(|content| vec![ModelMessage::User { content }])
-                .unwrap_or_else(|| messages.clone()),
+            messages: request_messages.clone(),
             tools: if tools_available {
                 // Keep the plan-scoped tool catalog stable across model turns.
                 // Budget and diagnosis rules are enforced as recoverable tool
@@ -826,6 +847,87 @@ pub async fn run_agent_recorded(
             }),
             max_output_tokens: limits.max_output_tokens_per_turn,
         };
+        if request_bytes(&request) > MAX_MODEL_REQUEST_BYTES && !is_repair {
+            for evidence_bytes in [MODEL_EVIDENCE_HANDOFF_BYTES, 12 * 1024, 6 * 1024] {
+                request_messages = compact_handoff_messages(
+                    &input,
+                    &analysis_plan,
+                    registry.evidence(),
+                    evidence_bytes,
+                );
+                request.messages = request_messages.clone();
+                if request_bytes(&request) <= MAX_MODEL_REQUEST_BYTES {
+                    trace.push(
+                        "model_context_handoff",
+                        None,
+                        registry.evidence().keys().cloned().collect(),
+                        Some(format!(
+                            "bounded_request_{}_bytes",
+                            request_bytes(&request)
+                        )),
+                    );
+                    break;
+                }
+            }
+        }
+        if request_bytes(&request) > MAX_MODEL_REQUEST_BYTES {
+            record_replay(
+                &replay_sink,
+                "model_context_limit",
+                serde_json::json!({
+                    "code": "model_request_too_large",
+                    "request_bytes": request_bytes(&request),
+                    "max_bytes": MAX_MODEL_REQUEST_BYTES,
+                    "evidence_ids": registry.evidence().keys().collect::<Vec<_>>(),
+                }),
+            );
+            if let Some(content) = evidence_preserving_provider_fallback(
+                &analysis_plan,
+                registry.evidence(),
+                "模型上下文达到本地硬上限；未继续发送超长请求，下方保留已经取得的可验证证据。",
+            ) {
+                trace.push(
+                    "model_context_limit_evidence_preserved",
+                    None,
+                    cited_evidence_ids(&content),
+                    Some("model_request_too_large".to_string()),
+                );
+                return terminal_with_report(
+                    provider,
+                    &input,
+                    &prompt,
+                    AgentRunStatus::PartiallyVerified,
+                    accounting,
+                    content,
+                    Some(fixed_error(
+                        "model_request_too_large",
+                        "Model request exceeded the local context budget",
+                    )),
+                    trace,
+                    started,
+                    &registry,
+                );
+            }
+            let content = refusal_content(
+                "当前上下文超过本地安全预算，已停止发送超长请求。",
+                "请缩小问题范围后重试；本轮没有向供应商发送超限内容。",
+            );
+            return terminal_with_report(
+                provider,
+                &input,
+                &prompt,
+                AgentRunStatus::EvidenceInsufficient,
+                accounting,
+                content,
+                Some(fixed_error(
+                    "model_request_too_large",
+                    "Model request exceeded the local context budget",
+                )),
+                trace,
+                started,
+                &registry,
+            );
+        }
         if request.validate().is_err() {
             record_replay(
                 &replay_sink,
@@ -869,6 +971,16 @@ pub async fn run_agent_recorded(
             "model_request",
             serde_json::to_value(&request).unwrap_or_else(|_| serde_json::json!({})),
         );
+        record_replay(
+            &replay_sink,
+            "model_context_budget",
+            serde_json::json!({
+                "request_bytes": request_bytes(&request),
+                "max_request_bytes": MAX_MODEL_REQUEST_BYTES,
+                "message_count": request.messages.len(),
+                "tool_count": request.tools.len(),
+            }),
+        );
         accounting.model_turns += 1;
         let remaining =
             Duration::from_millis(limits.wall_time_ms).saturating_sub(started.elapsed());
@@ -906,6 +1018,8 @@ pub async fn run_agent_recorded(
                         "message": error.message,
                         "retryable": error.retryable,
                         "upstream_status": error.upstream_status,
+                        "request_bytes": request_bytes(&request),
+                        "max_request_bytes": MAX_MODEL_REQUEST_BYTES,
                         "usage": &error.usage,
                     }),
                 );
@@ -935,6 +1049,41 @@ pub async fn run_agent_recorded(
                     ) {
                         trace.push(
                             "provider_empty_evidence_preserved",
+                            None,
+                            cited_evidence_ids(&content),
+                            Some(error.code.to_string()),
+                        );
+                        return terminal_with_report(
+                            provider,
+                            &input,
+                            &prompt,
+                            AgentRunStatus::PartiallyVerified,
+                            accounting,
+                            content,
+                            Some(fixed_error(error.code, error.message)),
+                            trace,
+                            started,
+                            &registry,
+                        );
+                    }
+                }
+                if !registry.evidence().is_empty() {
+                    let recovered = recover_report_from_messages(
+                        &input.question,
+                        &analysis_plan,
+                        &messages,
+                        registry.evidence(),
+                    )
+                    .or_else(|| {
+                        evidence_preserving_provider_fallback(
+                            &analysis_plan,
+                            registry.evidence(),
+                            "模型后续请求失败；下方保留失败前已经取得的可验证证据。",
+                        )
+                    });
+                    if let Some(content) = recovered {
+                        trace.push(
+                            "provider_failure_evidence_preserved",
                             None,
                             cited_evidence_ids(&content),
                             Some(error.code.to_string()),
@@ -1215,7 +1364,7 @@ pub async fn run_agent_recorded(
                     );
                     messages.push(ModelMessage::ToolResult {
                         call_id: call.call_id,
-                        output: coalesced.output,
+                        output: model_tool_output(&coalesced.output),
                     });
                     continue;
                 }
@@ -1316,7 +1465,7 @@ pub async fn run_agent_recorded(
                 );
                 messages.push(ModelMessage::ToolResult {
                     call_id: call.call_id,
-                    output: outcome.output,
+                    output: model_tool_output(&outcome.output),
                 });
                 if outcome.budget_exhausted {
                     let knowledge_budget = call.name == "search_knowledge_base";
@@ -1355,6 +1504,14 @@ pub async fn run_agent_recorded(
                 evidence_pack.evidence_ids.clone(),
                 Some(evidence_pack.coverage.sufficiency.as_str().to_string()),
             );
+            messages.retain(|message| {
+                !matches!(
+                    message,
+                    ModelMessage::User { content }
+                        if content.starts_with("<evidence_pack")
+                            || content.starts_with("<reasoning_state")
+                )
+            });
             messages.push(ModelMessage::User {
                 content: evidence_pack_model_context(&evidence_pack),
             });
@@ -1395,7 +1552,23 @@ pub async fn run_agent_recorded(
             // Rotation playbooks with both diagnosis and comparison tools remain open
             // for a bounded diagnose -> candidate -> A/B loop. Other playbooks preserve
             // their cheap one-experiment or one-point-lookup termination behavior.
-            if !adaptive_experiments {
+            if adaptive_experiments
+                && registry.evidence().values().any(|envelope| {
+                    envelope.get("tool_name").and_then(Value::as_str)
+                        == Some("compare_scenarios")
+                })
+            {
+                final_report_only = true;
+                trace.push(
+                    "evidence_ready_for_report",
+                    None,
+                    evidence_pack.evidence_ids.clone(),
+                    Some("single_variable_comparison_completed".to_string()),
+                );
+                messages.push(ModelMessage::User {
+                    content: "The bounded single-variable comparison is complete. Do not call more tools. Interpret the measured result and return the final JSON report now.".to_string(),
+                });
+            } else if !adaptive_experiments {
                 final_report_only = domain_experiment_completed && !needs_knowledge_followup;
                 if analysis_plan.task_type == AnalysisTaskType::EquipmentAnalysis
                     && evidence_pack.coverage.sufficiency == EvidenceSufficiency::Sufficient
@@ -1892,6 +2065,373 @@ pub async fn run_agent_recorded(
             },
         }
     }
+}
+
+fn recover_report_from_messages(
+    question: &str,
+    plan: &AnalysisPlanV1,
+    messages: &[ModelMessage],
+    evidence: &EvidenceStore,
+) -> Option<AgentReportContentV1> {
+    messages.iter().rev().find_map(|message| {
+        let ModelMessage::Assistant {
+            content: Some(raw),
+            ..
+        } = message
+        else {
+            return None;
+        };
+        let mut content = parse_and_validate_report(raw, evidence)
+            .map(|validated| validated.content)
+            .or_else(|_| parse_and_salvage_report(raw, evidence).map(|salvaged| salvaged.content))
+            .ok()?;
+        normalize_reasoning_contract(question, &mut content);
+        audit_reasoning_contract(question, plan, &content, evidence)
+            .ok()
+            .map(|_| content)
+    })
+}
+
+fn model_tool_output(output: &Value) -> Value {
+    let mut projected = output.clone();
+    if let Some(evidence) = projected.get_mut("evidence").and_then(Value::as_array_mut) {
+        for envelope in evidence {
+            let tool_name = envelope
+                .get("tool_name")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            if let Some(result) = envelope.get_mut("result") {
+                project_tool_result(&tool_name, result);
+                bound_json_value(result, 32, 1_600, 0);
+            }
+        }
+    }
+    if serde_json::to_vec(&projected)
+        .map(|encoded| encoded.len())
+        .unwrap_or(usize::MAX)
+        > MODEL_TOOL_OUTPUT_BYTES
+    {
+        bound_json_value(&mut projected, 12, 800, 0);
+    }
+    if serde_json::to_vec(&projected)
+        .map(|encoded| encoded.len())
+        .unwrap_or(usize::MAX)
+        > MODEL_TOOL_OUTPUT_BYTES
+    {
+        let evidence = projected
+            .get("evidence")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .map(|item| {
+                serde_json::json!({
+                    "evidence_id": item.get("evidence_id"),
+                    "tool_name": item.get("tool_name"),
+                    "result": compact_result_facts(item.get("result")),
+                })
+            })
+            .collect::<Vec<_>>();
+        projected = serde_json::json!({
+            "schema_version": projected.get("schema_version"),
+            "ok": projected.get("ok"),
+            "tool_name": projected.get("tool_name"),
+            "evidence_ids": projected.get("evidence_ids"),
+            "evidence": evidence,
+            "model_projection": "full evidence retained by server"
+        });
+    }
+    projected
+}
+
+fn project_tool_result(tool_name: &str, result: &mut Value) {
+    match tool_name {
+        "search_knowledge_base" => {
+            if let Some(items) = result.get_mut("results").and_then(Value::as_array_mut) {
+                items.truncate(3);
+                for item in items {
+                    if let Some(object) = item.as_object_mut() {
+                        object.retain(|key, _| {
+                            matches!(
+                                key.as_str(),
+                                "document_id"
+                                    | "title"
+                                    | "heading"
+                                    | "snippet"
+                                    | "category"
+                                    | "season"
+                                    | "source_site"
+                                    | "source_url"
+                                    | "source_updated_at"
+                                    | "yuque_url"
+                                    | "version_match"
+                                    | "version_warning"
+                                    | "fact_eligible"
+                                    | "quality"
+                                    | "reference_entities"
+                                    | "domain_claims"
+                            )
+                        });
+                    }
+                }
+            }
+        }
+        "analyze_timeline" => {
+            if let Some(buffs) = result
+                .get_mut("buff_coverage")
+                .and_then(Value::as_array_mut)
+            {
+                for buff in buffs {
+                    if let Some(object) = buff.as_object_mut() {
+                        object.remove("intervals");
+                    }
+                }
+            }
+            for key in ["gcd_gaps", "cd_waits"] {
+                if let Some(items) = result.get_mut(key).and_then(Value::as_array_mut) {
+                    items.truncate(8);
+                }
+            }
+        }
+        "compare_scenarios" | "compare_saved_macros" | "compare_saved_scenarios" => {
+            if let Some(candidates) = result.get_mut("candidates").and_then(Value::as_array_mut) {
+                candidates.truncate(3);
+                for candidate in candidates {
+                    if let Some(deltas) = candidate
+                        .get_mut("skill_deltas")
+                        .and_then(Value::as_array_mut)
+                    {
+                        deltas.sort_by(|left, right| {
+                            let left = left
+                                .get("damage_delta")
+                                .and_then(Value::as_f64)
+                                .unwrap_or(0.0)
+                                .abs();
+                            let right = right
+                                .get("damage_delta")
+                                .and_then(Value::as_f64)
+                                .unwrap_or(0.0)
+                                .abs();
+                            right.total_cmp(&left)
+                        });
+                        deltas.truncate(12);
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn bound_json_value(value: &mut Value, array_limit: usize, string_limit: usize, depth: usize) {
+    if depth > 16 {
+        *value = Value::String("[depth bounded]".to_string());
+        return;
+    }
+    match value {
+        Value::String(text) if text.chars().count() > string_limit => {
+            *text = format!("{}…", text.chars().take(string_limit).collect::<String>());
+        }
+        Value::Array(items) => {
+            items.truncate(array_limit);
+            for item in items {
+                bound_json_value(item, array_limit, string_limit, depth + 1);
+            }
+        }
+        Value::Object(object) => {
+            for item in object.values_mut() {
+                bound_json_value(item, array_limit, string_limit, depth + 1);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn compact_result_facts(result: Option<&Value>) -> Value {
+    let Some(result) = result.and_then(Value::as_object) else {
+        return serde_json::json!({});
+    };
+    let mut facts = serde_json::Map::new();
+    for key in [
+        "dps",
+        "total_damage",
+        "fight_time",
+        "fingerprint_hex",
+        "diagnostic_profile",
+        "rage",
+        "stance",
+        "selection",
+        "results",
+        "candidates",
+        "rotation_input",
+        "game_version",
+        "mount",
+        "network_delay_ms",
+        "haste_level",
+    ] {
+        if let Some(value) = result.get(key) {
+            facts.insert(key.to_string(), value.clone());
+        }
+    }
+    let mut facts = Value::Object(facts);
+    bound_json_value(&mut facts, 6, 600, 0);
+    facts
+}
+
+fn evidence_priority(envelope: &Value) -> u8 {
+    match envelope.get("tool_name").and_then(Value::as_str) {
+        Some("get_current_scenario") => 0,
+        Some("analyze_timeline") => 1,
+        Some("compare_scenarios" | "compare_saved_macros" | "compare_saved_scenarios") => 2,
+        Some("compare_focused_equipment" | "compare_equipment_strategies") => 2,
+        Some("search_knowledge_base") => 3,
+        Some("simulate_scenario") => 4,
+        _ => 5,
+    }
+}
+
+fn model_evidence_handoff(evidence: &EvidenceStore, max_bytes: usize) -> String {
+    let mut candidates = evidence
+        .values()
+        .map(|envelope| {
+            let wrapper = serde_json::json!({
+                "schema_version": "agent-tool-result/v1",
+                "ok": true,
+                "tool_name": envelope.get("tool_name"),
+                "evidence_ids": [envelope.get("evidence_id")],
+                "evidence": [envelope]
+            });
+            let projected = model_tool_output(&wrapper)
+                .get("evidence")
+                .and_then(Value::as_array)
+                .and_then(|items| items.first())
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({}));
+            (evidence_priority(envelope), projected)
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by_key(|(priority, item)| {
+        (
+            *priority,
+            item.get("evidence_id")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+        )
+    });
+    let mut items = Vec::new();
+    let mut omitted = Vec::new();
+    for (_, item) in candidates {
+        let mut trial = items.clone();
+        trial.push(item.clone());
+        let encoded = serde_json::to_vec(&trial)
+            .map(|value| value.len())
+            .unwrap_or(usize::MAX);
+        if encoded <= max_bytes {
+            items.push(item);
+        } else if let Some(id) = item.get("evidence_id").and_then(Value::as_str) {
+            omitted.push(id.to_string());
+        }
+    }
+    let payload = serde_json::json!({
+        "schema_version": "agent-model-evidence/v1",
+        "items": items,
+        "omitted_evidence_ids": omitted,
+        "boundary": "This is a bounded model projection. Full immutable evidence remains available to server-side validators."
+    });
+    format!(
+        "<model_evidence server_generated=\"true\" schema=\"agent-model-evidence/v1\">\n{}\n</model_evidence>",
+        serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string())
+    )
+}
+
+fn compact_transcript_messages(messages: &[ModelMessage]) -> Vec<ModelMessage> {
+    let latest_pack = messages.iter().rposition(|message| {
+        matches!(message, ModelMessage::User { content } if content.starts_with("<evidence_pack"))
+    });
+    let latest_reasoning = messages.iter().rposition(|message| {
+        matches!(message, ModelMessage::User { content } if content.starts_with("<reasoning_state"))
+    });
+    messages
+        .iter()
+        .enumerate()
+        .filter_map(|(index, message)| match message {
+            ModelMessage::User { content } if content.starts_with("<evidence_pack") => {
+                (Some(index) == latest_pack).then(|| message.clone())
+            }
+            ModelMessage::User { content } if content.starts_with("<reasoning_state") => {
+                (Some(index) == latest_reasoning).then(|| message.clone())
+            }
+            ModelMessage::User { content } if content.starts_with("<session_context") => {
+                Some(ModelMessage::User {
+                    content: clip_model_text(content, 2_500),
+                })
+            }
+            ModelMessage::Assistant {
+                content,
+                tool_calls,
+            } => Some(ModelMessage::Assistant {
+                content: content.as_ref().map(|text| clip_model_text(text, 1_000)),
+                tool_calls: tool_calls.clone(),
+            }),
+            ModelMessage::ToolResult { call_id, output } => Some(ModelMessage::ToolResult {
+                call_id: call_id.clone(),
+                output: model_tool_output(output),
+            }),
+            _ => Some(message.clone()),
+        })
+        .collect()
+}
+
+fn compact_handoff_messages(
+    input: &AgentRunInput,
+    plan: &AnalysisPlanV1,
+    evidence: &EvidenceStore,
+    evidence_bytes: usize,
+) -> Vec<ModelMessage> {
+    let pack = build_evidence_pack(plan, evidence);
+    let reasoning = build_reasoning_state(&input.question, plan, &pack, evidence);
+    let mut messages = Vec::new();
+    if let Some(context) = &input.session_context {
+        messages.push(ModelMessage::User {
+            content: format!(
+                "<session_context untrusted_data=\"true\">\n{}\n</session_context>",
+                clip_model_text(context, 2_000)
+            ),
+        });
+    }
+    messages.push(ModelMessage::User {
+        content: input.question.clone(),
+    });
+    messages.push(ModelMessage::User {
+        content: plan_model_context(plan),
+    });
+    messages.push(ModelMessage::User {
+        content: model_evidence_handoff(evidence, evidence_bytes),
+    });
+    messages.push(ModelMessage::User {
+        content: evidence_pack_model_context(&pack),
+    });
+    messages.push(ModelMessage::User {
+        content: reasoning_state_model_context(&reasoning),
+    });
+    messages.push(ModelMessage::User {
+        content: "The earlier provider transcript was compacted by the trusted orchestrator. Continue from the server-generated evidence and reasoning state. Do not request facts already present there.".to_string(),
+    });
+    messages
+}
+
+fn clip_model_text(value: &str, max_chars: usize) -> String {
+    if value.chars().count() <= max_chars {
+        return value.to_string();
+    }
+    format!("{}…", value.chars().take(max_chars).collect::<String>())
+}
+
+fn request_bytes(request: &ModelRequest) -> usize {
+    serde_json::to_vec(request)
+        .map(|encoded| encoded.len())
+        .unwrap_or(usize::MAX)
 }
 
 fn public_decision_summary(
@@ -2629,6 +3169,104 @@ mod tests {
         }
     }
 
+    #[test]
+    fn model_projection_bounds_large_timeline_without_touching_full_evidence() {
+        let intervals = (0..2_000)
+            .map(|index| json!({"start": index as f64, "end": index as f64 + 0.5}))
+            .collect::<Vec<_>>();
+        let full = json!({
+            "schema_version": "agent-tool-result/v1",
+            "ok": true,
+            "tool_name": "analyze_timeline",
+            "evidence_ids": ["a".repeat(64)],
+            "evidence": [{
+                "evidence_id": "a".repeat(64),
+                "tool_name": "analyze_timeline",
+                "result": {
+                    "diagnostic_profile": {"cadence_gaps": {"count": 0}},
+                    "buff_coverage": [{
+                        "name": "嗜血",
+                        "coverage_percent": 97.5,
+                        "intervals": intervals
+                    }]
+                }
+            }]
+        });
+        let projected = model_tool_output(&full);
+        assert!(serde_json::to_vec(&projected).unwrap().len() <= MODEL_TOOL_OUTPUT_BYTES);
+        assert!(projected
+            .pointer("/evidence/0/result/buff_coverage/0/intervals")
+            .is_none());
+        assert!(full
+            .pointer("/evidence/0/result/buff_coverage/0/intervals")
+            .is_some());
+    }
+
+    #[test]
+    fn evidence_handoff_has_a_hard_byte_budget() {
+        let mut evidence = EvidenceStore::new();
+        for index in 0..20 {
+            let id = format!("{index:064x}");
+            evidence.insert(
+                id.clone(),
+                json!({
+                    "evidence_id": id,
+                    "tool_name": "search_knowledge_base",
+                    "result": {
+                        "results": [{
+                            "document_id": format!("doc-{index}"),
+                            "title": format!("资料 {index}"),
+                            "snippet": "长文本".repeat(4_000),
+                            "fact_eligible": true,
+                            "version_match": "current_exact"
+                        }]
+                    }
+                }),
+            );
+        }
+        let handoff = model_evidence_handoff(&evidence, MODEL_EVIDENCE_HANDOFF_BYTES);
+        assert!(handoff.len() <= MODEL_EVIDENCE_HANDOFF_BYTES + 4_096);
+        assert!(handoff.contains("omitted_evidence_ids"));
+    }
+
+    #[test]
+    fn compact_handoff_builds_a_provider_safe_request_from_oversized_evidence() {
+        let runtime = AgentRuntime::fixture();
+        let input = input(&runtime, "run-context-handoff");
+        let plan = select_analysis_plan(&input.question, &input.scenario);
+        let mut evidence = EvidenceStore::new();
+        for index in 0..24 {
+            let id = format!("{index:064x}");
+            evidence.insert(
+                id.clone(),
+                json!({
+                    "evidence_id": id,
+                    "tool_name": "search_knowledge_base",
+                    "result": {"results": [{
+                        "document_id": format!("doc-{index}"),
+                        "title": "超长资料",
+                        "snippet": "证据正文".repeat(5_000),
+                        "fact_eligible": true,
+                        "version_match": "current_exact"
+                    }]}
+                }),
+            );
+        }
+        let prompt = agent_prompt_v20();
+        let request = ModelRequest {
+            instructions: prompt.instructions.to_string(),
+            messages: compact_handoff_messages(&input, &plan, &evidence, 6 * 1024),
+            tools: Vec::new(),
+            response_format: Some(StructuredOutputDefinition {
+                name: "agent_report_content_v1".to_string(),
+                schema: report_content_json_schema(),
+            }),
+            max_output_tokens: 2_048,
+        };
+        assert!(request_bytes(&request) <= MAX_MODEL_REQUEST_BYTES);
+        request.validate().unwrap();
+    }
+
     #[async_trait]
     impl LlmProvider for ScriptedProvider {
         fn profile_id(&self) -> &str {
@@ -2737,6 +3375,10 @@ mod tests {
                 })
             };
             if let Some(comparison) = tool_output("compare_scenarios") {
+                assert!(
+                    request.tools.is_empty(),
+                    "a completed single-variable comparison must force the next turn into report-only mode"
+                );
                 let knowledge = tool_output("search_knowledge_base").unwrap();
                 let knowledge_id = knowledge
                     .pointer("/evidence/0/evidence_id")
@@ -3815,6 +4457,29 @@ mod tests {
             .iter()
             .any(|event| event.kind == "model_finished"));
         assert_eq!(result.error.unwrap().code, "provider_http_429");
+    }
+
+    #[tokio::test]
+    async fn later_provider_failure_preserves_completed_tool_evidence() {
+        let runtime = AgentRuntime::fixture();
+        let provider = ScriptedProvider::new(vec![
+            Ok(tool_call("call-diagnose", "analyze_timeline", json!({}))),
+            Err(ProviderError::upstream_status(400)),
+        ]);
+        let result = run_agent(
+            &provider,
+            &runtime,
+            input(&runtime, "run-provider-error-after-evidence"),
+            AgentRunLimits::default(),
+            AgentCancellation::default(),
+        )
+        .await;
+        assert_eq!(result.status, AgentRunStatus::PartiallyVerified);
+        assert!(result.report.is_some());
+        assert_eq!(result.error.unwrap().code, "provider_http_400");
+        assert!(result.trace.iter().any(|event| {
+            event.kind == "provider_failure_evidence_preserved"
+        }));
     }
 
     #[tokio::test]
