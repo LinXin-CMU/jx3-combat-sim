@@ -17,7 +17,7 @@ pub enum DomainClient {
     Wujie,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
 pub enum AnalysisTaskType {
     BaselineAnalysis,
@@ -32,6 +32,56 @@ pub enum AnalysisTaskType {
     MechanismExplanation,
     ReferenceLookup,
     GeneralAnalysis,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AnalysisSurface {
+    Simulation,
+    Equipment,
+    Agent,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RoutingStrategy {
+    StructuredHint,
+    HybridSemantic,
+    ScoredSignals,
+    SessionInheritance,
+    GeneralFallback,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RoutingCandidateV1 {
+    pub task_type: AnalysisTaskType,
+    pub score: u16,
+    pub lexical_score: u16,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_similarity_millis: Option<u16>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RoutingDecisionV1 {
+    pub strategy: RoutingStrategy,
+    pub confidence_basis_points: u16,
+    pub candidates: Vec<RoutingCandidateV1>,
+}
+
+impl Default for RoutingDecisionV1 {
+    fn default() -> Self {
+        Self {
+            strategy: RoutingStrategy::GeneralFallback,
+            confidence_basis_points: 0,
+            candidates: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SemanticRouteScoreV1 {
+    pub task_type: AnalysisTaskType,
+    pub similarity_millis: u16,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -160,6 +210,8 @@ pub struct AnalysisPlanV1 {
     pub resolved_scope: DomainScopeV1,
     pub playbook: AnalysisPlaybookV1,
     pub routing_signals: Vec<String>,
+    #[serde(default)]
+    pub routing_decision: RoutingDecisionV1,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -573,6 +625,17 @@ pub fn domain_index_hash<'a>(claims: impl Iterator<Item = &'a DomainClaimV1>) ->
 }
 
 pub fn select_analysis_plan(question: &str, scenario: &ScenarioSnapshotV1) -> AnalysisPlanV1 {
+    select_analysis_plan_routed(question, None, None, &[], None, scenario)
+}
+
+pub fn select_analysis_plan_routed(
+    question: &str,
+    task_hint: Option<AnalysisTaskType>,
+    surface: Option<AnalysisSurface>,
+    semantic_scores: &[SemanticRouteScoreV1],
+    prior_playbook_id: Option<&str>,
+    scenario: &ScenarioSnapshotV1,
+) -> AnalysisPlanV1 {
     let normalized = question.to_lowercase();
     let client = if contains_any(&normalized, &["无界", "分山劲·悟", "分山劲・悟", "wujie"])
     {
@@ -580,7 +643,43 @@ pub fn select_analysis_plan(question: &str, scenario: &ScenarioSnapshotV1) -> An
     } else {
         DomainClient::Flagship
     };
-    let (task_type, routing_signals) = classify_task(&normalized);
+    let (mut task_type, mut routing_signals, mut routing_decision) = if let Some(task_hint) = task_hint {
+        (
+            task_hint,
+            vec!["structured_task_hint".to_string()],
+            RoutingDecisionV1 {
+                strategy: RoutingStrategy::StructuredHint,
+                confidence_basis_points: 10_000,
+                candidates: vec![RoutingCandidateV1 {
+                    task_type: task_hint,
+                    score: 10_000,
+                    lexical_score: 0,
+                    semantic_similarity_millis: None,
+                }],
+            },
+        )
+    } else {
+        classify_task(&normalized, surface, semantic_scores)
+    };
+    if task_hint.is_none()
+        && task_type == AnalysisTaskType::GeneralAnalysis
+        && is_short_follow_up(&normalized)
+    {
+        if let Some(inherited) = prior_playbook_id.and_then(task_type_for_playbook) {
+            task_type = inherited;
+            routing_signals.push("inherited_session_playbook".to_string());
+            routing_decision = RoutingDecisionV1 {
+                strategy: RoutingStrategy::SessionInheritance,
+                confidence_basis_points: 7_500,
+                candidates: vec![RoutingCandidateV1 {
+                    task_type: inherited,
+                    score: 7_500,
+                    lexical_score: 0,
+                    semantic_similarity_millis: None,
+                }],
+            };
+        }
+    }
     let scope = DomainScopeV1 {
         client,
         game_version: scenario.game_version.clone(),
@@ -612,6 +711,7 @@ pub fn select_analysis_plan(question: &str, scenario: &ScenarioSnapshotV1) -> An
         resolved_scope: scope,
         playbook: playbook(task_type, client),
         routing_signals,
+        routing_decision,
     };
     let has_macro_input = scenario
         .simulation
@@ -1002,27 +1102,7 @@ pub fn select_analysis_plan_with_history(
     prior_playbook_id: Option<&str>,
     scenario: &ScenarioSnapshotV1,
 ) -> AnalysisPlanV1 {
-    let mut plan = select_analysis_plan(question, scenario);
-    if plan.task_type != AnalysisTaskType::GeneralAnalysis {
-        return plan;
-    }
-    let Some(task_type) = prior_playbook_id.and_then(task_type_for_playbook) else {
-        return plan;
-    };
-    plan.task_type = task_type;
-    plan.playbook = playbook(task_type, plan.resolved_scope.client);
-    plan.routing_signals
-        .push("inherited_session_playbook".to_string());
-    apply_equipment_contract(&mut plan, &question.to_lowercase());
-    apply_saved_artifact_contract(&mut plan, &question.to_lowercase());
-    if !plan
-        .routing_signals
-        .iter()
-        .any(|signal| signal == "saved_artifact_access_requested")
-    {
-        apply_rotation_diagnosis_contract(&mut plan, &question.to_lowercase(), scenario);
-    }
-    plan
+    select_analysis_plan_routed(question, None, None, &[], prior_playbook_id, scenario)
 }
 
 fn task_type_for_playbook(playbook_id: &str) -> Option<AnalysisTaskType> {
@@ -1156,113 +1236,222 @@ pub fn knowledge_prefetch(plan: &AnalysisPlanV1, question: &str) -> Option<Knowl
     })
 }
 
-fn classify_task(question: &str) -> (AnalysisTaskType, Vec<String>) {
-    let routes: &[(AnalysisTaskType, &[&str])] = &[
-        (
-            AnalysisTaskType::ReferenceLookup,
-            &["是谁", "作者", "名字", "昵称"],
-        ),
-        (
-            AnalysisTaskType::EncounterAdvice,
-            &[
-                "副本",
-                "boss",
-                "首领",
-                "阆风",
-                "千机源枢",
-                "老一",
-                "老二",
-                "老三",
-                "老四",
-            ],
-        ),
-        (
-            AnalysisTaskType::OrangeWeaponTiming,
-            &["橙武", "天下宏愿", "裂伤"],
-        ),
-        (
-            AnalysisTaskType::EquipmentAnalysis,
-            &["装备", "配装", "换这件", "换那件", "四件套", "4件套", "四切糕", "4切糕", "切糕", "套装"],
-        ),
-        (
-            AnalysisTaskType::HasteDecision,
-            &["加速", "14156", "30158", "206档", "206 和", "206和"],
-        ),
-        (
-            AnalysisTaskType::PracticalAdaptation,
-            &[
-                "实战适配",
-                "移动、转火",
-                "移动转火",
-                "移动、停手",
-                "移动停手",
-                "转火和停手",
-                "转火、停手",
-                "延迟适应",
-                "网络延迟变化",
-                "停手恢复",
-                "攻击距离或面向",
-            ],
-        ),
-        (
-            AnalysisTaskType::SavedArtifactAnalysis,
-            &[
-                "我保存",
-                "保存了",
-                "保存过",
-                "保存哪些",
-                "已保存",
-                "保存的宏",
-                "保存的循环",
-                "宏存档",
-                "循环存档",
-                "广场方案",
-            ],
-        ),
-        (AnalysisTaskType::MacroAnalysis, &["一键宏", "宏", "macro"]),
-        (
-            AnalysisTaskType::RotationStallDiagnosis,
-            &[
-                "空转",
-                "断档",
-                "卡住",
-                "没技能",
-                "等cd",
-                "等 cd",
-                "停手",
-                "断流血",
-                "循环漏洞",
-                "循环问题",
-            ],
-        ),
-        (
-            AnalysisTaskType::BaselineAnalysis,
-            &[
-                "输出基线",
-                "当前循环",
-                "基线",
-                "伤害构成",
-                "输出分析",
-                "调优",
-                "优化",
-            ],
-        ),
-        (
-            AnalysisTaskType::MechanismExplanation,
-            &["机制", "怎么算", "公式", "系数", "重置率", "为什么"],
-        ),
-    ];
-    for (task, signals) in routes {
-        let matched = signals
-            .iter()
-            .filter(|signal| question.contains(**signal))
-            .map(|signal| (*signal).to_string())
-            .collect::<Vec<_>>();
-        if !matched.is_empty() {
-            return (*task, matched);
+struct RouteProfile {
+    task_type: AnalysisTaskType,
+    signals: &'static [(&'static str, u16)],
+    prototypes: &'static [&'static str],
+}
+
+const ROUTE_PROFILES: &[RouteProfile] = &[
+    RouteProfile {
+        task_type: AnalysisTaskType::ReferenceLookup,
+        signals: &[("是谁", 8), ("作者", 7), ("昵称", 7), ("哪位", 6), ("名字", 4)],
+        prototypes: &["查询攻略作者、玩家身份、名字、昵称或资料来源是谁", "这篇攻略是谁写的，作者是哪位"],
+    },
+    RouteProfile {
+        task_type: AnalysisTaskType::EncounterAdvice,
+        signals: &[("阆风", 9), ("千机源枢", 9), ("副本", 7), ("boss", 7), ("首领", 7), ("老一", 4), ("老二", 4), ("老三", 4), ("老四", 4)],
+        prototypes: &["指定副本首领和阶段的实战打法、转火、移动与技能安排", "这个副本首领具体怎么打"],
+    },
+    RouteProfile {
+        task_type: AnalysisTaskType::OrangeWeaponTiming,
+        signals: &[("天下宏愿", 10), ("裂伤", 10), ("橙武", 8), ("神兵", 5)],
+        prototypes: &["橙武天下宏愿裂伤的伤害缺失、触发实现与循环对轴", "橙武效果如何安排时间轴"],
+    },
+    RouteProfile {
+        task_type: AnalysisTaskType::EquipmentAnalysis,
+        signals: &[("四切糕", 10), ("4切糕", 10), ("换这件", 9), ("换那件", 9), ("候选装备", 9), ("配装", 8), ("四件套", 8), ("4件套", 8), ("切糕", 7), ("套装", 6), ("装备", 5)],
+        prototypes: &["分析当前配装、单件装备替换、套装与切糕取舍、面板和DPS差异", "两种装备搭配该挑哪边", "换掉这件装备会提升还是下降"],
+    },
+    RouteProfile {
+        task_type: AnalysisTaskType::HasteDecision,
+        signals: &[("14156", 10), ("30158", 10), ("206档", 10), ("加速档", 9), ("206 和", 8), ("206和", 8), ("加速", 7)],
+        prototypes: &["比较加速档位、加速阈值、206与14156对循环和网络延迟的影响", "哪个加速档位更适合当前网络和循环"],
+    },
+    RouteProfile {
+        task_type: AnalysisTaskType::PracticalAdaptation,
+        signals: &[("实战适配", 10), ("网络延迟变化", 9), ("攻击距离或面向", 9), ("停手恢复", 8), ("移动转火", 8), ("移动、转火", 8), ("移动停手", 8), ("移动、停手", 8), ("转火和停手", 8), ("转火、停手", 8), ("延迟适应", 8), ("转火", 4), ("移动", 3)],
+        prototypes: &["评估循环在移动、转火、停手、目标变化和网络延迟下的实战适应性", "这套打法在实战跑动和转火时是否稳定"],
+    },
+    RouteProfile {
+        task_type: AnalysisTaskType::SavedArtifactAnalysis,
+        signals: &[("我保存", 10), ("保存了", 10), ("保存过", 10), ("保存哪些", 10), ("已保存", 9), ("保存的宏", 9), ("保存的循环", 9), ("宏存档", 9), ("循环存档", 9), ("战斗广场", 7), ("广场方案", 7), ("存档", 6)],
+        prototypes: &["列出、读取或比较用户本地已经保存的宏、循环、配装与战斗广场方案", "把我以前收起来的战斗方案列出来", "我之前存过哪些方案"],
+    },
+    RouteProfile {
+        task_type: AnalysisTaskType::MacroAnalysis,
+        signals: &[("分体态宏", 10), ("一键宏", 9), ("宏语句", 9), ("武学助手", 8), ("macro", 8), ("宏", 4)],
+        prototypes: &["理解一键宏、分体态宏或武学助手语句，分析判定顺序和手动循环差异", "读懂这段宏语句在游戏里怎么执行"],
+    },
+    RouteProfile {
+        task_type: AnalysisTaskType::RotationStallDiagnosis,
+        signals: &[("空转", 10), ("断档", 10), ("循环漏洞", 9), ("卡住", 8), ("没技能", 8), ("等cd", 8), ("等 cd", 8), ("断流血", 8), ("循环问题", 7), ("停手", 4)],
+        prototypes: &["先诊断循环时间轴中的空转、断档、等待、资源浪费和技能衔接问题", "为什么技能总是接不上，哪里卡手", "找出循环不连贯和浪费资源的位置"],
+    },
+    RouteProfile {
+        task_type: AnalysisTaskType::BaselineAnalysis,
+        signals: &[("输出基线", 10), ("伤害构成", 9), ("输出分析", 9), ("循环优缺点", 8), ("整体输出", 7), ("基线", 7), ("调优", 5), ("优化", 4), ("当前循环", 3)],
+        prototypes: &["分析当前循环的输出基线、伤害结构、节奏优缺点和主要瓶颈", "我手上的这套循环打得顺不顺", "整体输出表现和优缺点怎么样"],
+    },
+    RouteProfile {
+        task_type: AnalysisTaskType::MechanismExplanation,
+        signals: &[("重置率", 10), ("公式", 9), ("怎么算", 9), ("系数", 8), ("机制", 7), ("原理", 6)],
+        prototypes: &["解释技能机制、伤害公式、系数、概率、重置率及其证据来源", "这个数是怎么来的", "解释某个技能为什么这样结算"],
+    },
+];
+
+pub fn routing_semantic_prototypes() -> Vec<(AnalysisTaskType, &'static str)> {
+    ROUTE_PROFILES
+        .iter()
+        .flat_map(|profile| {
+            profile
+                .prototypes
+                .iter()
+                .map(move |prototype| (profile.task_type, *prototype))
+        })
+        .collect()
+}
+
+fn classify_task(
+    question: &str,
+    surface: Option<AnalysisSurface>,
+    semantic_scores: &[SemanticRouteScoreV1],
+) -> (AnalysisTaskType, Vec<String>, RoutingDecisionV1) {
+    let mut candidates = ROUTE_PROFILES
+        .iter()
+        .map(|profile| {
+            let matched = profile
+                .signals
+                .iter()
+                .filter(|(signal, _)| question.contains(*signal))
+                .collect::<Vec<_>>();
+            let lexical_score = matched.iter().map(|(_, weight)| *weight).sum::<u16>();
+            let semantic_similarity_millis = semantic_scores
+                .iter()
+                .filter(|score| score.task_type == profile.task_type)
+                .map(|score| score.similarity_millis)
+                .max();
+            let semantic_component = semantic_similarity_millis
+                .unwrap_or(0)
+                .saturating_sub(500)
+                .saturating_mul(8);
+            let surface_component = match (surface, profile.task_type) {
+                (Some(AnalysisSurface::Equipment), AnalysisTaskType::EquipmentAnalysis) => 500,
+                (Some(AnalysisSurface::Simulation), AnalysisTaskType::BaselineAnalysis | AnalysisTaskType::RotationStallDiagnosis | AnalysisTaskType::MacroAnalysis | AnalysisTaskType::PracticalAdaptation) => 180,
+                _ => 0,
+            };
+            let score = lexical_score
+                .saturating_mul(700)
+                .saturating_add(semantic_component)
+                .saturating_add(if lexical_score > 0 || semantic_component > 0 { surface_component } else { 0 });
+            let signals = matched
+                .into_iter()
+                .map(|(signal, _)| (*signal).to_string())
+                .collect::<Vec<_>>();
+            (
+                RoutingCandidateV1 {
+                    task_type: profile.task_type,
+                    score,
+                    lexical_score,
+                    semantic_similarity_millis,
+                },
+                signals,
+            )
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by(|(left, _), (right, _)| {
+        right
+            .score
+            .cmp(&left.score)
+            .then_with(|| right.lexical_score.cmp(&left.lexical_score))
+            .then_with(|| {
+                right
+                    .semantic_similarity_millis
+                    .cmp(&left.semantic_similarity_millis)
+            })
+            .then_with(|| left.task_type.cmp(&right.task_type))
+    });
+
+    let second_score = candidates.get(1).map(|(candidate, _)| candidate.score).unwrap_or(0);
+    let (selected, matched_signals, strategy, confidence) = if let Some((candidate, matched)) = candidates.first().cloned() {
+        let semantic = candidate.semantic_similarity_millis.unwrap_or(0);
+        let margin = candidate.score.saturating_sub(second_score);
+        let lexical_ready = candidate.lexical_score >= 3;
+        let semantic_ready = semantic >= 580 && margin >= 120;
+        let surface_semantic_ready = semantic >= 540
+            && margin >= 120
+            && matches!(
+                (surface, candidate.task_type),
+                (Some(AnalysisSurface::Equipment), AnalysisTaskType::EquipmentAnalysis)
+                    | (Some(AnalysisSurface::Simulation), AnalysisTaskType::BaselineAnalysis)
+                    | (Some(AnalysisSurface::Simulation), AnalysisTaskType::RotationStallDiagnosis)
+                    | (Some(AnalysisSurface::Simulation), AnalysisTaskType::MacroAnalysis)
+                    | (Some(AnalysisSurface::Simulation), AnalysisTaskType::PracticalAdaptation)
+            );
+        let ambiguous = margin < 80 && candidate.lexical_score < 8;
+        if (lexical_ready || semantic_ready || surface_semantic_ready) && !ambiguous {
+            let strategy = if semantic_scores.is_empty() {
+                RoutingStrategy::ScoredSignals
+            } else {
+                RoutingStrategy::HybridSemantic
+            };
+            let confidence = if candidate.lexical_score >= 8 {
+                9_000_u16.saturating_add(margin.min(1_000))
+            } else {
+                5_500_u16
+                    .saturating_add(margin.saturating_mul(2))
+                    .saturating_add(semantic.saturating_sub(500).saturating_mul(4))
+                    .min(9_500)
+            };
+            (candidate.task_type, matched, strategy, confidence)
+        } else {
+            (AnalysisTaskType::GeneralAnalysis, Vec::new(), RoutingStrategy::GeneralFallback, 0)
         }
+    } else {
+        (AnalysisTaskType::GeneralAnalysis, Vec::new(), RoutingStrategy::GeneralFallback, 0)
+    };
+
+    let mut routing_signals = matched_signals;
+    routing_signals.push(format!("routing_strategy:{strategy:?}"));
+    if let Some(surface) = surface {
+        routing_signals.push(format!("analysis_surface:{surface:?}"));
     }
-    (AnalysisTaskType::GeneralAnalysis, Vec::new())
+    let decision = RoutingDecisionV1 {
+        strategy,
+        confidence_basis_points: confidence,
+        candidates: candidates
+            .into_iter()
+            .filter(|(candidate, _)| {
+                candidate.score > 0 || candidate.semantic_similarity_millis.is_some()
+            })
+            .take(3)
+            .map(|(candidate, _)| candidate)
+            .collect(),
+    };
+    (selected, routing_signals, decision)
+}
+
+fn is_short_follow_up(question: &str) -> bool {
+    question.chars().count() <= 16
+        && contains_any(
+            question,
+            &[
+                "继续",
+                "接着",
+                "展开",
+                "详细说",
+                "然后呢",
+                "下一步",
+                "再看",
+                "再分析",
+                "这个呢",
+                "那个呢",
+                "还有呢",
+                "刚才",
+                "上一个",
+                "前面",
+            ],
+        )
 }
 
 fn playbook(task: AnalysisTaskType, client: DomainClient) -> AnalysisPlaybookV1 {
@@ -2111,6 +2300,93 @@ mod tests {
                 expected
             );
         }
+    }
+
+    #[test]
+    fn structured_task_hint_overrides_wording() {
+        let scenario = AgentRuntime::fixture().fixture_scenario();
+        let plan = select_analysis_plan_routed(
+            "为什么当前循环空转？",
+            Some(AnalysisTaskType::EquipmentAnalysis),
+            Some(AnalysisSurface::Equipment),
+            &[],
+            Some("rotation_stall_diagnosis"),
+            &scenario,
+        );
+        assert_eq!(plan.task_type, AnalysisTaskType::EquipmentAnalysis);
+        assert_eq!(plan.routing_decision.strategy, RoutingStrategy::StructuredHint);
+        assert_eq!(plan.routing_decision.confidence_basis_points, 10_000);
+        assert_eq!(plan.playbook.playbook_id, "equipment_build_analysis");
+    }
+
+    #[test]
+    fn scorer_keeps_ranked_candidates_instead_of_first_keyword() {
+        let scenario = AgentRuntime::fixture().fixture_scenario();
+        let saved = select_analysis_plan("我保存了哪些宏？先列出来再决定比较哪两个。", &scenario);
+        assert_eq!(saved.task_type, AnalysisTaskType::SavedArtifactAnalysis);
+        assert_eq!(saved.routing_decision.strategy, RoutingStrategy::ScoredSignals);
+        assert_eq!(saved.routing_decision.candidates[0].task_type, AnalysisTaskType::SavedArtifactAnalysis);
+        assert!(saved.routing_decision.candidates.iter().any(|item| item.task_type == AnalysisTaskType::MacroAnalysis));
+
+        let practical = select_analysis_plan("移动和转火时发生空转，评估这套循环的实战适配。", &scenario);
+        assert_eq!(practical.task_type, AnalysisTaskType::PracticalAdaptation);
+        assert!(practical.routing_decision.candidates.iter().any(|item| item.task_type == AnalysisTaskType::RotationStallDiagnosis));
+    }
+
+    #[test]
+    fn semantic_candidate_routes_a_paraphrase_without_keyword_hits() {
+        let scenario = AgentRuntime::fixture().fixture_scenario();
+        let scores = [
+            SemanticRouteScoreV1 { task_type: AnalysisTaskType::HasteDecision, similarity_millis: 720 },
+            SemanticRouteScoreV1 { task_type: AnalysisTaskType::EquipmentAnalysis, similarity_millis: 650 },
+        ];
+        let plan = select_analysis_plan_routed(
+            "哪个档位更适合我现在的网络情况？",
+            None,
+            Some(AnalysisSurface::Simulation),
+            &scores,
+            None,
+            &scenario,
+        );
+        assert_eq!(plan.task_type, AnalysisTaskType::HasteDecision);
+        assert_eq!(plan.routing_decision.strategy, RoutingStrategy::HybridSemantic);
+        assert_eq!(plan.routing_decision.candidates[0].semantic_similarity_millis, Some(720));
+    }
+
+    #[test]
+    fn weak_signals_fall_back_and_do_not_inherit_an_unrelated_task() {
+        let scenario = AgentRuntime::fixture().fixture_scenario();
+        let vague = select_analysis_plan_routed(
+            "帮我看看这个",
+            None,
+            Some(AnalysisSurface::Equipment),
+            &[],
+            Some("equipment_build_analysis"),
+            &scenario,
+        );
+        assert_eq!(vague.task_type, AnalysisTaskType::GeneralAnalysis);
+        assert!(vague.routing_decision.candidates.is_empty());
+
+        let weak = select_analysis_plan_routed(
+            "为什么？",
+            None,
+            None,
+            &[],
+            Some("current_rotation_baseline"),
+            &scenario,
+        );
+        assert_eq!(weak.task_type, AnalysisTaskType::GeneralAnalysis);
+        assert!(weak.routing_decision.candidates.is_empty());
+        assert!(!weak.routing_signals.contains(&"inherited_session_playbook".to_string()));
+    }
+
+    #[test]
+    fn old_serialized_plans_default_the_routing_decision() {
+        let scenario = AgentRuntime::fixture().fixture_scenario();
+        let mut value = serde_json::to_value(select_analysis_plan("分析当前循环输出基线", &scenario)).unwrap();
+        value.as_object_mut().unwrap().remove("routing_decision");
+        let restored: AnalysisPlanV1 = serde_json::from_value(value).unwrap();
+        assert_eq!(restored.routing_decision.strategy, RoutingStrategy::GeneralFallback);
     }
 
     #[test]

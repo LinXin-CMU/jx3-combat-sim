@@ -1,4 +1,7 @@
-use fastembed::{EmbeddingModel, TextEmbedding, TextInitOptions};
+use fastembed::{
+    EmbeddingModel, InitOptionsUserDefined, Pooling, TextEmbedding, TextInitOptions,
+    TokenizerFiles, UserDefinedEmbeddingModel,
+};
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
@@ -10,6 +13,8 @@ pub const DENSE_DIMENSION: usize = 512;
 pub const DENSE_MIN_SIMILARITY: f32 = 0.45;
 const CACHE_MAGIC: &[u8; 8] = b"JX3EMB01";
 const MAX_CACHE_BYTES: u64 = 128 * 1024 * 1024;
+const MAX_LOCAL_MODEL_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_LOCAL_TOKENIZER_BYTES: u64 = 16 * 1024 * 1024;
 const EMBED_BATCH_SIZE: usize = 32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,6 +64,7 @@ pub struct DenseHit {
 pub struct DenseKnowledgeIndex {
     model: Mutex<TextEmbedding>,
     embeddings: Vec<Vec<f32>>,
+    routing_cache: Mutex<Option<(Vec<String>, Vec<Vec<f32>>)>>,
     cache_state: DenseCacheState,
 }
 
@@ -87,12 +93,7 @@ impl DenseKnowledgeIndex {
         })?;
 
         eprintln!("[agent][knowledge] 正在加载本地向量模型 {DENSE_MODEL_ID}");
-        let options = TextInitOptions::new(EmbeddingModel::BGESmallZHV15)
-            .with_cache_dir(model_cache)
-            .with_show_download_progress(false)
-            .with_intra_threads(4);
-        let mut model = TextEmbedding::try_new(options)
-            .map_err(|error| DenseError::new("dense_model_init_failed", error.to_string()))?;
+        let mut model = load_embedding_model(&model_cache)?;
 
         let cache_path = cache_path(cache_root, corpus_hash);
         let (embeddings, cache_state) = match read_cache(&cache_path, corpus_hash, texts.len()) {
@@ -132,6 +133,7 @@ impl DenseKnowledgeIndex {
         Ok(Self {
             model: Mutex::new(model),
             embeddings,
+            routing_cache: Mutex::new(None),
             cache_state,
         })
     }
@@ -174,6 +176,143 @@ impl DenseKnowledgeIndex {
         });
         Ok(hits)
     }
+
+    pub fn similarities(&self, query: &str, candidates: &[String]) -> Result<Vec<f32>, DenseError> {
+        if candidates.is_empty() {
+            return Ok(Vec::new());
+        }
+        let cached = self
+            .routing_cache
+            .lock()
+            .map_err(|_| DenseError::new("dense_routing_cache_lock_failed", "routing cache lock poisoned"))?
+            .as_ref()
+            .filter(|(texts, _)| texts.as_slice() == candidates)
+            .map(|(_, embeddings)| embeddings.clone());
+        let candidate_embeddings = if let Some(cached) = cached {
+            cached
+        } else {
+            let mut model = self
+                .model
+                .lock()
+                .map_err(|_| DenseError::new("dense_model_lock_failed", "model lock poisoned"))?;
+            let mut embeddings = model
+                .embed(candidates, Some(EMBED_BATCH_SIZE))
+                .map_err(|error| DenseError::new("dense_routing_failed", error.to_string()))?;
+            validate_and_normalize(&mut embeddings, candidates.len())?;
+            drop(model);
+            *self
+                .routing_cache
+                .lock()
+                .map_err(|_| DenseError::new("dense_routing_cache_lock_failed", "routing cache lock poisoned"))? =
+                Some((candidates.to_vec(), embeddings.clone()));
+            embeddings
+        };
+        let mut model = self
+            .model
+            .lock()
+            .map_err(|_| DenseError::new("dense_model_lock_failed", "model lock poisoned"))?;
+        let mut query_embeddings = model
+            .embed([query], Some(1))
+            .map_err(|error| DenseError::new("dense_routing_failed", error.to_string()))?;
+        validate_and_normalize(&mut query_embeddings, 1)?;
+        let query_embedding = &query_embeddings[0];
+        Ok(candidate_embeddings
+            .iter()
+            .map(|embedding| dot(query_embedding, embedding))
+            .collect())
+    }
+}
+
+fn load_embedding_model(model_cache: &Path) -> Result<TextEmbedding, DenseError> {
+    if let Ok(snapshot) = local_model_snapshot(model_cache) {
+        eprintln!("[agent][knowledge] 使用已缓存的本地 BGE 模型文件");
+        return load_local_embedding_model(&snapshot);
+    }
+    let options = TextInitOptions::new(EmbeddingModel::BGESmallZHV15)
+        .with_cache_dir(model_cache.to_path_buf())
+        .with_show_download_progress(false)
+        .with_intra_threads(4);
+    TextEmbedding::try_new(options)
+        .map_err(|error| DenseError::new("dense_model_init_failed", error.to_string()))
+}
+
+fn local_model_snapshot(model_cache: &Path) -> Result<PathBuf, DenseError> {
+    let snapshots = model_cache
+        .join("models--Xenova--bge-small-zh-v1.5")
+        .join("snapshots");
+    let mut candidates = fs::read_dir(&snapshots)
+        .map_err(|error| DenseError::new("dense_local_model_absent", error.to_string()))?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .filter(|path| {
+            [
+                "onnx/model.onnx",
+                "tokenizer.json",
+                "config.json",
+                "special_tokens_map.json",
+                "tokenizer_config.json",
+            ]
+            .iter()
+            .all(|relative| path.join(relative).is_file())
+        })
+        .collect::<Vec<_>>();
+    candidates.sort();
+    candidates
+        .pop()
+        .ok_or_else(|| DenseError::new("dense_local_model_absent", "complete snapshot not found"))
+}
+
+fn read_bounded_model_file(
+    path: &Path,
+    byte_limit: u64,
+    code: &'static str,
+) -> Result<Vec<u8>, DenseError> {
+    let metadata = fs::metadata(path)
+        .map_err(|error| DenseError::new(code, error.to_string()))?;
+    if metadata.len() == 0 || metadata.len() > byte_limit {
+        return Err(DenseError::new(code, "cached model file size is invalid"));
+    }
+    fs::read(path).map_err(|error| DenseError::new(code, error.to_string()))
+}
+
+fn load_local_embedding_model(snapshot: &Path) -> Result<TextEmbedding, DenseError> {
+    let tokenizer_files = TokenizerFiles {
+        tokenizer_file: read_bounded_model_file(
+            &snapshot.join("tokenizer.json"),
+            MAX_LOCAL_TOKENIZER_BYTES,
+            "dense_local_tokenizer_invalid",
+        )?,
+        config_file: read_bounded_model_file(
+            &snapshot.join("config.json"),
+            MAX_LOCAL_TOKENIZER_BYTES,
+            "dense_local_config_invalid",
+        )?,
+        special_tokens_map_file: read_bounded_model_file(
+            &snapshot.join("special_tokens_map.json"),
+            MAX_LOCAL_TOKENIZER_BYTES,
+            "dense_local_special_tokens_invalid",
+        )?,
+        tokenizer_config_file: read_bounded_model_file(
+            &snapshot.join("tokenizer_config.json"),
+            MAX_LOCAL_TOKENIZER_BYTES,
+            "dense_local_tokenizer_config_invalid",
+        )?,
+    };
+    let model = UserDefinedEmbeddingModel::new(
+        read_bounded_model_file(
+            &snapshot.join("onnx").join("model.onnx"),
+            MAX_LOCAL_MODEL_BYTES,
+            "dense_local_onnx_invalid",
+        )?,
+        tokenizer_files,
+    )
+    .with_pooling(Pooling::Mean);
+    TextEmbedding::try_new_from_user_defined(
+        model,
+        InitOptionsUserDefined::default().with_intra_threads(4),
+    )
+    .map_err(|error| DenseError::new("dense_local_model_init_failed", error.to_string()))
 }
 
 fn cache_path(cache_root: &Path, corpus_hash: &str) -> PathBuf {

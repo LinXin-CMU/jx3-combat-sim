@@ -363,6 +363,27 @@ pub struct KnowledgeIndex {
 }
 
 impl KnowledgeIndex {
+    pub(crate) fn semantic_route_similarities(
+        &self,
+        question: &str,
+        prototypes: &[String],
+    ) -> Result<Vec<u16>, String> {
+        let dense = self.dense.as_ref().ok_or_else(|| {
+            self.dense_fallback_code
+                .clone()
+                .unwrap_or_else(|| "dense_unavailable".to_string())
+        })?;
+        dense
+            .similarities(question, prototypes)
+            .map(|scores| {
+                scores
+                    .into_iter()
+                    .map(|score| (score.clamp(0.0, 1.0) * 1_000.0).round() as u16)
+                    .collect()
+            })
+            .map_err(|error| error.code.to_string())
+    }
+
     pub fn from_env() -> Result<Self, KnowledgeIndexError> {
         let root = env::var_os(KNOWLEDGE_ROOT_ENV).ok_or(KnowledgeIndexError::NotConfigured)?;
         let mut index = Self::load(Path::new(&root))?;

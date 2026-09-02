@@ -12,8 +12,9 @@ use tokio::sync::Notify;
 use super::domain::select_analysis_plan;
 use super::domain::{
     build_evidence_pack, evidence_pack_model_context, knowledge_prefetch, plan_model_context,
-    select_analysis_plan_with_history, trace_annotation, AnalysisPlanV1, AnalysisTaskType,
-    EvidencePackV1, EvidenceSufficiency, equipment_focused_comparison_requested,
+    routing_semantic_prototypes, select_analysis_plan_routed, trace_annotation, AnalysisPlanV1,
+    AnalysisSurface, AnalysisTaskType, EvidencePackV1, EvidenceSufficiency,
+    SemanticRouteScoreV1, equipment_focused_comparison_requested,
     equipment_strategy_comparison_requested,
 };
 use super::evidence::validate_trace_id;
@@ -96,6 +97,10 @@ pub struct AgentRunInput {
     pub session_context: Option<String>,
     /// The last server-selected playbook. This is trusted routing state, not model prose.
     pub session_playbook_id: Option<String>,
+    /// A typed client hint. It cannot bypass server tool allowlists or grant write access.
+    pub task_hint: Option<AnalysisTaskType>,
+    /// Client surface context used only as a low-weight prior, never as authorization.
+    pub analysis_surface: Option<AnalysisSurface>,
     /// Structured, bounded context captured by the equipment configurator.
     pub equipment_workspace: Option<super::EquipmentWorkspaceV1>,
 }
@@ -538,11 +543,45 @@ pub async fn run_agent_recorded(
 ) -> AgentRunResultV1 {
     let started = Instant::now();
     let prompt = agent_prompt_v22();
-    let analysis_plan = select_analysis_plan_with_history(
+    let semantic_prototypes = routing_semantic_prototypes();
+    let semantic_result = if input.task_hint.is_none() {
+        runtime.knowledge().map(|knowledge| {
+            let texts = semantic_prototypes
+                .iter()
+                .map(|(_, prototype)| (*prototype).to_string())
+                .collect::<Vec<_>>();
+            knowledge.semantic_route_similarities(&input.question, &texts)
+        })
+    } else {
+        None
+    };
+    let semantic_scores = semantic_result
+        .as_ref()
+        .and_then(|result| result.as_ref().ok())
+        .map(|similarities| {
+            semantic_prototypes
+                .iter()
+                .zip(similarities)
+                .map(|((task_type, _), similarity_millis)| SemanticRouteScoreV1 {
+                    task_type: *task_type,
+                    similarity_millis: *similarity_millis,
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let mut analysis_plan = select_analysis_plan_routed(
         &input.question,
+        input.task_hint,
+        input.analysis_surface,
+        &semantic_scores,
         input.session_playbook_id.as_deref(),
         &input.scenario,
     );
+    if let Some(Err(code)) = semantic_result {
+        analysis_plan
+            .routing_signals
+            .push(format!("semantic_router_fallback:{code}"));
+    }
     let mut accounting = AgentRunAccountingV1::default();
     let mut trace = TraceCollector::new(event_sink, analysis_plan.clone(), limits.clone());
     record_replay(
@@ -553,6 +592,8 @@ pub async fn run_agent_recorded(
             "scenario": &input.scenario,
             "session_context": &input.session_context,
             "session_playbook_id": &input.session_playbook_id,
+            "task_hint": &input.task_hint,
+            "analysis_surface": &input.analysis_surface,
             "equipment_workspace": &input.equipment_workspace,
             "provider_profile": provider.profile_id(),
             "model": provider.model(),
@@ -3973,6 +4014,8 @@ mod tests {
             scenario: scenario(runtime),
             session_context: None,
             session_playbook_id: None,
+            task_hint: None,
+            analysis_surface: None,
             equipment_workspace: None,
         }
     }

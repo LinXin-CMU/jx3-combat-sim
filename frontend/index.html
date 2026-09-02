@@ -241,14 +241,14 @@
               <h3>从一个可验证的问题开始</h3>
               <p>先在“循环模拟”准备场景，再问 Agent 当前攻略、输出基线、候选改动或时间轴异常。引用资料会标明赛季与原始来源。</p>
               <div class="agent-starter-grid">
-                <button class="sim-btn" data-agent-question="这套循环的整体输出和伤害结构怎么样？">分析当前基线</button>
-                <button class="sim-btn" data-agent-question="这套循环哪里顺，哪里可能在空转或浪费资源？">诊断时间轴</button>
-                <button class="sim-btn" data-agent-question="结合当前版本攻略，解释这套循环的核心思路。">查询版本攻略</button>
-                <button class="sim-btn" data-agent-question="为了更准确地判断这套循环，下一步最值得检查什么？">下一步分析</button>
-                <button class="sim-btn" data-agent-question="这套循环做得好的地方和最主要的问题是什么？">分析循环优缺点</button>
-                <button class="sim-btn" data-agent-question="这是宏循环还是手动循环？它的执行特点是什么？">识别输入模式</button>
-                <button class="sim-btn" data-agent-question="我保存了哪些可以互相比较的宏或循环？">选择保存方案</button>
-                <button class="sim-btn" data-agent-question="这套循环在移动、转火、停手和网络延迟变化时表现怎么样？">分析实战适配</button>
+                <button class="sim-btn" data-agent-question="这套循环的整体输出和伤害结构怎么样？" data-agent-task-hint="baseline_analysis">分析当前基线</button>
+                <button class="sim-btn" data-agent-question="这套循环哪里顺，哪里可能在空转或浪费资源？" data-agent-task-hint="rotation_stall_diagnosis">诊断时间轴</button>
+                <button class="sim-btn" data-agent-question="结合当前版本攻略，解释这套循环的核心思路。" data-agent-task-hint="general_analysis">查询版本攻略</button>
+                <button class="sim-btn" data-agent-question="为了更准确地判断这套循环，下一步最值得检查什么？" data-agent-task-hint="general_analysis">下一步分析</button>
+                <button class="sim-btn" data-agent-question="这套循环做得好的地方和最主要的问题是什么？" data-agent-task-hint="baseline_analysis">分析循环优缺点</button>
+                <button class="sim-btn" data-agent-question="这是宏循环还是手动循环？它的执行特点是什么？" data-agent-task-hint="macro_analysis">识别输入模式</button>
+                <button class="sim-btn" data-agent-question="我保存了哪些可以互相比较的宏或循环？" data-agent-task-hint="saved_artifact_analysis">选择保存方案</button>
+                <button class="sim-btn" data-agent-question="这套循环在移动、转火、停手和网络延迟变化时表现怎么样？" data-agent-task-hint="practical_adaptation">分析实战适配</button>
               </div>
             </div>
           </section>
@@ -2030,10 +2030,10 @@
         </div>
 
         <div class="sim-ai-quick" id="sim_ai_quick" aria-label="常用分析">
-          <button type="button" class="sim-btn" data-sim-ai-question="这套循环的整体输出和伤害结构怎么样？">基线分析</button>
-          <button type="button" class="sim-btn" data-sim-ai-question="这套循环哪里顺，哪里可能在空转或浪费资源？">时间轴诊断</button>
-          <button type="button" class="sim-btn" data-sim-ai-question="结合当前版本攻略，解释这套循环的核心思路。">版本攻略</button>
-          <button type="button" class="sim-btn" data-sim-ai-question="为了更准确地判断这套循环，下一步最值得检查什么？">下一步分析</button>
+          <button type="button" class="sim-btn" data-sim-ai-question="这套循环的整体输出和伤害结构怎么样？" data-agent-task-hint="baseline_analysis">基线分析</button>
+          <button type="button" class="sim-btn" data-sim-ai-question="这套循环哪里顺，哪里可能在空转或浪费资源？" data-agent-task-hint="rotation_stall_diagnosis">时间轴诊断</button>
+          <button type="button" class="sim-btn" data-sim-ai-question="结合当前版本攻略，解释这套循环的核心思路。" data-agent-task-hint="general_analysis">版本攻略</button>
+          <button type="button" class="sim-btn" data-sim-ai-question="为了更准确地判断这套循环，下一步最值得检查什么？" data-agent-task-hint="general_analysis">下一步分析</button>
         </div>
 
         <section class="sim-ai-chat" id="sim_ai_chat" aria-live="polite">

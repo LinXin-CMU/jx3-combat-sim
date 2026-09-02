@@ -28,7 +28,7 @@ use super::{
     },
     provider::LlmProvider,
     session::{contains_likely_secret, AgentSessionEventV1, AgentSessionStore},
-    AgentRuntime, ScenarioSnapshotV1,
+    AgentRuntime, AnalysisSurface, AnalysisTaskType, ScenarioSnapshotV1,
 };
 
 pub const AGENT_RUN_CREATED_SCHEMA_V1: &str = "agent-run-created/v1";
@@ -46,6 +46,10 @@ pub struct CreateAgentRunRequest {
     pub provider_profile: String,
     #[serde(default)]
     pub session_id: Option<String>,
+    #[serde(default)]
+    pub task_hint: Option<AnalysisTaskType>,
+    #[serde(default)]
+    pub analysis_surface: Option<AnalysisSurface>,
     pub simulation: SimulateRequest,
     #[serde(default)]
     pub equipment_workspace: Option<super::EquipmentWorkspaceV1>,
@@ -562,6 +566,8 @@ pub async fn create_run_handler(
         scenario: scenario.clone(),
         session_context: None,
         session_playbook_id: None,
+        task_hint: request.task_hint,
+        analysis_surface: request.analysis_surface,
         equipment_workspace: request.equipment_workspace,
     };
     match state
@@ -772,6 +778,8 @@ mod tests {
             scenario,
             session_context: None,
             session_playbook_id: None,
+            task_hint: None,
+            analysis_surface: None,
             equipment_workspace: None,
         };
         let record = manager
@@ -860,6 +868,8 @@ mod tests {
             scenario: runtime.fixture_scenario(),
             session_context: None,
             session_playbook_id: None,
+            task_hint: None,
+            analysis_surface: None,
             equipment_workspace: None,
         };
         let record = manager
@@ -880,6 +890,8 @@ mod tests {
             scenario: second_runtime.fixture_scenario(),
             session_context: None,
             session_playbook_id: None,
+            task_hint: None,
+            analysis_surface: None,
             equipment_workspace: None,
         };
         let error = match manager

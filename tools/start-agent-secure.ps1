@@ -3,6 +3,7 @@ param(
   [string]$ConfigPath = '',
   [string]$UserdataPath = '',
   [string]$KnowledgeRoot = '',
+  [string]$KnowledgeCachePath = '',
   [ValidateSet('embedded', 'bm25')]
   [string]$KnowledgeRetrieval = 'embedded',
   [string]$EmbeddingEndpoint = 'https://huggingface.co',
@@ -34,7 +35,11 @@ $resolvedExe = (Resolve-Path -LiteralPath $exe).Path
 $resolvedConfig = (Resolve-Path -LiteralPath $ConfigPath).Path
 $resolvedUserdata = (Resolve-Path -LiteralPath $UserdataPath).Path
 $resolvedKnowledge = if ($KnowledgeRoot) { (Resolve-Path -LiteralPath $KnowledgeRoot).Path } else { $null }
-$knowledgeCache = Join-Path $resolvedUserdata 'knowledge_index\v1'
+$knowledgeCache = if ($KnowledgeCachePath) {
+  [IO.Path]::GetFullPath($KnowledgeCachePath)
+} else {
+  Join-Path $resolvedUserdata 'knowledge_index\v1'
+}
 New-Item -ItemType Directory -Path $knowledgeCache -Force | Out-Null
 $credential = [Environment]::GetEnvironmentVariable($ApiKeyEnv, 'User')
 if ([string]::IsNullOrWhiteSpace($credential)) {

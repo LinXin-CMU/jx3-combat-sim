@@ -160,6 +160,13 @@
     return node;
   }
 
+  function setPromptWithHint(input, question, taskHint) {
+    input.value = question || '';
+    if (taskHint) input.dataset.agentTaskHint = taskHint;
+    else delete input.dataset.agentTaskHint;
+    input.focus();
+  }
+
   function setStatus(text, isError) {
     els.status.textContent = text;
     els.status.classList.toggle('agent-error', !!isError);
@@ -1245,14 +1252,18 @@
     welcome.appendChild(element('p', '', '先在“循环模拟”准备场景，再问 Agent 当前攻略、输出基线、候选改动或时间轴异常。引用资料会标明赛季与原始来源。'));
     const starters = element('div', 'agent-starter-grid');
     [
-      ['分析当前基线', '这套循环的整体输出和伤害结构怎么样？'],
-      ['诊断时间轴', '这套循环哪里顺，哪里可能在空转或浪费资源？'],
-      ['查询版本攻略', '结合当前版本攻略，解释这套循环的核心思路。'],
-      ['下一步分析', '为了更准确地判断这套循环，下一步最值得检查什么？'],
-    ].forEach(([label, question]) => {
+      ['分析当前基线', '这套循环的整体输出和伤害结构怎么样？', 'baseline_analysis'],
+      ['诊断时间轴', '这套循环哪里顺，哪里可能在空转或浪费资源？', 'rotation_stall_diagnosis'],
+      ['查询版本攻略', '结合当前版本攻略，解释这套循环的核心思路。', 'general_analysis'],
+      ['下一步分析', '为了更准确地判断这套循环，下一步最值得检查什么？', 'general_analysis'],
+      ['分析循环优缺点', '这套循环做得好的地方和最主要的问题是什么？', 'baseline_analysis'],
+      ['识别输入模式', '这是宏循环还是手动循环？它的执行特点是什么？', 'macro_analysis'],
+      ['选择保存方案', '我保存了哪些可以互相比较的宏或循环？', 'saved_artifact_analysis'],
+      ['分析实战适配', '这套循环在移动、转火、停手和网络延迟变化时表现怎么样？', 'practical_adaptation'],
+    ].forEach(([label, question, taskHint]) => {
       const button = element('button', 'sim-btn', label);
       button.type = 'button';
-      button.addEventListener('click', () => { els.question.value = question; els.question.focus(); });
+      button.addEventListener('click', () => setPromptWithHint(els.question, question, taskHint));
       starters.appendChild(button);
     });
     welcome.appendChild(starters);
@@ -1414,6 +1425,8 @@
       const payload = {
         question,
         provider_profile: els.dockProvider.value,
+        task_hint: els.dockQuestion.dataset.agentTaskHint || undefined,
+        analysis_surface: dockMode,
         simulation: captured.simulation,
         equipment_workspace: captured.equipment_workspace || undefined,
       };
@@ -1430,6 +1443,7 @@
       els.dockSession.textContent = `会话 · ${body.session_id.slice(0, 18)}…`;
       dockTrace.wrap.querySelector('.sim-ai-progress-run-id').textContent = body.run_id;
       els.dockQuestion.value = '';
+      delete els.dockQuestion.dataset.agentTaskHint;
       setStatus(`运行中 · 场景 ${body.scenario_hash.slice(0, 12)}…`);
       connectDockStream(body.stream_url);
       await loadSessions();
@@ -1523,6 +1537,8 @@
       const payload = {
         question,
         provider_profile: els.provider.value,
+        task_hint: els.question.dataset.agentTaskHint || undefined,
+        analysis_surface: 'agent',
         simulation: captured.simulation,
       };
       if (currentSessionId) payload.session_id = currentSessionId;
@@ -1537,6 +1553,7 @@
       currentSessionId = body.session_id;
       activeTrace.wrap.querySelector('.agent-trace-run-id').textContent = body.run_id;
       els.question.value = '';
+      delete els.question.dataset.agentTaskHint;
       setStatus(`运行中 · ${body.run_id} · 场景 ${body.scenario_hash.slice(0, 12)}…`);
       connectStream(body.stream_url);
       await loadSessions();
@@ -1745,24 +1762,24 @@
 
   const dockQuestions = {
     simulation: [
-      ['基线分析', '这套循环的整体输出和伤害结构怎么样？'],
-      ['时间轴诊断', '这套循环哪里顺，哪里可能在空转或浪费资源？'],
-      ['版本攻略', '结合当前版本攻略，解释这套循环的核心思路。'],
-      ['下一步分析', '为了更准确地判断这套循环，下一步最值得检查什么？'],
-      ['循环优缺点', '这套循环做得好的地方和最主要的问题是什么？'],
-      ['识别输入模式', '这是宏循环还是手动循环？它的执行特点是什么？'],
-      ['保存方案', '我保存了哪些可以互相比较的宏或循环？'],
-      ['实战适配', '这套循环在移动、转火、停手和网络延迟变化时表现怎么样？'],
+      ['基线分析', '这套循环的整体输出和伤害结构怎么样？', 'baseline_analysis'],
+      ['时间轴诊断', '这套循环哪里顺，哪里可能在空转或浪费资源？', 'rotation_stall_diagnosis'],
+      ['版本攻略', '结合当前版本攻略，解释这套循环的核心思路。', 'general_analysis'],
+      ['下一步分析', '为了更准确地判断这套循环，下一步最值得检查什么？', 'general_analysis'],
+      ['循环优缺点', '这套循环做得好的地方和最主要的问题是什么？', 'baseline_analysis'],
+      ['识别输入模式', '这是宏循环还是手动循环？它的执行特点是什么？', 'macro_analysis'],
+      ['保存方案', '我保存了哪些可以互相比较的宏或循环？', 'saved_artifact_analysis'],
+      ['实战适配', '这套循环在移动、转火、停手和网络延迟变化时表现怎么样？', 'practical_adaptation'],
     ],
     equipment: [
-      ['当前配装', '我当前配装怎么样？哪些属性、套装和特效最影响这套循环？'],
-      ['单件替换', '把我标记的候选装备换上会怎样？对比面板和当前循环表现。'],
-      ['套装 vs 切糕', '我的当前条件下，穿四件套还是四切糕更好？'],
-      ['属性短板', '当前配装最该补哪项属性？为什么？'],
-      ['加速档位', '当前加速档适合这套武器、循环和网络延迟吗？'],
-      ['套装效果', '当前激活了哪些套装效果？它们怎样影响技能和循环？'],
-      ['保存配装', '我保存了哪些可以和当前配装比较的方案？'],
-      ['替换优先级', '当前最值得优先更换哪个装备部位？'],
+      ['当前配装', '我当前配装怎么样？哪些属性、套装和特效最影响这套循环？', 'equipment_analysis'],
+      ['单件替换', '把我标记的候选装备换上会怎样？对比面板和当前循环表现。', 'equipment_analysis'],
+      ['套装 vs 切糕', '我的当前条件下，穿四件套还是四切糕更好？', 'equipment_analysis'],
+      ['属性短板', '当前配装最该补哪项属性？为什么？', 'equipment_analysis'],
+      ['加速档位', '当前加速档适合这套武器、循环和网络延迟吗？', 'haste_decision'],
+      ['套装效果', '当前激活了哪些套装效果？它们怎样影响技能和循环？', 'equipment_analysis'],
+      ['保存配装', '我保存了哪些可以和当前配装比较的方案？', 'saved_artifact_analysis'],
+      ['替换优先级', '当前最值得优先更换哪个装备部位？', 'equipment_analysis'],
     ],
   };
 
@@ -1783,8 +1800,8 @@
       ? '问装备替换、套装取舍、属性和当前循环 DPS…'
       : '问当前攻略、循环基线、时间轴或候选改动…';
     if (els.dockQuick) {
-      els.dockQuick.innerHTML = dockQuestions[next].map(([label, question]) =>
-        `<button type="button" class="sim-btn" data-agent-dock-question="${question.replaceAll('&', '&amp;').replaceAll('"', '&quot;')}">${label}</button>`
+      els.dockQuick.innerHTML = dockQuestions[next].map(([label, question, taskHint]) =>
+        `<button type="button" class="sim-btn" data-agent-dock-question="${question.replaceAll('&', '&amp;').replaceAll('"', '&quot;')}" data-agent-task-hint="${taskHint}">${label}</button>`
       ).join('');
     }
     updateScenarioState();
@@ -1835,15 +1852,21 @@
     const button = event.target.closest('[data-agent-dock-question], [data-sim-ai-question]');
     if (!button) return;
     setDockOpen(true);
-    els.dockQuestion.value = button.dataset.agentDockQuestion || button.dataset.simAiQuestion || '';
-    els.dockQuestion.focus();
+    setPromptWithHint(
+      els.dockQuestion,
+      button.dataset.agentDockQuestion || button.dataset.simAiQuestion || '',
+      button.dataset.agentTaskHint || ''
+    );
   });
   window.addEventListener('jx3-equip-ai-focus', event => {
     syncDockMode();
     const focus = event.detail || {};
     setDockOpen(true);
-    els.dockQuestion.value = `把当前${focus.position || '部位'}的“${focus.current_name || '当前装备'}”换成“${focus.candidate_name || '候选装备'}”怎么样？展示换前换后面板，并用当前循环实测 DPS 和伤害构成。`;
-    els.dockQuestion.focus();
+    setPromptWithHint(
+      els.dockQuestion,
+      `把当前${focus.position || '部位'}的“${focus.current_name || '当前装备'}”换成“${focus.candidate_name || '候选装备'}”怎么样？展示换前换后面板，并用当前循环实测 DPS 和伤害构成。`,
+      'equipment_analysis'
+    );
   });
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape' && els.dock?.classList.contains('open') && !activeRun) {
@@ -1857,8 +1880,14 @@
     }
   });
   document.querySelectorAll('[data-agent-question]').forEach(button => {
-    button.addEventListener('click', () => { els.question.value = button.dataset.agentQuestion; els.question.focus(); });
+    button.addEventListener('click', () => setPromptWithHint(
+      els.question,
+      button.dataset.agentQuestion,
+      button.dataset.agentTaskHint || ''
+    ));
   });
+  els.question.addEventListener('input', () => { delete els.question.dataset.agentTaskHint; });
+  els.dockQuestion?.addEventListener('input', () => { delete els.dockQuestion.dataset.agentTaskHint; });
   window.addEventListener('jx3-sim-complete', updateScenarioState);
   function syncAgentPageLayout() {
     document.body.classList.toggle('agent-fullheight', page.classList.contains('active'));
