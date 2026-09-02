@@ -15,7 +15,6 @@
     cancel: document.getElementById('agent_cancel'),
     status: document.getElementById('agent_composer_status'),
     scenario: document.getElementById('agent_scenario_state'),
-    copy: document.getElementById('agent_copy_summary'),
     newSession: document.getElementById('agent_new_session'),
     goSim: document.getElementById('agent_go_sim'),
     simPage: document.getElementById('page-sim'),
@@ -39,7 +38,6 @@
     dockContext: document.getElementById('sim_ai_context'),
     dockContextText: document.getElementById('sim_ai_context_text'),
     dockSession: document.getElementById('sim_ai_session_label'),
-    dockCopy: document.getElementById('sim_ai_copy'),
     dockTitle: document.getElementById('sim_ai_title'),
     dockQuick: document.getElementById('sim_ai_quick'),
     dockFabContext: document.getElementById('sim_ai_fab_context'),
@@ -55,10 +53,8 @@
   let activeRun = null;
   let activeSource = null;
   let activeTrace = null;
-  let latestResult = null;
   let activeSurface = 'full';
   let dockTrace = null;
-  let dockLatestResult = null;
   let activeThinking = null;
   let dockThinking = null;
   let sessionSummaries = [];
@@ -171,6 +167,50 @@
       els.dockStatus.textContent = text;
       els.dockStatus.classList.toggle('sim-ai-error', !!isError);
     }
+  }
+
+  async function copyCardText(button, text) {
+    if (!text) return;
+    const original = button.textContent;
+    try {
+      await navigator.clipboard.writeText(text);
+      button.textContent = '已复制';
+      button.classList.add('is-copied');
+    } catch (_) {
+      button.textContent = '复制失败';
+      button.classList.add('is-error');
+    }
+    window.setTimeout(() => {
+      button.textContent = original;
+      button.classList.remove('is-copied', 'is-error');
+    }, 1200);
+  }
+
+  function cardCopyButton(label, getText, compact) {
+    const button = element('button', `agent-card-copy${compact ? ' is-compact' : ''}`, label);
+    button.type = 'button';
+    button.title = label;
+    button.addEventListener('click', event => {
+      event.stopPropagation();
+      copyCardText(button, getText());
+    });
+    return button;
+  }
+
+  function traceCardText(wrap, compact) {
+    const runId = wrap.querySelector(compact ? '.sim-ai-progress-run-id' : '.agent-trace-run-id')?.textContent || '—';
+    const stepSelector = compact ? '.sim-ai-progress-step' : '.agent-trace-step';
+    const overviewSelector = compact ? '.sim-ai-progress-overview' : '.agent-trace-overview';
+    const lines = ['# 可验证分析流程 · 阶段概述', `- run: ${runId}`];
+    wrap.querySelectorAll(stepSelector).forEach((step, index) => {
+      const label = step.querySelector('b')?.textContent?.trim() || `阶段 ${index + 1}`;
+      const overview = step.querySelector(overviewSelector)?.textContent?.trim();
+      const meta = step.querySelector('small')?.textContent?.trim();
+      lines.push('', `${index + 1}. ${label}`);
+      if (overview) lines.push(`   ${overview}`);
+      if (meta) lines.push(`   ${meta}`);
+    });
+    return lines.join('\n');
   }
 
   function setBusy(busy) {
@@ -448,7 +488,10 @@
     const wrap = element('section', 'agent-trace');
     const title = element('div', 'agent-trace-title');
     title.appendChild(element('span', '', '可验证执行轨迹 · 阶段概述'));
-    title.appendChild(element('span', '', runId || '—'));
+    const actions = element('span', 'agent-card-actions');
+    actions.appendChild(element('span', 'agent-trace-run-id', runId || '—'));
+    actions.appendChild(cardCopyButton('复制思维链', () => traceCardText(wrap, false), false));
+    title.appendChild(actions);
     const note = element('p', 'agent-trace-note', '展示阶段目标、工具动作、证据产出与校验结果；不展示模型隐藏推理。');
     const steps = element('div', 'agent-trace-steps');
     wrap.appendChild(title);
@@ -855,8 +898,6 @@
   }
 
   function renderReport(result) {
-    latestResult = result || null;
-    els.copy.disabled = !latestResult;
     const report = result?.report;
     if (!report) {
       const reason = result?.status === 'provider_failed'
@@ -875,7 +916,10 @@
     head.appendChild(element('b', '', evidenceInsufficient
       ? '本轮未形成可靠结论'
       : partiallyVerified ? '部分验证分析报告' : '已验证分析报告'));
-    head.appendChild(element('span', '', `${report.provider_profile} / ${report.model} · ${result.accounting?.duration_ms || 0}ms`));
+    const actions = element('span', 'agent-card-actions');
+    actions.appendChild(element('span', '', `${report.provider_profile} / ${report.model} · ${result.accounting?.duration_ms || 0}ms`));
+    actions.appendChild(cardCopyButton('复制结论', () => buildSummary(result), false));
+    head.appendChild(actions);
     card.appendChild(head);
     if (evidenceInsufficient) {
       const notice = element('div', 'agent-result-notice');
@@ -1018,8 +1062,6 @@
     }
     els.dockChat.appendChild(welcome);
     dockTrace = null;
-    dockLatestResult = null;
-    els.dockCopy.disabled = true;
   }
 
   function prepareDockChat() {
@@ -1045,7 +1087,10 @@
     const wrap = element('div', 'sim-ai-progress');
     const head = element('div', 'sim-ai-progress-head');
     head.appendChild(element('span', '', '可验证分析流程 · 阶段概述'));
-    head.appendChild(element('span', '', runId || '准备中'));
+    const actions = element('span', 'agent-card-actions');
+    actions.appendChild(element('span', 'sim-ai-progress-run-id', runId || '准备中'));
+    actions.appendChild(cardCopyButton('复制思维链', () => traceCardText(wrap, true), true));
+    head.appendChild(actions);
     const note = element('p', 'sim-ai-progress-note', '显示动作、证据与校验状态，不显示隐藏推理。');
     const steps = element('div', 'sim-ai-progress-steps');
     wrap.append(head, note, steps);
@@ -1125,9 +1170,6 @@
   function renderDockReport(result) {
     if (!result) return;
     prepareDockChat();
-    dockLatestResult = result;
-    latestResult = result;
-    els.dockCopy.disabled = false;
     const report = result.report;
     const allMetrics = (report?.content?.findings || []).flatMap(finding => finding.metrics || []);
     const card = element('article', 'sim-ai-result');
@@ -1136,7 +1178,10 @@
     card.classList.toggle('is-limited', evidenceInsufficient || partiallyVerified);
     const head = element('div', 'sim-ai-result-head');
     head.appendChild(element('b', '', statusLabels[result.status] || result.status || '分析结果'));
-    head.appendChild(element('span', '', `${result.provider_profile || '—'} · ${result.accounting?.duration_ms || 0}ms`));
+    const actions = element('span', 'agent-card-actions');
+    actions.appendChild(element('span', '', `${result.provider_profile || '—'} · ${result.accounting?.duration_ms || 0}ms`));
+    actions.appendChild(cardCopyButton('复制结论', () => buildSummary(result), true));
+    head.appendChild(actions);
     card.appendChild(head);
 
     if (evidenceInsufficient) {
@@ -1376,7 +1421,7 @@
       activeRun = body;
       currentSessionId = body.session_id;
       els.dockSession.textContent = `会话 · ${body.session_id.slice(0, 18)}…`;
-      dockTrace.wrap.querySelector('.sim-ai-progress-head span:last-child').textContent = body.run_id;
+      dockTrace.wrap.querySelector('.sim-ai-progress-run-id').textContent = body.run_id;
       els.dockQuestion.value = '';
       setStatus(`运行中 · 场景 ${body.scenario_hash.slice(0, 12)}…`);
       connectDockStream(body.stream_url);
@@ -1483,7 +1528,7 @@
       if (!response.ok) throw new Error(body?.error?.message || `创建任务失败 (${response.status})`);
       activeRun = body;
       currentSessionId = body.session_id;
-      activeTrace.wrap.querySelector('.agent-trace-title span:last-child').textContent = body.run_id;
+      activeTrace.wrap.querySelector('.agent-trace-run-id').textContent = body.run_id;
       els.question.value = '';
       setStatus(`运行中 · ${body.run_id} · 场景 ${body.scenario_hash.slice(0, 12)}…`);
       connectStream(body.stream_url);
@@ -1578,20 +1623,19 @@
     }
   }
 
-  async function copySummary() {
-    if (!latestResult) return;
-    const report = latestResult.report;
+  function buildSummary(result) {
+    const report = result.report;
     const lines = [
       '# 苍云战斗分析 Agent 实验摘要',
-      `- status: ${latestResult.status}`,
-      `- provider/model: ${latestResult.provider_profile} / ${latestResult.model}`,
-      `- scenario: ${latestResult.scenario_hash}`,
-      `- prompt: ${latestResult.prompt_version} / ${latestResult.prompt_sha256}`,
-      `- tools/simulations: ${latestResult.accounting?.tool_calls || 0} / ${latestResult.accounting?.simulations || 0}`,
-      `- knowledge searches: ${latestResult.accounting?.knowledge_searches || 0}`,
+      `- status: ${result.status}`,
+      `- provider/model: ${result.provider_profile} / ${result.model}`,
+      `- scenario: ${result.scenario_hash}`,
+      `- prompt: ${result.prompt_version} / ${result.prompt_sha256}`,
+      `- tools/simulations: ${result.accounting?.tool_calls || 0} / ${result.accounting?.simulations || 0}`,
+      `- knowledge searches: ${result.accounting?.knowledge_searches || 0}`,
       `- evidence: ${(report?.evidence_ids || []).join(', ') || 'none'}`,
       '',
-      report?.content?.summary || latestResult.error?.message || 'No report',
+      report?.content?.summary || result.error?.message || 'No report',
     ];
     if (report?.content?.findings?.length) {
       lines.push('', '## 分析结论');
@@ -1629,22 +1673,13 @@
         if (href) lines.push(`- [${source.title || '未命名资料'}](${href}) · ${source.season || '版本未标注'} · ${versionLabels[source.version_match] || source.version_match || '匹配状态未知'}`);
       });
     }
-    try {
-      await navigator.clipboard.writeText(lines.join('\n'));
-      setStatus('已复制可复现实验摘要');
-    } catch (_) {
-      setStatus('浏览器未允许写入剪贴板', true);
-    }
+    return lines.join('\n');
   }
 
   function newSession() {
     if (activeRun) return;
     toggleDockHistory(false);
     currentSessionId = null;
-    latestResult = null;
-    dockLatestResult = null;
-    els.copy.disabled = true;
-    if (els.dockCopy) els.dockCopy.disabled = true;
     if (els.dockSession) els.dockSession.textContent = '新对话';
     renderWelcome();
     if (els.dockChat) clearDockChat();
@@ -1711,7 +1746,6 @@
   els.dockProvider?.addEventListener('change', () => selectProvider(els.dockProvider));
   els.run.addEventListener('click', startRun);
   els.cancel.addEventListener('click', cancelRun);
-  els.copy.addEventListener('click', copySummary);
   els.newSession.addEventListener('click', newSession);
   els.goSim.addEventListener('click', () => window.Jx3Nav?.switchPage('page-sim'));
   els.dockFab?.addEventListener('click', () => setDockOpen(true, true));
@@ -1734,12 +1768,6 @@
     initialize().then(() => {
       if (sessionToOpen && !activeRun) openSession(sessionToOpen);
     });
-  });
-  els.dockCopy?.addEventListener('click', () => {
-    if (!dockLatestResult) return;
-    activeSurface = 'dock';
-    latestResult = dockLatestResult;
-    copySummary();
   });
   els.dockQuestion?.addEventListener('keydown', event => {
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
