@@ -2142,10 +2142,8 @@ mod tests {
             .routing_signals
             .contains(&"candidate_comparison_explicitly_requested".to_string()));
 
-        let diagnosis_only = select_analysis_plan(
-            "先分析当前循环已经做得好的地方，再找出有证据支持的主要风险；不要在诊断前直接给修改方案。",
-            &macro_scenario,
-        );
+        let diagnosis_only =
+            select_analysis_plan("这套循环做得好的地方和最主要的问题是什么？", &macro_scenario);
         assert!(!diagnosis_only
             .playbook
             .required_dimensions

@@ -242,14 +242,14 @@
               <h3>从一个可验证的问题开始</h3>
               <p>先在“循环模拟”准备场景，再问 Agent 当前攻略、输出基线、候选改动或时间轴异常。引用资料会标明赛季与原始来源。</p>
               <div class="agent-starter-grid">
-                <button class="sim-btn" data-agent-question="分析当前循环的输出基线，并说明证据边界。">分析当前基线</button>
-                <button class="sim-btn" data-agent-question="找出当前循环中值得进一步验证的时间轴问题。">诊断时间轴</button>
-                <button class="sim-btn" data-agent-question="结合当前版本资料，说明这套循环的核心思路，并标注来源和版本边界。">查询版本攻略</button>
-                <button class="sim-btn" data-agent-question="说明这个场景还缺少哪些证据，避免给出未经验证的结论。">检查证据边界</button>
-                <button class="sim-btn" data-agent-question="先分析当前循环已经做得好的地方，再找出有证据支持的主要风险；不要在诊断前直接给修改方案。">分析循环优缺点</button>
-                <button class="sim-btn" data-agent-question="识别当前循环是宏还是手动操作，解释其执行结构、适合的优化方式和目前可验证的限制。">识别输入模式</button>
-                <button class="sim-btn" data-agent-question="列出与当前心法相关的已保存宏和完整循环，说明哪些可以做同场景对比，并让我选择。">选择保存方案</button>
-                <button class="sim-btn" data-agent-question="结合当前版本资料，分析当前循环在实战中的移动、转火、停手和延迟适应性，并区分模拟证据与攻略建议。">分析实战适配</button>
+                <button class="sim-btn" data-agent-question="这套循环的整体输出和伤害结构怎么样？">分析当前基线</button>
+                <button class="sim-btn" data-agent-question="这套循环哪里顺，哪里可能在空转或浪费资源？">诊断时间轴</button>
+                <button class="sim-btn" data-agent-question="结合当前版本攻略，解释这套循环的核心思路。">查询版本攻略</button>
+                <button class="sim-btn" data-agent-question="为了更准确地判断这套循环，下一步最值得检查什么？">下一步分析</button>
+                <button class="sim-btn" data-agent-question="这套循环做得好的地方和最主要的问题是什么？">分析循环优缺点</button>
+                <button class="sim-btn" data-agent-question="这是宏循环还是手动循环？它的执行特点是什么？">识别输入模式</button>
+                <button class="sim-btn" data-agent-question="我保存了哪些可以互相比较的宏或循环？">选择保存方案</button>
+                <button class="sim-btn" data-agent-question="这套循环在移动、转火、停手和网络延迟变化时表现怎么样？">分析实战适配</button>
               </div>
             </div>
           </section>
@@ -262,7 +262,7 @@
               <span class="agent-provider-note">凭据仅存在于服务端环境变量</span>
             </div>
             <div class="agent-input-row">
-              <textarea id="agent_question" rows="2" maxlength="16000" placeholder="例如：当前循环的主要输出基线是什么？请只引用模拟器证据。"></textarea>
+              <textarea id="agent_question" rows="2" maxlength="16000" placeholder="例如：这套循环做得怎么样？主要问题在哪里？"></textarea>
             </div>
             <div class="agent-composer-actions">
               <div class="agent-composer-status" id="agent_composer_status">Enter 发送 · Shift+Enter 换行</div>
@@ -2031,10 +2031,10 @@
         </div>
 
         <div class="sim-ai-quick" id="sim_ai_quick" aria-label="常用分析">
-          <button type="button" class="sim-btn" data-sim-ai-question="分析当前循环的输出基线，并说明证据边界。">基线分析</button>
-          <button type="button" class="sim-btn" data-sim-ai-question="诊断当前循环的时间轴，找出值得进一步验证的空转、怒气或增益覆盖问题。">时间轴诊断</button>
-          <button type="button" class="sim-btn" data-sim-ai-question="结合当前版本资料，说明这套循环的核心思路，并标注来源和版本边界。">版本攻略</button>
-          <button type="button" class="sim-btn" data-sim-ai-question="说明当前循环还缺少哪些证据，并给出下一步最小验证实验。">下一步实验</button>
+          <button type="button" class="sim-btn" data-sim-ai-question="这套循环的整体输出和伤害结构怎么样？">基线分析</button>
+          <button type="button" class="sim-btn" data-sim-ai-question="这套循环哪里顺，哪里可能在空转或浪费资源？">时间轴诊断</button>
+          <button type="button" class="sim-btn" data-sim-ai-question="结合当前版本攻略，解释这套循环的核心思路。">版本攻略</button>
+          <button type="button" class="sim-btn" data-sim-ai-question="为了更准确地判断这套循环，下一步最值得检查什么？">下一步分析</button>
         </div>
 
         <section class="sim-ai-chat" id="sim_ai_chat" aria-live="polite">
@@ -2823,7 +2823,7 @@
       s.onload = next; s.onerror = next;
       document.body.appendChild(s);
     }
-    var SCRIPTS = ['state.js', 'app.js?v=20260902-prompts1', 'agent.js?v=20260902-prompts1'];
+    var SCRIPTS = ['state.js', 'app.js?v=20260902-prompts1', 'agent.js?v=20260902-prompts2'];
     var go = function () { loadSeq(SCRIPTS); };
     try {
       fetch('/api/settings', { cache: 'no-store' })
