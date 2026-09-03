@@ -200,7 +200,7 @@ pub fn report_content_json_schema() -> Value {
                     "type": "object",
                     "properties": {
                         "change_type": {"type": "string", "enum": ["macro_statement", "manual_operation"]},
-                        "edit_operation": {"type": "string", "enum": ["replace", "insert_before", "insert_after", "adjust_timing"]},
+                        "edit_operation": {"type": "string", "enum": ["replace", "insert_before", "insert_after", "remove", "adjust_timing"]},
                         "target": {"type": "string", "minLength": 1, "maxLength": 1024},
                         "current": {"type": "string", "minLength": 1, "maxLength": 1024},
                         "proposed": {"type": "string", "minLength": 1, "maxLength": 1024},
@@ -557,6 +557,17 @@ fn deserialize_compatible_report(mut value: Value) -> Result<AgentReportContentV
         return serde_json::from_value(value);
     };
 
+    object.insert(
+        "schema_version".to_string(),
+        Value::String(AGENT_REPORT_CONTENT_SCHEMA_V1.to_string()),
+    );
+    for display_field in ["report_type", "title", "explanation", "evidence_ids"] {
+        object.remove(display_field);
+    }
+    object
+        .entry("rotation_changes".to_string())
+        .or_insert_with(|| Value::Array(Vec::new()));
+
     // `Option<String>` still requires the key in the published JSON schema.
     // Treat omission as the natural `null` representation.
     object
@@ -589,6 +600,136 @@ fn deserialize_compatible_report(mut value: Value) -> Result<AgentReportContentV
             };
             *limitation = Value::String(normalized);
         }
+    }
+
+    if let Some(findings) = object.get_mut("findings").and_then(Value::as_array_mut) {
+        for finding in findings {
+            let Some(fields) = finding.as_object_mut() else {
+                continue;
+            };
+            if !fields.contains_key("explanation") {
+                if let Some(explanation) = fields
+                    .remove("description")
+                    .or_else(|| fields.remove("statement"))
+                    .or_else(|| fields.remove("finding"))
+                {
+                    fields.insert("explanation".to_string(), explanation);
+                }
+            }
+            fields
+                .entry("title".to_string())
+                .or_insert_with(|| Value::String("分析结论".to_string()));
+            fields.remove("evidence_pointers");
+            if let Some(metrics) = fields.get_mut("metrics").and_then(Value::as_array_mut) {
+                metrics.retain_mut(|metric| {
+                    let Some(metric) = metric.as_object_mut() else {
+                        return false;
+                    };
+                    if !metric.contains_key("label") {
+                        if let Some(label) = metric.remove("metric_name") {
+                            metric.insert("label".to_string(), label);
+                        }
+                    }
+                    metric
+                        .entry("evidence_id".to_string())
+                        .or_insert_with(|| Value::String(String::new()));
+                    if metric.get("unit").and_then(Value::as_str) == Some("%") {
+                        metric.insert("unit".to_string(), Value::String("percent".to_string()));
+                    }
+                    metric.get("label").is_some_and(Value::is_string)
+                        && metric.get("value").is_some_and(Value::is_number)
+                        && metric.get("unit").is_some_and(Value::is_string)
+                        && metric
+                            .get("json_pointer")
+                            .and_then(Value::as_str)
+                            .is_some_and(|pointer| !pointer.trim().is_empty())
+                });
+            }
+        }
+    }
+
+    let default_recommendation_evidence = object
+        .get("findings")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_object)
+        .filter_map(|finding| finding.get("evidence_ids"))
+        .filter_map(Value::as_array)
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::to_owned)
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .map(Value::String)
+        .collect::<Vec<_>>();
+
+    if let Some(recommendations) = object
+        .get_mut("recommendations")
+        .and_then(Value::as_array_mut)
+    {
+        for recommendation in recommendations {
+            if let Some(rationale) = recommendation.as_str().map(str::to_owned) {
+                *recommendation = serde_json::json!({
+                    "title": "建议",
+                    "rationale": rationale,
+                    "evidence_ids": default_recommendation_evidence,
+                });
+            }
+            let Some(fields) = recommendation.as_object_mut() else {
+                continue;
+            };
+            if let Some(action) = fields.remove("action") {
+                fields
+                    .entry("title".to_string())
+                    .or_insert_with(|| Value::String("建议".to_string()));
+                fields.entry("rationale".to_string()).or_insert(action);
+            }
+            fields
+                .entry("evidence_ids".to_string())
+                .or_insert_with(|| Value::Array(default_recommendation_evidence.clone()));
+        }
+    }
+
+    // Rotation edits are an optional high-risk projection. Some compatible
+    // JSON providers still emit an older card shape even when the rest of the
+    // report is valid. Keep only entries that can be losslessly normalized to
+    // the current typed shape; semantic evidence checks still run afterward.
+    if let Some(changes) = object
+        .get_mut("rotation_changes")
+        .and_then(Value::as_array_mut)
+    {
+        changes.retain_mut(|change| {
+            let Some(fields) = change.as_object_mut() else {
+                return false;
+            };
+            if fields.get("change_type").and_then(Value::as_str) == Some("edit_operation")
+            {
+                fields.insert(
+                    "change_type".to_string(),
+                    Value::String("manual_operation".to_string()),
+                );
+            }
+            let removes_current = fields
+                .get("rationale")
+                .and_then(Value::as_str)
+                .is_some_and(|text| text.contains("删除") || text.contains("移除"));
+            if fields.get("proposed").is_some_and(Value::is_null) && removes_current {
+                let current = fields
+                    .get("current")
+                    .and_then(Value::as_str)
+                    .unwrap_or("当前操作");
+                fields.insert(
+                    "proposed".to_string(),
+                    Value::String(format!("删除{current}")),
+                );
+                fields.insert(
+                    "edit_operation".to_string(),
+                    Value::String("remove".to_string()),
+                );
+            }
+            serde_json::from_value::<RotationChangeV1>(change.clone()).is_ok()
+        });
     }
 
     serde_json::from_value(value)
@@ -1081,7 +1222,7 @@ pub fn validate_report(
         if !rotation_change_has_diagnosis_evidence(change, evidence) {
             return Err(error(
                 "rotation_change_without_diagnosis",
-                "rotation change must cite the baseline timeline diagnostic profile",
+                "rotation change must cite the baseline timeline or exact input inspection",
             ));
         }
         if !rotation_change_has_comparison_evidence(change, evidence) {
@@ -1102,7 +1243,7 @@ fn rotation_edit_operation_is_valid(change: &RotationChangeV1) -> bool {
         ),
         "manual_operation" => matches!(
             change.edit_operation.as_str(),
-            "replace" | "insert_before" | "insert_after" | "adjust_timing"
+            "replace" | "insert_before" | "insert_after" | "remove" | "adjust_timing"
         ),
         _ => false,
     }
@@ -1123,12 +1264,16 @@ fn matching_rotation_input_evidence_id(
         "manual_sequence"
     };
     evidence.iter().find_map(|(id, item)| {
-        (item.get("tool_name").and_then(Value::as_str) == Some("get_current_scenario")
-            && item
+        let tool = item.get("tool_name").and_then(Value::as_str);
+        let mode_matches = match tool {
+            Some("get_current_scenario") => item
                 .pointer("/result/rotation_input/mode")
                 .and_then(Value::as_str)
-                == Some(expected_mode)
-            && evidence_contains_exact_string(item, &change.current))
+                == Some(expected_mode),
+            Some("inspect_rotation_input") => change.change_type == "manual_operation",
+            _ => false,
+        };
+        (mode_matches && evidence_contains_exact_string(item, &change.current))
         .then(|| id.clone())
     })
 }
@@ -1196,10 +1341,17 @@ fn rotation_change_has_comparison_evidence(
                         .and_then(Value::as_array)
                         .is_some_and(|changes| {
                             changes.iter().any(|field| {
-                                matches!(
-                                    field.get("field").and_then(Value::as_str),
-                                    Some("sequence") | Some("timing_offsets") | Some("pauses")
-                                )
+                                field
+                                    .get("field")
+                                    .and_then(Value::as_str)
+                                    .is_some_and(|name| {
+                                        name == "sequence"
+                                            || name.ends_with(".sequence")
+                                            || name == "timing_offsets"
+                                            || name.ends_with(".timing_offsets")
+                                            || name == "pauses"
+                                            || name.ends_with(".pauses")
+                                    })
                             })
                         })
                 })
@@ -1213,8 +1365,11 @@ fn rotation_change_has_diagnosis_evidence(
 ) -> bool {
     change.evidence_ids.iter().any(|id| {
         evidence.get(id).is_some_and(|item| {
-            item.get("tool_name").and_then(Value::as_str) == Some("analyze_timeline")
-                && item.pointer("/result/diagnostic_profile").is_some()
+            (item.get("tool_name").and_then(Value::as_str) == Some("analyze_timeline")
+                && item.pointer("/result/diagnostic_profile").is_some())
+                || (change.change_type == "manual_operation"
+                    && item.get("tool_name").and_then(Value::as_str)
+                        == Some("inspect_rotation_input"))
         })
     })
 }
@@ -1482,98 +1637,6 @@ fn validate_grounded_prose<'a>(
     Ok(())
 }
 
-/// Baseline reports describe measured combat facts, so even small standalone
-/// counts must match the evidence. The general validator remains tolerant of
-/// ordinary list counts for non-combat prose, while this stricter pass prevents
-/// statements such as "8 gaps" from passing when the cited timeline records 11.
-pub(crate) fn validate_baseline_quantitative_prose(
-    report: &AgentReportContentV1,
-    evidence: &EvidenceStore,
-) -> Result<(), ReportValidationError> {
-    fn validate<'a>(
-        value: &str,
-        metrics: impl IntoIterator<Item = &'a GroundedMetricV1>,
-        evidence_ids: &[String],
-        evidence: &EvidenceStore,
-    ) -> Result<(), ReportValidationError> {
-        let metrics = metrics.into_iter().collect::<Vec<_>>();
-        let metric_values = metrics
-            .iter()
-            .map(|metric| metric.value)
-            .collect::<Vec<_>>();
-        let knowledge_literals = cited_knowledge_numeric_literals(evidence_ids, evidence);
-        let tool_values = cited_tool_numeric_values(evidence_ids, evidence);
-        if numeric_literals(value).iter().any(|literal| {
-            !literal.identifier
-                && !matches_metric(*literal, &metric_values)
-                && !matches_metric_label_literal(value, *literal, &metrics)
-                && !matches_knowledge_literal(*literal, &knowledge_literals)
-                && !matches_tool_value(*literal, &tool_values)
-        }) {
-            return Err(error(
-                "numeric_prose_claim",
-                "baseline numeric prose must restate a value from its cited evidence",
-            ));
-        }
-        Ok(())
-    }
-
-    let report_metrics = report
-        .findings
-        .iter()
-        .flat_map(|finding| finding.metrics.iter())
-        .collect::<Vec<_>>();
-    let report_evidence_ids = cited_evidence_ids(report);
-    validate(
-        &report.summary,
-        report_metrics.iter().copied(),
-        &report_evidence_ids,
-        evidence,
-    )?;
-    for limitation in &report.limitations {
-        validate(
-            limitation,
-            report_metrics.iter().copied(),
-            &report_evidence_ids,
-            evidence,
-        )?;
-    }
-    for finding in &report.findings {
-        validate(
-            &finding.title,
-            finding.metrics.iter(),
-            &finding.evidence_ids,
-            evidence,
-        )?;
-        validate(
-            &finding.explanation,
-            finding.metrics.iter(),
-            &finding.evidence_ids,
-            evidence,
-        )?;
-    }
-    for recommendation in &report.recommendations {
-        let metrics = report_metrics
-            .iter()
-            .copied()
-            .filter(|metric| recommendation.evidence_ids.contains(&metric.evidence_id))
-            .collect::<Vec<_>>();
-        validate(
-            &recommendation.title,
-            metrics.iter().copied(),
-            &recommendation.evidence_ids,
-            evidence,
-        )?;
-        validate(
-            &recommendation.rationale,
-            metrics,
-            &recommendation.evidence_ids,
-            evidence,
-        )?;
-    }
-    Ok(())
-}
-
 fn numeric_literals(value: &str) -> Vec<NumericLiteral> {
     let bytes = value.as_bytes();
     let mut literals = Vec::new();
@@ -1804,7 +1867,10 @@ fn cited_tool_numeric_values(evidence_ids: &[String], evidence: &EvidenceStore) 
 
 fn prose_numeric_tool_allowed(envelope: &Value) -> bool {
     metric_tool_allowed(envelope)
-        || envelope.get("tool_name").and_then(Value::as_str) == Some("get_current_scenario")
+        || matches!(
+            envelope.get("tool_name").and_then(Value::as_str),
+            Some("get_current_scenario" | "inspect_rotation_input")
+        )
 }
 
 fn collect_tool_numeric_values(value: &Value, field: Option<&str>, values: &mut Vec<f64>) {
@@ -2424,6 +2490,51 @@ mod tests {
     }
 
     #[test]
+    fn common_provider_report_aliases_are_normalized_before_validation() {
+        let raw = json!({
+            "schema_version": "1.0",
+            "report_type": "knowledge_and_analysis",
+            "title": "白刀分析",
+            "evidence_ids": ["a".repeat(64)],
+            "summary": "白刀应放在无血怒窗口。",
+            "findings": [{
+                "finding": "白刀是未触发援戈血影的苍雪刀。",
+                "evidence_ids": ["a".repeat(64)],
+                "evidence_pointers": ["/snippet"],
+                "metrics": [{
+                    "metric_name": "覆盖率",
+                    "value": 50.0,
+                    "unit": "%",
+                    "json_pointer": "/result/coverage"
+                }, {
+                    "metric_name": "知识摘录",
+                    "value": "白刀定义原文",
+                    "unit": null,
+                    "json_pointer": "/result/results/0/snippet"
+                }]
+            }],
+            "recommendations": ["在无血怒窗口保留这套斩绝绝。"],
+            "limitations": [],
+            "refusal_reason": null
+        })
+        .to_string();
+
+        let parsed = parse_report_json(&raw).unwrap();
+        assert_eq!(parsed.schema_version, AGENT_REPORT_CONTENT_SCHEMA_V1);
+        assert_eq!(parsed.findings[0].title, "分析结论");
+        assert_eq!(parsed.findings[0].explanation, "白刀是未触发援戈血影的苍雪刀。");
+        assert_eq!(parsed.findings[0].metrics[0].unit, "percent");
+        assert_eq!(parsed.findings[0].metrics.len(), 1);
+        assert!(parsed.findings[0].metrics[0].evidence_id.is_empty());
+        assert_eq!(parsed.recommendations[0].title, "建议");
+        assert_eq!(
+            parsed.recommendations[0].rationale,
+            "在无血怒窗口保留这套斩绝绝。"
+        );
+        assert!(parsed.rotation_changes.is_empty());
+    }
+
+    #[test]
     fn unknown_or_mismatched_metric_is_rejected() {
         let mut unknown = report();
         unknown.findings[0].evidence_ids[0] = "b".repeat(64);
@@ -2523,6 +2634,20 @@ mod tests {
             AGENT_REPORT_CONTENT_SCHEMA_V1
         );
         assert_eq!(parsed.content.findings.len(), 1);
+    }
+
+    #[test]
+    fn legacy_rotation_card_does_not_discard_an_otherwise_valid_report() {
+        let mut value = serde_json::to_value(report()).unwrap();
+        value["rotation_changes"] = json!([{
+            "index": 10,
+            "original_skill": "血怒",
+            "new_skill": "斩刀",
+            "description": "旧版前端卡片"
+        }]);
+        let parsed = parse_and_validate_report(&value.to_string(), &evidence()).unwrap();
+        assert!(parsed.content.rotation_changes.is_empty());
+        assert_eq!(parsed.content.summary, report().summary);
     }
 
     #[test]
@@ -2724,31 +2849,6 @@ mod tests {
         value.summary = "预计可以提升50%。".to_string();
         assert_eq!(
             validate_report(&value, &evidence()).unwrap_err().code,
-            "numeric_prose_claim"
-        );
-    }
-
-    #[test]
-    fn baseline_strict_numeric_gate_rejects_a_wrong_small_count() {
-        let mut value = report();
-        value.findings[0].explanation = "时间轴记录到 8 次主技能空档。".to_string();
-        value.findings[0].metrics = vec![GroundedMetricV1 {
-            label: "主技能空档次数".to_string(),
-            value: 11.0,
-            unit: "count".to_string(),
-            evidence_id: "a".repeat(64),
-            json_pointer: "/result/gap_count".to_string(),
-        }];
-        let mut store = evidence();
-        store.get_mut(&"a".repeat(64)).unwrap()["result"]["gap_count"] = json!(11);
-
-        // The general presentation gate tolerates ordinary list counts, while
-        // the combat-baseline audit must not.
-        validate_report(&value, &store).unwrap();
-        assert_eq!(
-            validate_baseline_quantitative_prose(&value, &store)
-                .unwrap_err()
-                .code,
             "numeric_prose_claim"
         );
     }

@@ -64,12 +64,15 @@
 
   const traceLabels = {
     planning: '拆解问题',
-    analysis_plan_selected: '选择专业分析路径',
+    analysis_context_prepared: '准备分析上下文',
+    analysis_plan_selected: '准备分析上下文',
     evidence_coverage_checked: '检查证据覆盖',
     reasoning_state_updated: '更新问题推导状态',
     reasoning_critique_started: '执行发布前批判检查',
     reasoning_critique_failed: '批判检查要求修订',
     reasoning_critique_passed: '批判检查通过',
+    report_validation_started: '校验报告证据',
+    report_validation_passed: '证据校验通过',
     model_context_compacted: '压缩模型上下文',
     model_context_handoff: '重建紧凑上下文',
     model_context_limit_evidence_preserved: '上下文已安全截停',
@@ -90,6 +93,7 @@
     knowledge_only_client_scope: '限定为知识问答',
     completed: '分析完成',
     partially_verified: '部分通过',
+    needs_user_input: '等待你的回答',
     refused: '安全拒绝',
     cancelled: '任务取消',
     evidence_insufficient: '证据校验未通过',
@@ -102,7 +106,7 @@
   };
 
   const statusLabels = {
-    created: '已创建', running: '运行中', completed: '已完成', partially_verified: '部分通过', refused: '已拒绝',
+    created: '已创建', running: '运行中', completed: '已完成', partially_verified: '部分通过', needs_user_input: '等待回答', refused: '已拒绝',
     cancelled: '已取消', interrupted: '已中断', evidence_insufficient: '未形成可靠结论',
     budget_exhausted: '预算耗尽', provider_failed: 'Provider 故障',
     protocol_failed: '协议故障', timed_out: '超时', finished: '已结束',
@@ -110,6 +114,7 @@
 
   const toolLabels = {
     get_current_scenario: '读取当前场景',
+    ask_user_question: '向你确认关键信息',
     search_knowledge_base: '检索版本知识库',
     simulate_scenario: '运行基线模拟',
     compare_scenarios: '对比候选方案',
@@ -296,7 +301,7 @@
 
   function thinkingText(event) {
     const kind = event?.trace_kind || event?.kind;
-    if (event?.overview && ['planning', 'analysis_plan_selected', 'evidence_coverage_checked',
+    if (event?.overview && ['planning', 'analysis_context_prepared', 'analysis_plan_selected', 'evidence_coverage_checked',
       'reasoning_state_updated', 'reasoning_critique_started',
       'tool_started', 'model_started', 'decision_checkpoint'].includes(kind)) return event.overview;
     if (kind === 'planning') return '正在拆解问题并选择验证路径…';
@@ -349,6 +354,8 @@
       setStatus(recovered ? '分析完成 · 已恢复验证结论' : '分析完成 · 结论已绑定证据并保存');
     } else if (status === 'partially_verified') {
       setStatus(recovered ? '分析完成 · 已恢复部分验证结论' : '分析完成 · 已保留通过逐项校验的结论');
+    } else if (status === 'needs_user_input') {
+      setStatus('分析已暂停 · 回答上方问题后可在当前会话继续');
     } else if (status === 'evidence_insufficient') {
       setStatus('分析结束 · 未验证内容已被证据校验器拦截');
     } else if (status === 'refused') {
@@ -549,7 +556,7 @@
   function traceStepMeta(event) {
     const kind = event?.trace_kind || event?.kind;
     const evidenceCount = Array.isArray(event?.evidence_ids) ? event.evidence_ids.length : 0;
-    if (kind === 'analysis_plan_selected') return '任务路由已锁定';
+    if (kind === 'analysis_context_prepared' || kind === 'analysis_plan_selected') return '由模型决定接下来的分析步骤';
     if (kind === 'evidence_coverage_checked') {
       return `证据覆盖 · ${{ sufficient: '充分', partial: '部分', insufficient: '不足' }[event?.code] || '检查完成'}`;
     }
@@ -717,7 +724,7 @@
     const suffix = event.tool_name ? ` · ${toolLabel(event.tool_name)}` : '';
     const label = event.label || (kind === 'tool_started' ? `调用工具${suffix}` : `${traceLabels[kind] || kind}${suffix}`);
     const step = createTraceStep('agent-trace-step', label, traceStageOverview(event), traceStepMeta(event), false);
-    const terminal = ['completed', 'partially_verified', 'refused', 'cancelled', 'evidence_insufficient',
+    const terminal = ['completed', 'partially_verified', 'needs_user_input', 'refused', 'cancelled', 'evidence_insufficient',
       'budget_exhausted', 'provider_failed', 'protocol_failed', 'timed_out'].includes(kind);
     const active = !terminal && !['tool_finished', 'model_finished'].includes(kind);
     step.classList.add(terminal ? (isTraceWarning(event) ? 'is-warning' : 'is-done') : active ? 'is-running' : 'is-done');
@@ -945,6 +952,22 @@
   function renderReport(result) {
     const report = result?.report;
     if (!report) {
+      if (result?.clarification) {
+        const actions = [cardCopyButton('复制问题', () => result.clarification.question, false)];
+        const message = appendMessage('agent', result.clarification.question, actions);
+        message.classList.add('agent-clarification');
+        if (result.clarification.reason) {
+          message.appendChild(element('p', 'agent-clarification-reason', result.clarification.reason));
+        }
+        if (result.clarification.answer_hint) {
+          message.appendChild(element('p', 'agent-clarification-hint', `可以这样回答：${result.clarification.answer_hint}`));
+        }
+        setTimeout(() => {
+          els.question.placeholder = '回答上面的问题，继续当前会话…';
+          els.question.focus();
+        }, 0);
+        return;
+      }
       const reason = result?.status === 'provider_failed'
         ? providerErrorText(result?.error)
         : result?.error?.message || `任务状态：${statusLabels[result?.status] || result?.status || '未知'}`;
@@ -1196,7 +1219,7 @@
     const suffix = event.tool_name ? ` · ${toolLabel(event.tool_name)}` : '';
     const label = event.label || (kind === 'tool_started' ? `调用工具${suffix}` : `${traceLabels[kind] || kind}${suffix}`);
     const step = createTraceStep('sim-ai-progress-step', label, traceStageOverview(event), traceStepMeta(event), true);
-    const terminal = ['completed', 'partially_verified', 'refused', 'cancelled', 'evidence_insufficient',
+    const terminal = ['completed', 'partially_verified', 'needs_user_input', 'refused', 'cancelled', 'evidence_insufficient',
       'budget_exhausted', 'provider_failed', 'protocol_failed', 'timed_out'].includes(kind);
     const active = !terminal && !['tool_finished', 'model_finished'].includes(kind);
     step.classList.add(terminal ? (isTraceWarning(event) ? 'is-warning' : 'is-done') : active ? 'is-running' : 'is-done');
@@ -1235,6 +1258,25 @@
     actions.appendChild(cardCopyButton('复制调试', () => buildDebugBundle(result), true));
     head.appendChild(actions);
     card.appendChild(head);
+
+    if (result.clarification) {
+      const question = element('div', 'sim-ai-result-summary', result.clarification.question);
+      card.appendChild(question);
+      if (result.clarification.reason) {
+        card.appendChild(element('p', 'sim-ai-clarification-reason', result.clarification.reason));
+      }
+      if (result.clarification.answer_hint) {
+        card.appendChild(element('p', 'sim-ai-clarification-hint', `可以这样回答：${result.clarification.answer_hint}`));
+      }
+      appendDiagnostics(card, result, true);
+      els.dockChat.appendChild(card);
+      scrollDock();
+      setTimeout(() => {
+        els.dockQuestion.placeholder = '回答上面的问题，继续当前会话…';
+        els.dockQuestion.focus();
+      }, 0);
+      return;
+    }
 
     if (evidenceInsufficient) {
       const notice = element('div', 'sim-ai-result-notice');
@@ -1733,8 +1775,12 @@
       `- knowledge searches: ${result.accounting?.knowledge_searches || 0}`,
       `- evidence: ${(report?.evidence_ids || []).join(', ') || 'none'}`,
       '',
-      report?.content?.summary || result.error?.message || 'No report',
+      report?.content?.summary || result.clarification?.question || result.error?.message || 'No report',
     ];
+    if (result.clarification) {
+      lines.push('', '## 需要用户补充', result.clarification.reason || '');
+      if (result.clarification.answer_hint) lines.push(`- 回答提示：${result.clarification.answer_hint}`);
+    }
     if (report?.content?.findings?.length) {
       lines.push('', '## 分析结论');
       report.content.findings.forEach(finding => {
@@ -1815,6 +1861,7 @@
         error: result?.error || null,
       },
       trace: result?.trace || null,
+      clarification: result?.clarification || null,
       report: safeReport,
       compatibility: result?.debug
         ? 'full'

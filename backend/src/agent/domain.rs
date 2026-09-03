@@ -22,6 +22,7 @@ pub enum DomainClient {
 pub enum AnalysisTaskType {
     BaselineAnalysis,
     RotationStallDiagnosis,
+    RotationEditAnalysis,
     PracticalAdaptation,
     HasteDecision,
     OrangeWeaponTiming,
@@ -46,6 +47,7 @@ pub enum AnalysisSurface {
 #[serde(rename_all = "snake_case")]
 pub enum RoutingStrategy {
     StructuredHint,
+    ComposedIntent,
     HybridSemantic,
     ScoredSignals,
     SessionInheritance,
@@ -313,6 +315,25 @@ const CLAIM_SEEDS: &[ClaimSeed] = &[
         observable_fields: &["skills", "rage", "buff_coverage", "timeline"],
         applicable_tools: &["simulate_scenario", "analyze_timeline"],
         boundary_codes: &[],
+    },
+    ClaimSeed {
+        id: "fs-white-blade-001",
+        title_contains: "分山劲白皮书",
+        anchors: &["触发不了血影的白刀", "苍雪刀"],
+        subject_kind: "rotation_variant",
+        subject: "白刀",
+        relation: "means",
+        object_kind: "skill_sequence",
+        object: "未触发援戈·血影的苍雪刀斩绝绝",
+        statement: "白刀指未触发援戈·血影的苍雪刀斩绝绝。低加速业火末尾是典型自然窗口：血怒结束后直接斩云绝绝，把援戈留给后续有血怒的苍雪刀。",
+        claim_type: DomainClaimType::PlayerPractice,
+        authority: DomainAuthority::CurrentWhitepaper,
+        conditions: &["暗影千机旗舰端分山劲", "援戈资源分配", "当前版本循环"],
+        conflict_status: DomainConflictStatus::Clear,
+        simulator_support: SimulatorSupport::PartiallyObservable,
+        observable_fields: &["skills", "buff_coverage", "timeline", "rotation_input"],
+        applicable_tools: &["inspect_rotation_input", "analyze_timeline", "compare_scenarios"],
+        boundary_codes: &["guide_variant_requires_same_scenario_validation"],
     },
     ClaimSeed {
         id: "fs-yh-001",
@@ -658,26 +679,32 @@ pub fn select_analysis_plan_routed(
                 }],
             },
         )
+    } else if let Some(decision) = composed_rotation_edit_intent(&normalized, surface) {
+        decision
     } else {
         classify_task(&normalized, surface, semantic_scores)
     };
-    if task_hint.is_none()
-        && task_type == AnalysisTaskType::GeneralAnalysis
-        && is_short_follow_up(&normalized)
-    {
+    if task_hint.is_none() {
         if let Some(inherited) = prior_playbook_id.and_then(task_type_for_playbook) {
-            task_type = inherited;
-            routing_signals.push("inherited_session_playbook".to_string());
-            routing_decision = RoutingDecisionV1 {
-                strategy: RoutingStrategy::SessionInheritance,
-                confidence_basis_points: 7_500,
-                candidates: vec![RoutingCandidateV1 {
-                    task_type: inherited,
-                    score: 7_500,
-                    lexical_score: 0,
-                    semantic_similarity_millis: None,
-                }],
-            };
+            let should_inherit = (task_type == AnalysisTaskType::GeneralAnalysis
+                && is_short_follow_up(&normalized))
+                || (inherited == AnalysisTaskType::RotationEditAnalysis
+                    && is_rotation_edit_follow_up(&normalized)
+                    && !explicit_domain_shift(&normalized));
+            if should_inherit {
+                task_type = inherited;
+                routing_signals.push("inherited_session_playbook".to_string());
+                routing_decision = RoutingDecisionV1 {
+                    strategy: RoutingStrategy::SessionInheritance,
+                    confidence_basis_points: 7_500,
+                    candidates: vec![RoutingCandidateV1 {
+                        task_type: inherited,
+                        score: 7_500,
+                        lexical_score: 0,
+                        semantic_similarity_millis: None,
+                    }],
+                };
+            }
         }
     }
     let scope = DomainScopeV1 {
@@ -735,6 +762,7 @@ pub fn select_analysis_plan_routed(
     }
     apply_equipment_contract(&mut plan, &normalized);
     apply_saved_artifact_contract(&mut plan, &normalized);
+    apply_rotation_edit_contract(&mut plan, &normalized, scenario);
     if !plan
         .routing_signals
         .iter()
@@ -743,6 +771,75 @@ pub fn select_analysis_plan_routed(
         apply_rotation_diagnosis_contract(&mut plan, &normalized, scenario);
     }
     plan
+}
+
+/// Detects the composition "edit a rotation" independently of domain jargon.
+/// This avoids forcing every skill nickname into a growing keyword taxonomy.
+fn composed_rotation_edit_intent(
+    question: &str,
+    surface: Option<AnalysisSurface>,
+) -> Option<(AnalysisTaskType, Vec<String>, RoutingDecisionV1)> {
+    let edit_action = contains_any(
+        question,
+        &["插入", "插到", "可以插", "怎么插", "替换或者插入", "哪个技能可以替换", "哪一行可以替换", "放在哪", "落到哪", "改哪一行"],
+    );
+    let exact_anchor = contains_any(
+        question,
+        &["第几行", "哪一行", "哪个位置", "具体位置", "哪个技能", "前后技能"],
+    );
+    let rotation_subject = matches!(surface, Some(AnalysisSurface::Simulation))
+        || contains_any(question, &["循环", "序列", "技能", "宏语句", "宏里", "手法", "打法"]);
+    if !(rotation_subject && (edit_action || exact_anchor)) || explicit_equipment_subject(question) {
+        return None;
+    }
+
+    let mut signals = vec![
+        "intent_subject:rotation".to_string(),
+        "intent_action:edit".to_string(),
+        "intent_output:exact_anchor".to_string(),
+        "routing_strategy:ComposedIntent".to_string(),
+    ];
+    if contains_any(question, &["攻略", "资料", "白皮书", "按攻略", "根据攻略"]) {
+        signals.push("intent_grounding:guide".to_string());
+    }
+    if let Some(surface) = surface {
+        signals.push(format!("analysis_surface:{surface:?}"));
+    }
+    let task_type = AnalysisTaskType::RotationEditAnalysis;
+    Some((
+        task_type,
+        signals,
+        RoutingDecisionV1 {
+            strategy: RoutingStrategy::ComposedIntent,
+            confidence_basis_points: 9_600,
+            candidates: vec![RoutingCandidateV1 {
+                task_type,
+                score: 10_000,
+                lexical_score: u16::from(edit_action) * 10 + u16::from(exact_anchor) * 8,
+                semantic_similarity_millis: None,
+            }],
+        },
+    ))
+}
+
+fn explicit_equipment_subject(question: &str) -> bool {
+    contains_any(
+        question,
+        &["装备", "配装", "部位", "套装", "切糕", "项链", "戒指", "腰坠", "暗器", "帽子", "衣服", "鞋子"],
+    )
+}
+
+fn explicit_domain_shift(question: &str) -> bool {
+    explicit_equipment_subject(question)
+        || contains_any(question, &["副本", "boss", "首领", "加速档", "橙武", "天下宏愿"])
+}
+
+fn is_rotation_edit_follow_up(question: &str) -> bool {
+    question.chars().count() <= 32
+        && contains_any(
+            question,
+            &["具体点", "说具体", "哪个位置", "第几行", "哪一行", "哪个技能", "怎么插", "怎么替换", "前后", "刚才", "这个位置"],
+        )
 }
 
 pub(crate) fn equipment_strategy_comparison_requested(question: &str) -> bool {
@@ -1122,6 +1219,44 @@ fn apply_rotation_diagnosis_contract(
     }
 }
 
+fn apply_rotation_edit_contract(
+    plan: &mut AnalysisPlanV1,
+    normalized_question: &str,
+    scenario: &ScenarioSnapshotV1,
+) {
+    if plan.task_type != AnalysisTaskType::RotationEditAnalysis {
+        return;
+    }
+    let is_macro = scenario
+        .simulation
+        .macro_text
+        .as_deref()
+        .is_some_and(|text| !text.trim().is_empty());
+    if !is_macro && scenario.simulation.sequence.is_empty() {
+        demote_required_dimension(&mut plan.playbook, "candidate_comparison");
+        plan.routing_signals.push("rotation_edit_missing_input".to_string());
+        return;
+    }
+    plan.routing_signals.push(
+        if is_macro { "rotation_input_macro" } else { "rotation_input_manual_sequence" }.to_string(),
+    );
+    let explicit_edit_or_test = contains_any(
+        normalized_question,
+        &[
+            "替换", "删除", "移除", "改成", "修改", "对比", "比较", "实测", "收益",
+            "提升", "dps",
+        ],
+    );
+    if explicit_edit_or_test {
+        plan.routing_signals
+            .push("candidate_comparison_explicitly_requested".to_string());
+    } else {
+        demote_required_dimension(&mut plan.playbook, "candidate_comparison");
+        plan.routing_signals
+            .push("rotation_location_first".to_string());
+    }
+}
+
 /// Resolve a short follow-up against the last server-selected playbook without
 /// trusting model prose as routing input. A self-contained current question always wins.
 pub fn select_analysis_plan_with_history(
@@ -1136,6 +1271,7 @@ fn task_type_for_playbook(playbook_id: &str) -> Option<AnalysisTaskType> {
     Some(match playbook_id {
         "current_rotation_baseline" => AnalysisTaskType::BaselineAnalysis,
         "rotation_stall_diagnosis" => AnalysisTaskType::RotationStallDiagnosis,
+        "rotation_edit_mapping" => AnalysisTaskType::RotationEditAnalysis,
         "rotation_practical_adaptation" => AnalysisTaskType::PracticalAdaptation,
         "haste_band_decision" => AnalysisTaskType::HasteDecision,
         "orange_weapon_timing" => AnalysisTaskType::OrangeWeaponTiming,
@@ -1211,6 +1347,9 @@ pub fn knowledge_prefetch(plan: &AnalysisPlanV1, question: &str) -> Option<Knowl
         (AnalysisTaskType::RotationStallDiagnosis, _) => {
             "旗舰端 分山劲 循环 盾击 斩刀 业火 援戈 怒气 血怒"
         }
+        (AnalysisTaskType::RotationEditAnalysis, _) => {
+            "旗舰端 分山劲白皮书 当前版本 资源分配"
+        }
         (AnalysisTaskType::PracticalAdaptation, _) => {
             "旗舰端 分山劲 实战 移动 转火 停手 延迟 分体态宏 盾飞 盾回"
         }
@@ -1238,7 +1377,11 @@ pub fn knowledge_prefetch(plan: &AnalysisPlanV1, question: &str) -> Option<Knowl
         }
         (AnalysisTaskType::GeneralAnalysis, _) => "旗舰端 分山劲 当前版本 白皮书",
     };
-    let rotation_terms = if plan
+    let rotation_terms = if plan.task_type == AnalysisTaskType::RotationEditAnalysis {
+        // The user's rare term is the strongest retrieval anchor for edit mapping. Generic
+        // diagnosis vocabulary dilutes it and can pull the search toward baseline articles.
+        ""
+    } else if plan
         .routing_signals
         .iter()
         .any(|signal| signal == "rotation_input_macro")
@@ -1270,6 +1413,11 @@ struct RouteProfile {
 }
 
 const ROUTE_PROFILES: &[RouteProfile] = &[
+    RouteProfile {
+        task_type: AnalysisTaskType::RotationEditAnalysis,
+        signals: &[("第几行", 10), ("哪一行", 10), ("插入", 9), ("插到", 9), ("可以插", 9), ("哪个技能可以替换", 10), ("放在哪", 8), ("落到哪", 8)],
+        prototypes: &["把攻略中的打法映射到当前循环的具体技能位置，并测试插入或替换", "这项机制应该落在序列第几行或宏的哪条语句", "某个技能应该放在哪两个技能之间"],
+    },
     RouteProfile {
         task_type: AnalysisTaskType::ReferenceLookup,
         signals: &[("是谁", 8), ("作者", 7), ("昵称", 7), ("哪位", 6), ("名字", 4)],
@@ -1374,7 +1522,7 @@ fn classify_task(
             };
             let surface_component = match (surface, profile.task_type) {
                 (Some(AnalysisSurface::Equipment), AnalysisTaskType::EquipmentAnalysis) => 500,
-                (Some(AnalysisSurface::Simulation), AnalysisTaskType::BaselineAnalysis | AnalysisTaskType::RotationStallDiagnosis | AnalysisTaskType::MacroAnalysis | AnalysisTaskType::PracticalAdaptation) => 180,
+                (Some(AnalysisSurface::Simulation), AnalysisTaskType::BaselineAnalysis | AnalysisTaskType::RotationStallDiagnosis | AnalysisTaskType::RotationEditAnalysis | AnalysisTaskType::MacroAnalysis | AnalysisTaskType::PracticalAdaptation) => 180,
                 _ => 0,
             };
             let score = lexical_score
@@ -1425,6 +1573,7 @@ fn classify_task(
                 (Some(AnalysisSurface::Equipment), AnalysisTaskType::EquipmentAnalysis)
                     | (Some(AnalysisSurface::Simulation), AnalysisTaskType::BaselineAnalysis)
                     | (Some(AnalysisSurface::Simulation), AnalysisTaskType::RotationStallDiagnosis)
+                    | (Some(AnalysisSurface::Simulation), AnalysisTaskType::RotationEditAnalysis)
                     | (Some(AnalysisSurface::Simulation), AnalysisTaskType::MacroAnalysis)
                     | (Some(AnalysisSurface::Simulation), AnalysisTaskType::PracticalAdaptation)
             );
@@ -1581,6 +1730,30 @@ fn playbook(task: AnalysisTaskType, client: DomainClient) -> AnalysisPlaybookV1 
                     "收束为验证实验",
                     "无法证明因果时只提出一个变量的对照实验。",
                 ),
+            ],
+        ),
+        AnalysisTaskType::RotationEditAnalysis => (
+            "rotation_edit_mapping",
+            "循环修改定位",
+            "先从当前攻略还原用户所指机制，再把它映射到当前输入的精确操作点；构造一个可执行候选并用同场景对照决定是否采用。",
+            &["scope", "scenario", "rotation_input", "rotation_anchor", "versioned_knowledge", "candidate_comparison"],
+            &["timeline", "baseline_metrics"],
+            &["get_current_scenario", "search_knowledge_base", "inspect_rotation_input", "analyze_timeline", "compare_scenarios"],
+            &["当前分山劲白皮书 技能循环 操作位置 资源分配", "用户原词 当前循环 插入 替换 前后技能"],
+            &[
+                "不得用常识猜测或擅自改写用户所用的领域术语；先由当前版本资料确定其含义",
+                "精确位置问题不能改答为通用输出基线、伤害构成或循环优缺点",
+                "手动序列必须使用从1开始的行号，并同时指出该行当前技能和前后技能；术语可能代表技能状态或复合连招，不能默认当成一个可插入技能",
+                "攻略中的‘某技能后’可能指施放后、增益结束后或该阶段结束后，必须由上下文判别，不能直接等同于下一行",
+                "宏修改必须指出原始宏行、条件与替换后的完整语句",
+                "候选对照未改善目标时，应明确不支持该插入或替换，不得为了给方案而发布改动",
+            ],
+            &[
+                ("term", "还原攻略术语", "从当前版本资料确认用户所指机制、触发条件和真正目标。"),
+                ("anchor", "定位当前操作点", "逐项读取当前输入，指出满足机制条件的精确行与相邻技能。"),
+                ("candidate", "构造单一候选", "按完整机制插入、替换或删除一个明确操作，保持其他环境与循环不变。"),
+                ("compare", "执行同场景对照", "比较候选的 DPS、技能构成、资源分配与相关时序。"),
+                ("decision", "回答具体位置", "给出可采用的位置，或说明当前证据不支持修改。"),
             ],
         ),
         AnalysisTaskType::PracticalAdaptation => (
@@ -2052,6 +2225,9 @@ fn satisfied_dimensions(
         dimensions.insert("scenario".to_string());
         dimensions.insert("rotation_input".to_string());
     }
+    if tools.contains("inspect_rotation_input") {
+        dimensions.insert("rotation_anchor".to_string());
+    }
     if has_fact_eligible_knowledge {
         dimensions.insert("versioned_knowledge".to_string());
     }
@@ -2143,22 +2319,6 @@ fn collect_knowledge_facts(
     }
 }
 
-pub fn plan_model_context(plan: &AnalysisPlanV1) -> String {
-    let json = serde_json::to_string(plan).unwrap_or_else(|_| "{}".to_string());
-    format!(
-        "<analysis_plan server_generated=\"true\" schema=\"{}\">\n{}\n</analysis_plan>",
-        ANALYSIS_PLAN_SCHEMA_V1, json
-    )
-}
-
-pub fn evidence_pack_model_context(pack: &EvidencePackV1) -> String {
-    let json = serde_json::to_string(pack).unwrap_or_else(|_| "{}".to_string());
-    format!(
-        "<evidence_pack server_generated=\"true\" schema=\"{}\">\n{}\n</evidence_pack>",
-        EVIDENCE_PACK_SCHEMA_V1, json
-    )
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TraceAnnotation {
     pub stage_id: String,
@@ -2173,25 +2333,30 @@ pub fn trace_annotation(
     evidence_count: usize,
 ) -> TraceAnnotation {
     let stage_candidates: &[&str] = match (kind, tool_name) {
-        ("planning" | "analysis_plan_selected", _) => &["scope", "entity"],
+        ("planning" | "analysis_context_prepared" | "analysis_plan_selected", _) => {
+            &["scope", "entity"]
+        }
+        ("tool_started" | "tool_finished", Some("get_current_scenario")) => {
+            &["scope", "baseline"]
+        }
         (
-            "tool_started" | "tool_finished" | "tool_deferred",
-            Some("get_current_scenario"),
-        ) => &["scope", "baseline"],
-        (
-            "tool_started" | "tool_finished" | "tool_deferred",
+            "tool_started" | "tool_finished",
             Some("search_knowledge_base"),
         ) => &["knowledge", "quality", "cross_check", "evidence", "lookup"],
         (
-            "tool_started" | "tool_finished" | "tool_deferred",
+            "tool_started" | "tool_finished",
+            Some("inspect_rotation_input"),
+        ) => &["anchor", "locate", "evidence"],
+        (
+            "tool_started" | "tool_finished",
             Some("simulate_scenario"),
         ) => &["baseline", "experiment", "compare", "evidence"],
         (
-            "tool_started" | "tool_finished" | "tool_deferred",
+            "tool_started" | "tool_finished",
             Some("analyze_timeline"),
         ) => &["locate", "quality", "cross_check", "baseline", "evidence"],
         (
-            "tool_started" | "tool_finished" | "tool_deferred",
+            "tool_started" | "tool_finished",
             Some(
                 "compare_scenarios"
                 | "compare_saved_macros"
@@ -2201,11 +2366,11 @@ pub fn trace_annotation(
             ),
         ) => &["compare", "experiment", "decision", "evidence"],
         (
-            "tool_started" | "tool_finished" | "tool_deferred",
+            "tool_started" | "tool_finished",
             Some("list_saved_artifacts" | "read_saved_artifact"),
         ) => &["saved", "scope", "evidence"],
         (
-            "tool_started" | "tool_finished" | "tool_deferred",
+            "tool_started" | "tool_finished",
             Some("inspect_equipment_workspace" | "search_equipment_catalog"),
         ) => &["equipment", "baseline", "evidence", "scope"],
         ("evidence_gap_requires_tool", Some("analyze_timeline")) => {
@@ -2214,14 +2379,8 @@ pub fn trace_annotation(
         ("evidence_gap_requires_tool", Some("compare_scenarios")) => {
             &["compare", "experiment", "decision"]
         }
-        ("evidence_coverage_checked" | "reasoning_state_updated", _) => {
-            &["quality", "cross_check", "evidence", "decision"]
-        }
         (
-            "reasoning_critique_started"
-            | "reasoning_critique_failed"
-            | "reasoning_critique_passed"
-            | "validating"
+            "validating"
             | "model_started"
             | "model_finished"
             | "provider_empty_retry"
@@ -2270,9 +2429,9 @@ pub fn trace_annotation(
             "理解分析任务".to_string(),
             "识别用户目标、当前上下文和需要验证的事实类型。".to_string(),
         ),
-        "analysis_plan_selected" => (
-            format!("选择任务路径 · {}", plan.playbook.label),
-            plan.playbook.goal.clone(),
+        "analysis_context_prepared" | "analysis_plan_selected" => (
+            "准备分析上下文".to_string(),
+            "已载入当前会话、页面与场景信息，接下来由模型决定分析步骤。".to_string(),
         ),
         "tool_started" => (format!("{} · 取得证据", stage_label), purpose.to_string()),
         "tool_finished" => (
@@ -2289,31 +2448,6 @@ pub fn trace_annotation(
             } else {
                 "本阶段没有产生新证据，后续不会据此扩展事实。".to_string()
             },
-        ),
-        "tool_deferred" => (
-            format!("{} · 暂缓", stage_label),
-            "前置诊断尚未完成；该动作不计为新证据，系统先执行必要的诊断步骤。"
-                .to_string(),
-        ),
-        "evidence_coverage_checked" => (
-            "检查专业维度覆盖".to_string(),
-            "按任务 Playbook 核对必需维度，缺失项只允许有界补证或明确写入边界。".to_string(),
-        ),
-        "reasoning_state_updated" => (
-            "更新问题推导状态".to_string(),
-            "逐项记录哪些判断已有证据、哪些可以开始分析、哪些仍需补证。".to_string(),
-        ),
-        "reasoning_critique_started" => (
-            "执行发布前批判检查".to_string(),
-            "检查任务完成度、证据归属、因果强度、范围漂移与干预必要性。".to_string(),
-        ),
-        "reasoning_critique_failed" => (
-            "批判检查要求修订".to_string(),
-            "报告需要基于已有证据修订，不新增事实或扩大工具范围。".to_string(),
-        ),
-        "reasoning_critique_passed" => (
-            "批判检查通过".to_string(),
-            "报告已满足当前任务的证据推导与发布边界。".to_string(),
         ),
         "model_started" => (
             "组织下一阶段".to_string(),
@@ -2394,6 +2528,7 @@ mod tests {
         let cases = [
             ("分析当前循环输出基线", "current_rotation_baseline"),
             ("为什么这里空转？", "rotation_stall_diagnosis"),
+            ("把阵云插到当前循环的哪个技能后面？", "rotation_edit_mapping"),
             (
                 "这套循环在移动、转火、停手和网络延迟变化时表现怎么样？",
                 "rotation_practical_adaptation",
@@ -2417,6 +2552,72 @@ mod tests {
                 expected
             );
         }
+    }
+
+    #[test]
+    fn composed_rotation_edit_route_handles_unknown_terms_and_resists_equipment_drift() {
+        let scenario = AgentRuntime::fixture().fixture_scenario();
+        let misleading_scores = [
+            SemanticRouteScoreV1 { task_type: AnalysisTaskType::EquipmentAnalysis, similarity_millis: 623 },
+            SemanticRouteScoreV1 { task_type: AnalysisTaskType::EncounterAdvice, similarity_millis: 608 },
+        ];
+        let first = select_analysis_plan_routed(
+            "按攻略讲的，哪里可以插白刀？",
+            None,
+            Some(AnalysisSurface::Simulation),
+            &misleading_scores,
+            None,
+            &scenario,
+        );
+        assert_eq!(first.task_type, AnalysisTaskType::RotationEditAnalysis);
+        assert_eq!(first.playbook.playbook_id, "rotation_edit_mapping");
+        assert_eq!(first.routing_decision.strategy, RoutingStrategy::ComposedIntent);
+        assert!(first.routing_signals.contains(&"intent_grounding:guide".to_string()));
+        for dimension in ["rotation_input", "rotation_anchor", "versioned_knowledge"] {
+            assert!(first.playbook.required_dimensions.contains(&dimension.to_string()));
+        }
+        assert!(!first
+            .playbook
+            .required_dimensions
+            .contains(&"candidate_comparison".to_string()));
+
+        let follow_up = select_analysis_plan_routed(
+            "具体点，哪个位置，第几行的哪个技能可以替换或者插入",
+            None,
+            Some(AnalysisSurface::Simulation),
+            &misleading_scores,
+            Some("rotation_edit_mapping"),
+            &scenario,
+        );
+        assert_eq!(follow_up.task_type, AnalysisTaskType::RotationEditAnalysis);
+        assert_ne!(follow_up.task_type, AnalysisTaskType::EquipmentAnalysis);
+        assert!(follow_up.playbook.preferred_tools.contains(&"compare_scenarios".to_string()));
+        assert!(follow_up
+            .playbook
+            .required_dimensions
+            .contains(&"candidate_comparison".to_string()));
+    }
+
+    #[test]
+    fn rotation_edit_composition_generalizes_without_known_game_jargon() {
+        let scenario = AgentRuntime::fixture().fixture_scenario();
+        for question in [
+            "这个打法应该落到循环哪一行？",
+            "把这个技能放在哪两个技能之间？",
+            "当前序列里哪个技能可以替换？",
+        ] {
+            let plan = select_analysis_plan(question, &scenario);
+            assert_eq!(plan.playbook.playbook_id, "rotation_edit_mapping", "{question}");
+        }
+        let equipment = select_analysis_plan_routed(
+            "这件装备应该替换哪个部位？",
+            None,
+            Some(AnalysisSurface::Equipment),
+            &[],
+            None,
+            &scenario,
+        );
+        assert_eq!(equipment.task_type, AnalysisTaskType::EquipmentAnalysis);
     }
 
     #[test]
@@ -2894,6 +3095,19 @@ mod tests {
         assert!(orange_query.query.contains("裂伤"));
         assert_eq!(orange_query.version_scope, "current_only");
 
+        let edit = select_analysis_plan_routed(
+            "按攻略讲的，哪里可以插白刀？",
+            None,
+            Some(AnalysisSurface::Simulation),
+            &[],
+            None,
+            &scenario,
+        );
+        let edit_query = knowledge_prefetch(&edit, "按攻略讲的，哪里可以插白刀？").unwrap();
+        assert!(edit_query.query.starts_with("按攻略讲的，哪里可以插白刀？"));
+        assert!(edit_query.query.contains("资源分配"));
+        assert_eq!(edit_query.category, None);
+
         let wujie = select_analysis_plan("无界分山劲·悟循环怎么打？", &scenario);
         assert!(knowledge_prefetch(&wujie, "无界分山劲·悟循环怎么打？")
             .unwrap()
@@ -2950,6 +3164,29 @@ mod tests {
     }
 
     #[test]
+    fn white_blade_is_a_source_bound_cangxuedao_variant() {
+        let claims = derive_domain_claims(DomainChunkContext {
+            document_id: "whitepaper",
+            title: "⭐暗影千机_ 分山劲白皮书",
+            season: "暗影千机（2026）",
+            heading: "资源分配",
+            text: "业火最后血怒已经结束，苍雪刀会成为触发不了血影的白刀。此时直接斩云绝绝，把援戈留给后面的苍雪刀。",
+            source_url: "https://www.yuque.com/sgyxy/cangyun/whitepaper-23",
+            yuque_url: "https://www.yuque.com/sgyxy/cangyun/whitepaper-23",
+            source_updated_at: "2026-09-04",
+            document_hash: "document",
+            chunk_hash: "chunk",
+        });
+        assert_eq!(claims.len(), 1);
+        assert_eq!(claims[0].claim_id, "fs-white-blade-001");
+        assert_eq!(claims[0].object.name, "未触发援戈·血影的苍雪刀斩绝绝");
+        assert!(claims[0]
+            .verification
+            .applicable_tools
+            .contains(&"inspect_rotation_input".to_string()));
+    }
+
+    #[test]
     fn evidence_pack_reports_missing_task_dimensions() {
         let runtime = AgentRuntime::fixture();
         let plan = select_analysis_plan("为什么这里空转？", &runtime.fixture_scenario());
@@ -2987,7 +3224,7 @@ mod tests {
     }
 
     #[test]
-    fn zero_evidence_and_deferred_tools_are_not_labeled_as_success() {
+    fn zero_evidence_tools_are_not_labeled_as_success() {
         let runtime = AgentRuntime::fixture();
         let plan = select_analysis_plan(
             "这套循环的整体输出和伤害结构怎么样？",
@@ -2996,9 +3233,6 @@ mod tests {
 
         let empty = trace_annotation(&plan, "tool_finished", Some("simulate_scenario"), 0);
         assert!(empty.label.contains("未产生新证据"));
-        let deferred = trace_annotation(&plan, "tool_deferred", Some("simulate_scenario"), 0);
-        assert!(deferred.label.contains("暂缓"));
-        assert!(!deferred.label.contains("已取得证据"));
     }
 
     #[test]

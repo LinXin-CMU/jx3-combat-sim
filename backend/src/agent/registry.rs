@@ -10,19 +10,30 @@ use super::equipment::{
 };
 use super::report::EvidenceStore;
 use super::{
-    analyze_timeline, compare_scenarios, get_current_scenario, simulate_scenario, AgentRuntime,
-    CandidatePatchV1, EvidenceEnvelopeV1, KnowledgeAudience, KnowledgeIndex, KnowledgeIndexError,
-    KnowledgeMountScope, KnowledgeSearchQuery, KnowledgeVersionContext, KnowledgeVersionScope,
-    PatchValueV1, SavedArtifactError, SavedArtifactKind, ScenarioPatchV1, ScenarioSnapshotV1,
-    ToolBudget, ToolError, COMPARE_SAVED_MACROS, COMPARE_SAVED_SCENARIOS, LIST_SAVED_ARTIFACTS,
-    MAX_KNOWLEDGE_RESULTS, READ_SAVED_ARTIFACT,
+    analyze_timeline, compare_scenarios, get_current_scenario, inspect_rotation_input,
+    simulate_scenario, AgentRuntime, CandidatePatchV1, EvidenceEnvelopeV1, KnowledgeAudience,
+    KnowledgeIndex, KnowledgeIndexError, KnowledgeMountScope, KnowledgeSearchQuery,
+    KnowledgeVersionContext, KnowledgeVersionScope, PatchValueV1, SavedArtifactError,
+    SavedArtifactKind, ScenarioPatchV1, ScenarioSnapshotV1, ToolBudget, ToolError,
+    COMPARE_SAVED_MACROS, COMPARE_SAVED_SCENARIOS, INSPECT_ROTATION_INPUT,
+    LIST_SAVED_ARTIFACTS, MAX_KNOWLEDGE_RESULTS, READ_SAVED_ARTIFACT,
 };
 use crate::macro_parser::parse_macro_text;
 use crate::Mount;
 
 pub const AGENT_TOOL_RESULT_SCHEMA_V1: &str = "agent-tool-result/v1";
+pub const ASK_USER_QUESTION: &str = "ask_user_question";
 pub const MAX_AGENT_CANDIDATES: usize = 3;
-pub const MAX_KNOWLEDGE_SEARCHES: u32 = 2;
+pub const MAX_KNOWLEDGE_SEARCHES: u32 = 6;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct AskUserQuestionArguments {
+    pub question: String,
+    pub reason: String,
+    #[serde(default)]
+    pub answer_hint: Option<String>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -38,6 +49,8 @@ pub struct AgentCandidateV1 {
 pub struct AgentScenarioPatchV1 {
     pub haste_level: Option<u32>,
     pub sequence: Option<Vec<String>>,
+    pub sequence_edits: Option<Vec<AgentSequenceEditV1>>,
+    pub sequence_splices: Option<Vec<AgentSequenceSpliceV1>>,
     pub network_delay: Option<u32>,
     pub initial_rage: Option<i32>,
     pub base_attack: Option<f64>,
@@ -46,6 +59,34 @@ pub struct AgentScenarioPatchV1 {
     pub talents: Option<Vec<u32>>,
     pub recipes: Option<Vec<u32>>,
     pub equipment: Option<std::collections::HashMap<String, u32>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AgentSequenceEditV1 {
+    pub op: AgentSequenceEditOperationV1,
+    /// One-based line number from inspect_rotation_input.
+    pub line_number: usize,
+    pub skill_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentSequenceEditOperationV1 {
+    InsertBefore,
+    InsertAfter,
+    Replace,
+    Remove,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AgentSequenceSpliceV1 {
+    /// Inclusive, one-based baseline range.
+    pub start_line_number: usize,
+    pub end_line_number: usize,
+    /// Empty removes the range; otherwise this replaces it atomically.
+    pub replacement: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -123,8 +164,18 @@ impl<'a> AgentToolRegistry<'a> {
         vec![
             ToolDefinition {
                 name: "get_current_scenario".to_string(),
-                description: "Read the immutable current scenario and its evidence identity. This must be called first.".to_string(),
+                description: "Read the immutable current scenario, resolved version and evidence identity.".to_string(),
                 parameters: empty_object_schema(),
+            },
+            ToolDefinition {
+                name: ASK_USER_QUESTION.to_string(),
+                description: "Pause this run and ask the user for one essential decision or missing fact. Use when the answer materially changes the analysis and local tools cannot determine it. The next user message continues in the same session.".to_string(),
+                parameters: ask_user_question_schema(),
+            },
+            ToolDefinition {
+                name: INSPECT_ROTATION_INPUT.to_string(),
+                description: "Search a manual rotation by skill name and return exact one-based line numbers with neighboring operations. Macro mode has no manual-operation rows; its complete parsed statements are provided by get_current_scenario. Results are paged at eight matches with next_start_index.".to_string(),
+                parameters: inspect_rotation_schema(),
             },
             ToolDefinition {
                 name: "simulate_scenario".to_string(),
@@ -133,7 +184,7 @@ impl<'a> AgentToolRegistry<'a> {
             },
             ToolDefinition {
                 name: "compare_scenarios".to_string(),
-                description: "Compare one to three explicit typed candidate patches against the immutable baseline. In each patch include only fields intentionally changed; omitted fields inherit the frozen baseline. Never send zero, empty arrays, or copied build fields as placeholders.".to_string(),
+                description: "Compare one to three typed candidate patches against the immutable baseline. Each patch contains the fields that change; omitted fields inherit the frozen baseline.".to_string(),
                 parameters: compare_schema(),
             },
             ToolDefinition {
@@ -143,12 +194,12 @@ impl<'a> AgentToolRegistry<'a> {
             },
             ToolDefinition {
                 name: LIST_SAVED_ARTIFACTS.to_string(),
-                description: "Search the current user's allow-listed saved simulator artifacts by their distinctive display name. Returns opaque artifact IDs; never accepts or exposes filesystem locations. Use this before reading or comparing saved data.".to_string(),
+                description: "Search the current user's saved simulator artifacts by display name and return opaque artifact IDs for reading or comparison.".to_string(),
                 parameters: list_saved_schema(),
             },
             ToolDefinition {
                 name: READ_SAVED_ARTIFACT.to_string(),
-                description: "Read one exact saved simulator artifact selected by an opaque ID returned from list_saved_artifacts. This is read-only and cannot access settings, credentials, sessions, caches, or unrelated files.".to_string(),
+                description: "Read one saved simulator artifact selected by an opaque ID from list_saved_artifacts.".to_string(),
                 parameters: read_saved_schema(),
             },
             ToolDefinition {
@@ -191,7 +242,7 @@ impl<'a> AgentToolRegistry<'a> {
         let mut definitions = Self::definitions();
         definitions.push(ToolDefinition {
             name: "search_knowledge_base".to_string(),
-            description: "Search the bounded local JX3 knowledge snapshot. The server adaptively selects evidence count and source roles; do not request a fixed top-k. Version scope is enforced by the server; use reference_lookup only for version-independent people, author, source, or nickname identity; use null for category unless an exact allowed category is needed, and copy an exact allowed season for specific_season.".to_string(),
+            description: "Search the local JX3 knowledge snapshot. The server selects evidence count and source roles, applies version scope, and supports reference_lookup for people, authors, sources and nicknames. Use null for broad category search and an allowed season name for specific_season.".to_string(),
             parameters: knowledge_search_schema(seasons, categories),
         });
         definitions
@@ -226,15 +277,6 @@ impl<'a> AgentToolRegistry<'a> {
         )
     }
 
-    pub fn rotation_diagnosis_required(tool_name: &str) -> ToolDispatchOutcome {
-        failure(
-            tool_name,
-            "rotation_diagnosis_required",
-            "baseline timeline diagnosis must complete before this experiment; call analyze_timeline next",
-            false,
-        )
-    }
-
     pub fn dispatch(
         &mut self,
         trace_id: &str,
@@ -260,6 +302,39 @@ impl<'a> AgentToolRegistry<'a> {
                         self.scenario_read = true;
                         self.success(tool_name, vec![serialize_evidence(evidence)])
                     }
+                    Err(error) => tool_failure(tool_name, error),
+                }
+            }
+            INSPECT_ROTATION_INPUT => {
+                let args = match serde_json::from_value::<InspectRotationArguments>(arguments) {
+                    Ok(args) => args,
+                    Err(_) => return invalid_arguments(tool_name),
+                };
+                if args.limit == 0
+                    || args.limit > 32
+                    || args.context_radius > 8
+                    || args.query.as_ref().is_some_and(|query| {
+                        query.trim().is_empty()
+                            || query.chars().count() > 64
+                            || query.chars().any(char::is_control)
+                    })
+                {
+                    return invalid_arguments(tool_name);
+                }
+                match inspect_rotation_input(
+                    trace_id,
+                    self.scenario,
+                    args.query.as_deref(),
+                    args.start_index,
+                    args.limit,
+                    if args.query.is_some() {
+                        args.context_radius.max(6)
+                    } else {
+                        args.context_radius
+                    },
+                    self.runtime.provenance(),
+                ) {
+                    Ok(evidence) => self.success(tool_name, vec![serialize_evidence(evidence)]),
                     Err(error) => tool_failure(tool_name, error),
                 }
             }
@@ -620,6 +695,16 @@ impl<'a> AgentToolRegistry<'a> {
     ) -> Result<CandidatePatchV1, &'static str> {
         let patch = candidate.patch;
         validate_agent_patch(&patch)?;
+        let sequence = if let Some(splices) = patch.sequence_splices.as_deref() {
+            Some(apply_sequence_splices(
+                &self.scenario.simulation.sequence,
+                splices,
+            )?)
+        } else if let Some(edits) = patch.sequence_edits.as_deref() {
+            Some(apply_sequence_edits(&self.scenario.simulation.sequence, edits)?)
+        } else {
+            patch.sequence.clone()
+        };
         let attributes = if let Some(base_attack) = patch.base_attack {
             let mut attributes = self
                 .scenario
@@ -648,7 +733,7 @@ impl<'a> AgentToolRegistry<'a> {
             label: candidate.label,
             patch: ScenarioPatchV1 {
                 haste_level: patch.haste_level,
-                sequence: patch.sequence,
+                sequence,
                 network_delay: patch.network_delay,
                 initial_rage: patch.initial_rage.map(PatchValueV1::Set),
                 attributes,
@@ -685,6 +770,12 @@ impl<'a> AgentToolRegistry<'a> {
 }
 
 fn validate_agent_patch(patch: &AgentScenarioPatchV1) -> Result<(), &'static str> {
+    let sequence_patch_kinds = usize::from(patch.sequence.is_some())
+        + usize::from(patch.sequence_edits.is_some())
+        + usize::from(patch.sequence_splices.is_some());
+    if sequence_patch_kinds > 1 {
+        return Err("conflicting_sequence_patch");
+    }
     if patch.haste_level.is_some_and(|value| value > 10_000_000) {
         return Err("invalid_haste_level");
     }
@@ -718,6 +809,40 @@ fn validate_agent_patch(patch: &AgentScenarioPatchV1) -> Result<(), &'static str
             })
     }) {
         return Err("invalid_sequence");
+    }
+    if patch.sequence_edits.as_ref().is_some_and(|edits| {
+        edits.is_empty()
+            || edits.len() > 4
+            || edits.iter().any(|edit| {
+                let valid_skill = edit.skill_name.as_deref().is_some_and(|skill| {
+                    !skill.trim().is_empty()
+                        && skill.chars().count() <= 128
+                        && !skill.chars().any(char::is_control)
+                });
+                edit.line_number == 0
+                    || match edit.op {
+                        AgentSequenceEditOperationV1::Remove => edit.skill_name.is_some(),
+                        _ => !valid_skill,
+                    }
+            })
+    }) {
+        return Err("invalid_sequence_edits");
+    }
+    if patch.sequence_splices.as_ref().is_some_and(|splices| {
+        splices.is_empty()
+            || splices.len() > 2
+            || splices.iter().any(|splice| {
+                splice.start_line_number == 0
+                    || splice.end_line_number < splice.start_line_number
+                    || splice.replacement.len() > 16
+                    || splice.replacement.iter().any(|skill| {
+                        skill.trim().is_empty()
+                            || skill.chars().count() > 128
+                            || skill.chars().any(char::is_control)
+                    })
+            })
+    }) {
+        return Err("invalid_sequence_splices");
     }
     if let Some(macro_text) = patch.macro_text.as_deref() {
         if macro_text.trim().is_empty()
@@ -753,9 +878,82 @@ fn validate_agent_patch(patch: &AgentScenarioPatchV1) -> Result<(), &'static str
     Ok(())
 }
 
+fn apply_sequence_edits(
+    baseline: &[String],
+    edits: &[AgentSequenceEditV1],
+) -> Result<Vec<String>, &'static str> {
+    if baseline.is_empty() {
+        return Err("missing_sequence");
+    }
+    let mut seen = std::collections::HashSet::new();
+    if edits.iter().any(|edit| {
+        edit.line_number > baseline.len() || !seen.insert(edit.line_number)
+    }) {
+        return Err("invalid_sequence_edit_line");
+    }
+    let mut ordered = edits.to_vec();
+    ordered.sort_by(|left, right| right.line_number.cmp(&left.line_number));
+    let mut sequence = baseline.to_vec();
+    for edit in ordered {
+        let index = edit.line_number - 1;
+        match edit.op {
+            AgentSequenceEditOperationV1::InsertBefore => {
+                sequence.insert(index, edit.skill_name.ok_or("missing_sequence_edit_skill")?);
+            }
+            AgentSequenceEditOperationV1::InsertAfter => {
+                sequence.insert(
+                    index + 1,
+                    edit.skill_name.ok_or("missing_sequence_edit_skill")?,
+                );
+            }
+            AgentSequenceEditOperationV1::Replace => {
+                sequence[index] = edit.skill_name.ok_or("missing_sequence_edit_skill")?;
+            }
+            AgentSequenceEditOperationV1::Remove => {
+                sequence.remove(index);
+            }
+        }
+    }
+    Ok(sequence)
+}
+
+fn apply_sequence_splices(
+    baseline: &[String],
+    splices: &[AgentSequenceSpliceV1],
+) -> Result<Vec<String>, &'static str> {
+    if baseline.is_empty() {
+        return Err("missing_sequence");
+    }
+    let mut ordered = splices.to_vec();
+    ordered.sort_by(|left, right| right.start_line_number.cmp(&left.start_line_number));
+    let mut previous_start = baseline.len() + 1;
+    for splice in &ordered {
+        if splice.end_line_number > baseline.len() || splice.end_line_number >= previous_start {
+            return Err("invalid_sequence_splice_range");
+        }
+        previous_start = splice.start_line_number;
+    }
+    let mut sequence = baseline.to_vec();
+    for splice in ordered {
+        let start = splice.start_line_number - 1;
+        let end_exclusive = splice.end_line_number;
+        sequence.splice(start..end_exclusive, splice.replacement);
+    }
+    Ok(sequence)
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct EmptyArguments {}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InspectRotationArguments {
+    query: Option<String>,
+    start_index: usize,
+    limit: usize,
+    context_radius: usize,
+}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -846,6 +1044,10 @@ pub(super) fn normalize_reference_query(value: &str) -> String {
     // Remove conversational intent words so exact alias matching and deterministic
     // relationship extraction can run even when a provider submits a full question.
     for noise in [
+        "请检索",
+        "检索",
+        "相关人物",
+        "相关",
         "给我一个名字",
         "给出一个名字",
         "告诉我名字",
@@ -1041,6 +1243,33 @@ fn empty_object_schema() -> Value {
     })
 }
 
+fn ask_user_question_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["question", "reason"],
+        "properties": {
+            "question": {"type": "string", "minLength": 1, "maxLength": 500},
+            "reason": {"type": "string", "minLength": 1, "maxLength": 500},
+            "answer_hint": {"type": ["string", "null"], "maxLength": 240}
+        }
+    })
+}
+
+fn inspect_rotation_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "query": {"type": ["string", "null"], "minLength": 1, "maxLength": 64},
+            "start_index": {"type": "integer", "minimum": 0},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 32},
+            "context_radius": {"type": "integer", "minimum": 0, "maximum": 8}
+        },
+        "required": ["query", "start_index", "limit", "context_radius"],
+        "additionalProperties": false
+    })
+}
+
 fn compare_schema() -> Value {
     json!({
         "type": "object",
@@ -1058,6 +1287,36 @@ fn compare_schema() -> Value {
                             "properties": {
                                 "haste_level": {"type": ["integer", "null"], "minimum": 0, "maximum": 10000000},
                                 "sequence": {"type": ["array", "null"], "maxItems": 256, "items": {"type": "string", "maxLength": 128}},
+                                "sequence_edits": {
+                                    "type": ["array", "null"],
+                                    "minItems": 1,
+                                    "maxItems": 4,
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "op": {"type": "string", "enum": ["insert_before", "insert_after", "replace", "remove"]},
+                                            "line_number": {"type": "integer", "minimum": 1},
+                                            "skill_name": {"type": ["string", "null"], "minLength": 1, "maxLength": 128}
+                                        },
+                                        "required": ["op", "line_number", "skill_name"],
+                                        "additionalProperties": false
+                                    }
+                                },
+                                "sequence_splices": {
+                                    "type": ["array", "null"],
+                                    "minItems": 1,
+                                    "maxItems": 2,
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "start_line_number": {"type": "integer", "minimum": 1},
+                                            "end_line_number": {"type": "integer", "minimum": 1},
+                                            "replacement": {"type": "array", "maxItems": 16, "items": {"type": "string", "minLength": 1, "maxLength": 128}}
+                                        },
+                                        "required": ["start_line_number", "end_line_number", "replacement"],
+                                        "additionalProperties": false
+                                    }
+                                },
                                 "network_delay": {"type": ["integer", "null"], "minimum": 0, "maximum": 5000},
                                 "initial_rage": {"type": ["integer", "null"], "minimum": -1000, "maximum": 1000},
                                 "base_attack": {"type": ["number", "null"], "minimum": 0, "maximum": 1000000000},
@@ -1175,6 +1434,8 @@ mod tests {
             names,
             vec![
                 "get_current_scenario",
+                "ask_user_question",
+                "inspect_rotation_input",
                 "simulate_scenario",
                 "compare_scenarios",
                 "analyze_timeline",
@@ -1214,7 +1475,7 @@ mod tests {
         ];
         let categories = vec!["基础".to_string(), "白皮书".to_string()];
         let definitions = AgentToolRegistry::definitions_with_knowledge(&seasons, &categories);
-        assert_eq!(definitions.len(), 13);
+        assert_eq!(definitions.len(), 15);
         let knowledge = definitions.last().unwrap();
         assert_eq!(knowledge.name, "search_knowledge_base");
         assert_eq!(knowledge.parameters["additionalProperties"], false);
@@ -1329,13 +1590,21 @@ mod tests {
         );
         let second = registry.dispatch("knowledge-run", "search_knowledge_base", arguments.clone());
         assert_eq!(second.output["ok"], true);
-        let third = registry.dispatch("knowledge-run", "search_knowledge_base", arguments);
+        for _ in 2..MAX_KNOWLEDGE_SEARCHES {
+            let next = registry.dispatch(
+                "knowledge-run",
+                "search_knowledge_base",
+                arguments.clone(),
+            );
+            assert_eq!(next.output["ok"], true);
+        }
+        let exhausted = registry.dispatch("knowledge-run", "search_knowledge_base", arguments);
         assert_eq!(
-            third.output["error"]["code"],
+            exhausted.output["error"]["code"],
             "knowledge_search_budget_exhausted"
         );
-        assert!(third.budget_exhausted);
-        assert_eq!(registry.used_knowledge_searches(), 2);
+        assert!(exhausted.budget_exhausted);
+        assert_eq!(registry.used_knowledge_searches(), MAX_KNOWLEDGE_SEARCHES);
 
         let expected_root = env::temp_dir();
         assert!(root.starts_with(&expected_root));
@@ -1355,6 +1624,71 @@ mod tests {
             ..AgentScenarioPatchV1::default()
         };
         assert_eq!(validate_agent_patch(&oversized), Err("invalid_sequence"));
+
+        let conflicting = AgentScenarioPatchV1 {
+            sequence: Some(vec!["盾击".to_string()]),
+            sequence_edits: Some(vec![AgentSequenceEditV1 {
+                op: AgentSequenceEditOperationV1::Replace,
+                line_number: 1,
+                skill_name: Some("盾压".to_string()),
+            }]),
+            ..AgentScenarioPatchV1::default()
+        };
+        assert_eq!(
+            validate_agent_patch(&conflicting),
+            Err("conflicting_sequence_patch")
+        );
+    }
+
+    #[test]
+    fn one_based_sequence_edits_build_a_complete_candidate_server_side() {
+        let baseline = vec!["斩刀".to_string(), "绝刀".to_string(), "盾回".to_string()];
+        let edited = apply_sequence_edits(
+            &baseline,
+            &[AgentSequenceEditV1 {
+                op: AgentSequenceEditOperationV1::InsertBefore,
+                line_number: 3,
+                skill_name: Some("苍雪刀".to_string()),
+            }],
+        )
+        .unwrap();
+        assert_eq!(edited, vec!["斩刀", "绝刀", "苍雪刀", "盾回"]);
+
+        let replaced = apply_sequence_edits(
+            &baseline,
+            &[AgentSequenceEditV1 {
+                op: AgentSequenceEditOperationV1::Replace,
+                line_number: 2,
+                skill_name: Some("苍雪刀".to_string()),
+            }],
+        )
+        .unwrap();
+        assert_eq!(replaced, vec!["斩刀", "苍雪刀", "盾回"]);
+
+        let removed = apply_sequence_edits(
+            &baseline,
+            &[AgentSequenceEditV1 {
+                op: AgentSequenceEditOperationV1::Remove,
+                line_number: 2,
+                skill_name: None,
+            }],
+        )
+        .unwrap();
+        assert_eq!(removed, vec!["斩刀", "盾回"]);
+
+        let spliced = apply_sequence_splices(
+            &["业火", "盾击", "盾击", "盾飞", "血怒", "绝刀"].map(str::to_string),
+            &[AgentSequenceSpliceV1 {
+                start_line_number: 2,
+                end_line_number: 5,
+                replacement: vec!["盾飞", "斩刀", "绝刀", "绝刀"]
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect(),
+            }],
+        )
+        .unwrap();
+        assert_eq!(spliced, vec!["业火", "盾飞", "斩刀", "绝刀", "绝刀", "绝刀"]);
     }
 
     #[test]

@@ -28,7 +28,7 @@ const MAX_QUERY_CHARACTERS: usize = 200;
 pub const MAX_KNOWLEDGE_RESULTS: usize = 8;
 const CHUNK_CHARACTERS: usize = 1_200;
 const CHUNK_OVERLAP: usize = 120;
-const SNIPPET_CHARACTERS: usize = 420;
+const SNIPPET_CHARACTERS: usize = 900;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KnowledgeIndexError {
@@ -820,9 +820,15 @@ impl KnowledgeIndex {
                     reciprocal_rank_fusion(
                         lexical_ranks.get(&chunk_index).copied(),
                         dense_ranks.get(&chunk_index).copied(),
-                    )
+                    ) + distinctive_literal_bonus(
+                        &self.chunks[chunk_index],
+                        &query_terms,
+                        &self.document_frequency,
+                        self.chunks.len(),
+                    ) + domain_entity_bonus(&self.chunks[chunk_index], &raw_query)
                 } else {
                     *lexical_scores.get(&chunk_index).unwrap_or(&0.0)
+                        + domain_entity_bonus(&self.chunks[chunk_index], &raw_query)
                 };
                 (score > 0.0).then_some((chunk_index, score, version_match))
             })
@@ -883,7 +889,12 @@ impl KnowledgeIndex {
                     season: chunk.season.clone(),
                     category: chunk.category.clone(),
                     heading: chunk.heading.clone(),
-                    snippet: snippet(&chunk.text),
+                    snippet: snippet_for_query(
+                        &chunk.text,
+                        &query_terms,
+                        &self.document_frequency,
+                        self.chunks.len(),
+                    ),
                     source_url: chunk.source_url.clone(),
                     yuque_url: chunk.yuque_url.clone(),
                     source_site: chunk.source_site.clone(),
@@ -1282,6 +1293,55 @@ fn reciprocal_rank_fusion(lexical_rank: Option<usize>, dense_rank: Option<usize>
     (lexical + dense) * 1_000.0
 }
 
+/// RRF deliberately discards raw score magnitude, which can let a semantically
+/// nearby paragraph outrank the paragraph containing a rare term verbatim.
+/// Preserve hybrid recall while giving one small, corpus-aware tie-break to the
+/// rarest multi-character query term present in the chunk body.
+fn distinctive_literal_bonus(
+    chunk: &KnowledgeChunk,
+    query_terms: &BTreeSet<String>,
+    document_frequency: &HashMap<String, usize>,
+    chunk_count: usize,
+) -> f64 {
+    let text = chunk.text.to_lowercase();
+    let rarity_cutoff = (chunk_count / 100).max(8);
+    let strongest = query_terms
+        .iter()
+        .filter(|term| term.chars().count() >= 2 && text.contains(term.as_str()))
+        .filter_map(|term| {
+            let frequency = *document_frequency.get(term)?;
+            (frequency <= rarity_cutoff).then(|| {
+                ((chunk_count as f64 + 1.0) / (frequency as f64 + 1.0)).ln()
+            })
+        })
+        .fold(0.0_f64, f64::max);
+    strongest.min(6.0) * 0.8
+}
+
+/// Domain claims are extracted from source text during indexing. When the user
+/// names one of those entities verbatim, keep its defining chunk ahead of a
+/// merely adjacent paragraph from the same document. This complements lexical
+/// and dense retrieval without changing version or fact-eligibility filters.
+fn domain_entity_bonus(chunk: &KnowledgeChunk, normalized_query: &str) -> f64 {
+    chunk
+        .domain_claims
+        .iter()
+        .map(|claim| {
+            if claim.subject.name.chars().count() >= 2
+                && normalized_query.contains(&claim.subject.name.to_lowercase())
+            {
+                120.0
+            } else if claim.object.name.chars().count() >= 2
+                && normalized_query.contains(&claim.object.name.to_lowercase())
+            {
+                60.0
+            } else {
+                0.0
+            }
+        })
+        .fold(0.0_f64, f64::max)
+}
+
 fn fact_eligible(chunk: &KnowledgeChunk) -> bool {
     chunk.quality == KnowledgeQuality::FullText && chunk.version_warning.is_none()
 }
@@ -1410,7 +1470,7 @@ fn clean_markdown_for_index(markdown: &str) -> String {
         if trimmed.contains("data:image") || trimmed.starts_with("<img") {
             continue;
         }
-        let cleaned = strip_link_destinations(trimmed);
+        let cleaned = strip_html_tags(&strip_link_destinations(trimmed));
         if !cleaned.trim().is_empty() {
             output.push_str(cleaned.trim());
             output.push('\n');
@@ -1424,6 +1484,26 @@ fn strip_link_destinations(value: &str) -> String {
     let bytes = value.as_bytes();
     let mut index = 0;
     while index < bytes.len() {
+        if index + 1 < bytes.len() && bytes[index] == b'!' && bytes[index + 1] == b'[' {
+            let mut cursor = index + 2;
+            while cursor < bytes.len() && bytes[cursor] != b']' {
+                cursor += 1;
+            }
+            if cursor + 1 < bytes.len() && bytes[cursor + 1] == b'(' {
+                cursor += 2;
+                let mut depth = 1_u32;
+                while cursor < bytes.len() && depth > 0 {
+                    match bytes[cursor] {
+                        b'(' => depth += 1,
+                        b')' => depth -= 1,
+                        _ => {}
+                    }
+                    cursor += 1;
+                }
+                index = cursor;
+                continue;
+            }
+        }
         if index + 1 < bytes.len() && bytes[index] == b']' && bytes[index + 1] == b'(' {
             output.push(']');
             index += 2;
@@ -1442,7 +1522,21 @@ fn strip_link_destinations(value: &str) -> String {
         output.push(ch);
         index += ch.len_utf8();
     }
-    output.replace("![", "[")
+    output
+}
+
+fn strip_html_tags(value: &str) -> String {
+    let mut output = String::with_capacity(value.len());
+    let mut in_tag = false;
+    for character in value.chars() {
+        match character {
+            '<' => in_tag = true,
+            '>' if in_tag => in_tag = false,
+            _ if !in_tag => output.push(character),
+            _ => {}
+        }
+    }
+    output
 }
 
 fn split_markdown_chunks(markdown: &str) -> Vec<(String, String)> {
@@ -1666,6 +1760,52 @@ fn snippet(text: &str) -> String {
     result
 }
 
+fn snippet_for_query(
+    text: &str,
+    query_terms: &BTreeSet<String>,
+    document_frequency: &HashMap<String, usize>,
+    chunk_count: usize,
+) -> String {
+    let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let lower = collapsed.to_lowercase();
+    let anchor = query_terms
+        .iter()
+        .filter(|term| term.chars().count() >= 2 && lower.contains(term.as_str()))
+        .filter_map(|term| {
+            let frequency = *document_frequency.get(term)?;
+            let rarity = ((chunk_count as f64 + 1.0) / (frequency as f64 + 1.0)).ln();
+            Some((term, rarity, term.chars().count()))
+        })
+        .max_by(|left, right| {
+            left.1
+                .partial_cmp(&right.1)
+                .unwrap_or(Ordering::Equal)
+                .then_with(|| left.2.cmp(&right.2))
+        })
+        .map(|(term, _, _)| term);
+    let Some(anchor) = anchor else {
+        return snippet(text);
+    };
+    let Some(byte_position) = lower.find(anchor.as_str()) else {
+        return snippet(text);
+    };
+    let anchor_character = lower[..byte_position].chars().count();
+    // Explanatory constraints usually follow a term's first use. Keep more room after the
+    // rarest query anchor instead of centering it mechanically.
+    let start = anchor_character.saturating_sub(SNIPPET_CHARACTERS / 4);
+    let characters = collapsed.chars().collect::<Vec<_>>();
+    let end = (start + SNIPPET_CHARACTERS).min(characters.len());
+    let mut result = String::new();
+    if start > 0 {
+        result.push('…');
+    }
+    result.extend(characters[start..end].iter());
+    if end < characters.len() {
+        result.push('…');
+    }
+    result
+}
+
 fn sha256(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
@@ -1681,6 +1821,25 @@ mod tests {
     use serde::Deserialize;
     use serde_json::json;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn markdown_cleanup_removes_visual_noise_but_keeps_link_labels_and_explanations() {
+        let markdown = concat!(
+            "# 援戈分配\n",
+            "> ![技能图标](../../../img/skill.png)![另一个图标](../../../img/other.png)\n",
+            "<font style=\"color:red\">业火后打白刀</font>，",
+            "参考[完整攻略](https://example.com/guide)。\n",
+            "除了业火末尾自然出现的白刀外，不建议刻意制造。\n",
+        );
+        let cleaned = clean_markdown_for_index(markdown);
+        assert!(!cleaned.contains("技能图标"));
+        assert!(!cleaned.contains("skill.png"));
+        assert!(!cleaned.contains("<font"));
+        assert!(!cleaned.contains("https://example.com"));
+        assert!(cleaned.contains("业火后打白刀"));
+        assert!(cleaned.contains("[完整攻略]"));
+        assert!(cleaned.contains("不建议刻意制造"));
+    }
 
     struct Fixture {
         root: PathBuf,
@@ -2448,6 +2607,28 @@ mod tests {
             .domain_relations
             .iter()
             .any(|relation| relation.claim_id == claim.claim_id));
+
+        let white_blade = index
+            .search_with_audience(
+                &KnowledgeVersionContext::from_game_version(GameVersion::AnYingQianJi),
+                KnowledgeSearchQuery {
+                    query: "苍云 白刀 盾飞 循环".to_string(),
+                    version_scope: KnowledgeVersionScope::CurrentOnly,
+                    category: None,
+                    top_k: MAX_KNOWLEDGE_RESULTS,
+                },
+                KnowledgeAudience::from_question(
+                    "旗舰端分山劲白刀",
+                    Some(KnowledgeMountScope::Fenshanjin),
+                ),
+            )
+            .unwrap();
+        assert!(white_blade.results.iter().any(|result| {
+            result
+                .domain_claims
+                .iter()
+                .any(|claim| claim.claim_id == "fs-white-blade-001")
+        }));
     }
 
     #[test]
@@ -2674,6 +2855,8 @@ mod tests {
         #[serde(default)]
         expected_titles_any: Vec<String>,
         #[serde(default)]
+        expected_snippet_contains_all: Vec<String>,
+        #[serde(default)]
         expected_version_match: Option<String>,
         #[serde(default)]
         expected_fact_eligible: Option<bool>,
@@ -2826,6 +3009,15 @@ mod tests {
                             result.fact_eligible, expected,
                             "fact eligibility mismatch in {}",
                             case.id
+                        );
+                    }
+                    for expected in &case.expected_snippet_contains_all {
+                        assert!(
+                            result.snippet.contains(expected),
+                            "snippet for {} did not contain {:?}: {}",
+                            case.id,
+                            expected,
+                            result.snippet
                         );
                     }
                     println!(

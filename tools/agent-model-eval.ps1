@@ -41,7 +41,7 @@ function Invoke-ExpectedError {
     Assert-True ([int]$response.StatusCode -eq $Status) "Unexpected HTTP status for $Code."
     if (-not [string]::IsNullOrWhiteSpace($errorRecord.ErrorDetails.Message)) {
       $payload = $errorRecord.ErrorDetails.Message | ConvertFrom-Json
-    } elseif ($response -is [System.Net.Http.HttpResponseMessage]) {
+    } elseif ($response.PSObject.Properties.Name -contains 'Content') {
       $payload = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult() | ConvertFrom-Json
     } else {
       $reader = New-Object System.IO.StreamReader($response.GetResponseStream())

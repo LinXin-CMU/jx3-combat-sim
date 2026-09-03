@@ -185,6 +185,10 @@ body.agent-fullheight #page-agent.active {
 .agent-report-head span { color: var(--agent-muted); font-size: 11px; }
 .agent-report-head > .agent-card-actions { flex: 0 0 auto; }
 .agent-report-summary { padding: 11px 12px; font-size: 13px; line-height: 1.65; }
+.agent-clarification { border-color: var(--gold, #b98a45); }
+.agent-clarification-reason,
+.agent-clarification-hint { margin: 8px 0 0; font-size: 12px; line-height: 1.6; color: var(--text-muted); }
+.agent-clarification-hint { color: var(--gold-dark, #8b642f); }
 .agent-finding { padding: 10px 12px; border-top: 1px solid var(--agent-line); }
 .agent-finding h4 { margin: 0 0 5px; font-size: 13px; }
 .agent-finding p { margin: 0; color: var(--agent-muted); font-size: 12px; line-height: 1.6; }
@@ -528,6 +532,9 @@ body.agent-fullheight #page-agent.active {
 .sim-ai-result-head span { color: var(--agent-muted); font-size: 11px; }
 .sim-ai-result-head > .agent-card-actions { flex: 0 0 auto; }
 .sim-ai-result-summary { padding: 10px 11px; font-size: 12px; line-height: 1.65; }
+.sim-ai-clarification-reason,
+.sim-ai-clarification-hint { margin: 0; padding: 8px 11px 0; font-size: 11px; line-height: 1.55; color: var(--text-muted); }
+.sim-ai-clarification-hint { color: var(--gold-dark, #8b642f); }
 .sim-ai-result-finding { padding: 9px 11px; border-top: 1px solid var(--agent-line); }
 .sim-ai-result-finding b { display: block; margin-bottom: 3px; font-size: 12px; }
 .sim-ai-result-finding p { margin: 0; color: var(--agent-muted); font-size: 11px; line-height: 1.55; }

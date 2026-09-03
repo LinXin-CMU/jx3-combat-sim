@@ -15,7 +15,6 @@ mod knowledge_dense;
 pub mod orchestrator;
 pub mod prompt;
 pub mod provider;
-pub mod reasoning;
 pub mod registry;
 pub mod report;
 pub mod run;
@@ -32,8 +31,8 @@ pub use compare::{
 };
 pub use domain::{
     build_evidence_pack, derive_domain_claims, domain_index_hash, domain_relations,
-    evidence_pack_model_context, knowledge_prefetch, plan_model_context, select_analysis_plan,
-    select_analysis_plan_routed, select_analysis_plan_with_history, AnalysisPlanV1,
+    knowledge_prefetch, select_analysis_plan, select_analysis_plan_routed,
+    select_analysis_plan_with_history, AnalysisPlanV1,
     AnalysisPlaybookV1, AnalysisSurface, AnalysisTaskType, DomainChunkContext, DomainClaimV1,
     DomainRelationV1, EvidencePackV1, EvidenceSufficiency, KnowledgePrefetchV1,
     RoutingCandidateV1, RoutingDecisionV1, RoutingStrategy, SemanticRouteScoreV1,
@@ -47,11 +46,6 @@ pub use knowledge::{
     KnowledgeVersionScope, MAX_KNOWLEDGE_RESULTS,
 };
 pub use runtime::AgentRuntime;
-pub use reasoning::{
-    audit_reasoning_contract, build_reasoning_state, reasoning_state_model_context,
-    normalize_reasoning_contract, ReasoningCheckpointStatus, ReasoningCheckpointV1,
-    ReasoningStateV1, REASONING_STATE_SCHEMA_V1,
-};
 pub use saved::{
     list_saved_artifacts, prepare_saved_macro_comparison, prepare_saved_scenario_comparison,
     read_saved_artifact, PreparedSavedComparison, SavedArtifactCatalog, SavedArtifactDocument,
@@ -64,6 +58,7 @@ pub use timeline::{
     TimelineAnalysis, TimelineExecution, WaitEvidence,
 };
 pub use tools::{
-    get_current_scenario, simulate_scenario, ScenarioSummary, SimulationExecution,
-    SimulationSummary, SimulatorContext, ToolBudget, ToolError,
+    get_current_scenario, inspect_rotation_input, simulate_scenario, RotationInputEntryV1,
+    RotationInputInspectionV1, RotationInputMatchV1, ScenarioSummary, SimulationExecution,
+    SimulationSummary, SimulatorContext, ToolBudget, ToolError, INSPECT_ROTATION_INPUT,
 };

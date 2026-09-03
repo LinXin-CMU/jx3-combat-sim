@@ -11,6 +11,7 @@ use super::evidence::{validate_trace_id, EvidenceEnvelopeV1, EvidenceError, Tool
 use super::schema::{game_version_id, mount_id, ScenarioError, ScenarioSnapshotV1};
 
 pub const GET_CURRENT_SCENARIO: &str = "get_current_scenario";
+pub const INSPECT_ROTATION_INPUT: &str = "inspect_rotation_input";
 pub const SIMULATE_SCENARIO: &str = "simulate_scenario";
 
 pub struct SimulatorContext<'a> {
@@ -294,6 +295,151 @@ pub struct ManualOperationSummary {
     pub skill_name: String,
     pub channel_ticks: Option<u32>,
     pub timing_offset_seconds: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RotationInputEntryV1 {
+    /// Stable zero-based index for typed tool patches.
+    pub sequence_index: usize,
+    /// Human-facing one-based line number.
+    pub line_number: usize,
+    pub skill_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_ticks: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timing_offset_seconds: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RotationInputMatchV1 {
+    pub matched: RotationInputEntryV1,
+    pub before: Vec<RotationInputEntryV1>,
+    pub after: Vec<RotationInputEntryV1>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RotationInputInspectionV1 {
+    pub mode: String,
+    pub total_items: usize,
+    pub query: Option<String>,
+    pub matches: Vec<RotationInputMatchV1>,
+    pub window: Vec<RotationInputEntryV1>,
+    pub next_start_index: Option<usize>,
+}
+
+fn manual_rotation_entry(
+    simulation: &crate::SimulateRequest,
+    sequence_index: usize,
+) -> RotationInputEntryV1 {
+    RotationInputEntryV1 {
+        sequence_index,
+        line_number: sequence_index + 1,
+        skill_name: simulation.sequence[sequence_index].clone(),
+        channel_ticks: simulation
+            .channel_ticks
+            .get(&sequence_index.to_string())
+            .copied(),
+        timing_offset_seconds: simulation
+            .timing_offsets
+            .get(&sequence_index.to_string())
+            .copied(),
+    }
+}
+
+/// Read a bounded window or search every operation in the immutable manual
+/// sequence. This avoids forcing the model to ingest or reproduce a long loop.
+pub fn inspect_rotation_input(
+    trace_id: &str,
+    snapshot: &ScenarioSnapshotV1,
+    query: Option<&str>,
+    start_index: usize,
+    limit: usize,
+    context_radius: usize,
+    provenance: &ToolProvenance,
+) -> Result<EvidenceEnvelopeV1<RotationInputInspectionV1>, ToolError> {
+    let started = Instant::now();
+    validate_trace_id(trace_id)?;
+    snapshot.verify_hash()?;
+    let simulation = &snapshot.simulation;
+    let total_items = simulation.sequence.len();
+    let normalized_query = query.map(str::trim).filter(|value| !value.is_empty());
+    let mut matches = Vec::new();
+    let mut query_next_start_index = None;
+    if let Some(query) = normalized_query {
+        let query = query.to_lowercase();
+        let match_limit = limit.min(8);
+        for sequence_index in start_index.min(total_items)..total_items {
+            if !simulation.sequence[sequence_index]
+                .to_lowercase()
+                .contains(&query)
+            {
+                continue;
+            }
+            if matches.len() >= match_limit {
+                query_next_start_index = Some(sequence_index);
+                break;
+            }
+            let before_start = sequence_index.saturating_sub(context_radius);
+            let after_end = (sequence_index + context_radius + 1).min(total_items);
+            matches.push(RotationInputMatchV1 {
+                matched: manual_rotation_entry(simulation, sequence_index),
+                before: (before_start..sequence_index)
+                    .map(|index| manual_rotation_entry(simulation, index))
+                    .collect(),
+                after: ((sequence_index + 1)..after_end)
+                    .map(|index| manual_rotation_entry(simulation, index))
+                    .collect(),
+            });
+        }
+    }
+    let window = if normalized_query.is_none() {
+        let end = start_index.saturating_add(limit).min(total_items);
+        (start_index.min(total_items)..end)
+            .map(|index| manual_rotation_entry(simulation, index))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let next_start_index = if normalized_query.is_some() {
+        query_next_start_index
+    } else if start_index.saturating_add(limit) < total_items {
+        Some(start_index + limit)
+    } else {
+        None
+    };
+    let result = RotationInputInspectionV1 {
+        mode: if simulation
+            .macro_text
+            .as_deref()
+            .is_some_and(|text| !text.trim().is_empty())
+        {
+            "macro_with_generated_sequence".to_string()
+        } else {
+            "manual_sequence".to_string()
+        },
+        total_items,
+        query: normalized_query.map(str::to_string),
+        matches,
+        window,
+        next_start_index,
+    };
+    Ok(EvidenceEnvelopeV1::new(
+        trace_id,
+        INSPECT_ROTATION_INPUT,
+        &snapshot.scenario_hash,
+        serde_json::json!({
+            "query": normalized_query,
+            "start_index": start_index,
+            "limit": limit,
+            "context_radius": context_radius,
+        }),
+        result,
+        provenance,
+        elapsed_ms(started),
+    )?)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -754,6 +900,75 @@ mod tests {
             "盾压"
         );
         assert!(evidence.result.rotation_input.macro_statements.is_empty());
+    }
+
+    #[test]
+    fn rotation_inspection_searches_the_complete_sequence_and_returns_neighbors() {
+        let mut value = request();
+        value.sequence = (0..180)
+            .map(|index| {
+                if index == 167 {
+                    "业火麟光".to_string()
+                } else {
+                    format!("技能{index}")
+                }
+            })
+            .collect();
+        let snapshot =
+            ScenarioSnapshotV1::capture(GameVersion::AnYingQianJi, Mount::FenShanJin, value)
+                .unwrap();
+        let evidence = inspect_rotation_input(
+            "trace-rotation-search",
+            &snapshot,
+            Some("业火"),
+            0,
+            16,
+            2,
+            &ToolProvenance::fixture(),
+        )
+        .unwrap();
+
+        assert_eq!(evidence.tool_name, INSPECT_ROTATION_INPUT);
+        assert_eq!(evidence.result.total_items, 180);
+        assert_eq!(evidence.result.matches.len(), 1);
+        let matched = &evidence.result.matches[0];
+        assert_eq!(matched.matched.sequence_index, 167);
+        assert_eq!(matched.matched.line_number, 168);
+        assert_eq!(matched.before[1].line_number, 167);
+        assert_eq!(matched.after[0].line_number, 169);
+    }
+
+    #[test]
+    fn rotation_inspection_pages_frequent_matches_without_losing_later_lines() {
+        let mut value = request();
+        value.sequence = vec!["斩刀".to_string(); 20];
+        let snapshot =
+            ScenarioSnapshotV1::capture(GameVersion::AnYingQianJi, Mount::FenShanJin, value)
+                .unwrap();
+        let first = inspect_rotation_input(
+            "trace-rotation-page-1",
+            &snapshot,
+            Some("斩刀"),
+            0,
+            32,
+            1,
+            &ToolProvenance::fixture(),
+        )
+        .unwrap();
+        assert_eq!(first.result.matches.len(), 8);
+        assert_eq!(first.result.next_start_index, Some(8));
+
+        let second = inspect_rotation_input(
+            "trace-rotation-page-2",
+            &snapshot,
+            Some("斩刀"),
+            first.result.next_start_index.unwrap(),
+            32,
+            1,
+            &ToolProvenance::fixture(),
+        )
+        .unwrap();
+        assert_eq!(second.result.matches[0].matched.line_number, 9);
     }
 
     #[test]

@@ -725,27 +725,40 @@ fn build_prior_context(events: &[AgentSessionEventV1]) -> Option<String> {
         .rev()
         .filter_map(|event| event.result.as_ref())
         .filter_map(|result| {
-            let report = result.report.as_ref()?;
-            Some(serde_json::json!({
-                "question": clipped(&report.question),
-                "status": status_name(&result.status),
-                "summary": clipped(&report.content.summary),
-                "findings": report.content.findings.iter().take(4).map(|finding| serde_json::json!({
-                    "title": clipped(&finding.title),
-                    "explanation": clipped(&finding.explanation),
-                    "metrics": finding.metrics.iter().take(6).map(|metric| serde_json::json!({
-                        "label": clipped(&metric.label),
-                        "value": metric.value,
-                        "unit": clipped(&metric.unit),
+            if let Some(clarification) = result.clarification.as_ref() {
+                let original_question = result
+                    .debug
+                    .as_ref()
+                    .map(|debug| clipped(&debug.question))
+                    .unwrap_or_default();
+                return Some(serde_json::json!({
+                    "question": original_question,
+                    "status": status_name(&result.status),
+                    "assistant_question": clipped(&clarification.question),
+                    "reason": clipped(&clarification.reason),
+                    "answer_hint": clarification.answer_hint.as_deref().map(clipped),
+                }));
+            }
+            result.report.as_ref().map(|report| serde_json::json!({
+                    "question": clipped(&report.question),
+                    "status": status_name(&result.status),
+                    "summary": clipped(&report.content.summary),
+                    "findings": report.content.findings.iter().take(4).map(|finding| serde_json::json!({
+                        "title": clipped(&finding.title),
+                        "explanation": clipped(&finding.explanation),
+                        "metrics": finding.metrics.iter().take(6).map(|metric| serde_json::json!({
+                            "label": clipped(&metric.label),
+                            "value": metric.value,
+                            "unit": clipped(&metric.unit),
+                        })).collect::<Vec<_>>(),
                     })).collect::<Vec<_>>(),
-                })).collect::<Vec<_>>(),
-                "recommendations": report.content.recommendations.iter().take(3).map(|recommendation| serde_json::json!({
-                    "title": clipped(&recommendation.title),
-                    "rationale": clipped(&recommendation.rationale),
-                })).collect::<Vec<_>>(),
-                "limitations": report.content.limitations.iter().take(3).map(|value| clipped(value)).collect::<Vec<_>>(),
-                "refusal_reason": report.content.refusal_reason.as_deref().map(clipped),
-            }))
+                    "recommendations": report.content.recommendations.iter().take(3).map(|recommendation| serde_json::json!({
+                        "title": clipped(&recommendation.title),
+                        "rationale": clipped(&recommendation.rationale),
+                    })).collect::<Vec<_>>(),
+                    "limitations": report.content.limitations.iter().take(3).map(|value| clipped(value)).collect::<Vec<_>>(),
+                    "refusal_reason": report.content.refusal_reason.as_deref().map(clipped),
+                }))
         })
         .take(MAX_CONTEXT_TURNS)
         .collect::<Vec<_>>();
@@ -776,6 +789,7 @@ fn status_name(status: &AgentRunStatus) -> &'static str {
     match status {
         AgentRunStatus::Completed => "completed",
         AgentRunStatus::PartiallyVerified => "partially_verified",
+        AgentRunStatus::NeedsUserInput => "needs_user_input",
         AgentRunStatus::Refused => "refused",
         AgentRunStatus::EvidenceInsufficient => "evidence_insufficient",
         AgentRunStatus::Cancelled => "cancelled",
@@ -1052,6 +1066,43 @@ mod tests {
         AgentSessionEventV1::run_result(&result)
     }
 
+    fn clarification_result_event(run_id: &str) -> AgentSessionEventV1 {
+        let result: AgentRunResultV1 = serde_json::from_value(serde_json::json!({
+            "schema_version": "agent-run/v1",
+            "run_id": run_id,
+            "scenario_hash": "scenario-context",
+            "prompt_version": "agent-system/v28",
+            "prompt_sha256": "prompt-hash",
+            "provider_profile": "offline",
+            "model": "fixture-v1",
+            "status": "needs_user_input",
+            "accounting": {
+                "model_turns": 1, "tool_calls": 2, "simulations": 0,
+                "knowledge_searches": 0,
+                "input_tokens": 0, "output_tokens": 0, "total_tokens": 0,
+                "duration_ms": 1
+            },
+            "clarification": {
+                "schema_version": "agent-clarification/v1",
+                "question": "你指的是哪两个保存方案？",
+                "reason": "名称会决定读取对象。",
+                "answer_hint": "回复两个名称"
+            },
+            "trace": []
+        }))
+        .unwrap();
+        AgentSessionEventV1::run_result(&result)
+    }
+
+    #[test]
+    fn clarification_is_kept_in_next_turn_context() {
+        let context = build_prior_context(&[clarification_result_event("run-question")])
+            .expect("context");
+        assert!(context.contains("needs_user_input"));
+        assert!(context.contains("你指的是哪两个保存方案"));
+        assert!(context.contains("回复两个名称"));
+    }
+
     #[test]
     fn session_events_are_append_only_and_listable() {
         let root = temp_root("append");
@@ -1136,7 +1187,7 @@ mod tests {
         assert!(first.prior_context.is_none());
         let mut plan_event = AgentSessionEventV1::empty("run_trace");
         plan_event.run_id = Some("run-context-one".to_string());
-        plan_event.trace_kind = Some("analysis_plan_selected".to_string());
+        plan_event.trace_kind = Some("analysis_context_prepared".to_string());
         plan_event.playbook_id = Some("current_rotation_baseline".to_string());
         store.append_event(&first.session_id, plan_event).unwrap();
         store

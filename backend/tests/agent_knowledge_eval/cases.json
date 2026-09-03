@@ -81,6 +81,18 @@
       "allowed_seasons": ["暗影千机（2026）"]
     },
     {
+      "id": "current_white_blade_resource_reallocation",
+      "game_version": "anying",
+      "scope": "current_only",
+      "query": "暗影千机 分山劲 白刀 血怒 援戈 分配 业火后 插入位置",
+      "expected_titles_any": ["分山劲白皮书"],
+      "expected_snippet_contains_all": ["白刀", "血怒", "援戈", "业火"],
+      "forbidden_title_contains": ["分山劲·悟"],
+      "expected_version_match": "current_exact",
+      "expected_fact_eligible": true,
+      "allowed_seasons": ["暗影千机（2026）"]
+    },
+    {
       "id": "current_wujie_knowledge_only",
       "game_version": "anying",
       "scope": "current_only",
