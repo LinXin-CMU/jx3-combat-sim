@@ -798,7 +798,7 @@ mod tests {
         let result = record.wait_result().await;
         assert_eq!(result.status, AgentRunStatus::Completed);
         let snapshot = record.snapshot_and_subscribe().0;
-        assert_eq!(snapshot.first().unwrap().kind, "planning");
+        assert_eq!(snapshot.first().unwrap().kind, "analysis_plan_selected");
         assert_eq!(snapshot.last().unwrap().kind, "run_result");
         assert!(snapshot
             .windows(2)

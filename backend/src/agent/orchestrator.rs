@@ -18,7 +18,7 @@ use super::domain::{
     equipment_strategy_comparison_requested,
 };
 use super::evidence::validate_trace_id;
-use super::prompt::agent_prompt_v22;
+use super::prompt::agent_prompt_v23;
 use super::provider::{
     FinishReason, LlmProvider, ModelMessage, ModelRequest, ProviderToolCall,
     StructuredOutputDefinition, TokenUsage,
@@ -81,7 +81,7 @@ impl Default for AgentRunLimits {
             max_model_turns: 6,
             max_tool_calls: 8,
             max_simulations: 8,
-            max_output_tokens_per_turn: 2048,
+            max_output_tokens_per_turn: 4096,
             wall_time_ms: 120_000,
         }
     }
@@ -542,7 +542,7 @@ pub async fn run_agent_recorded(
     replay_sink: Option<AgentReplaySink>,
 ) -> AgentRunResultV1 {
     let started = Instant::now();
-    let prompt = agent_prompt_v22();
+    let prompt = agent_prompt_v23();
     let semantic_prototypes = routing_semantic_prototypes();
     let semantic_result = if input.task_hint.is_none() {
         runtime.knowledge().map(|knowledge| {
@@ -716,7 +716,6 @@ pub async fn run_agent_recorded(
             .any(|tool| tool == "compare_scenarios");
     let mut domain_experiment_completed = false;
     let mut deterministic_tool_cache = HashMap::<String, ToolDispatchOutcome>::new();
-    trace.push("planning", None, Vec::new(), None);
     trace.push(
         "analysis_plan_selected",
         None,
@@ -2169,7 +2168,84 @@ pub async fn run_agent_recorded(
                     &registry,
                 );
             }
-            Err(error) => match parse_and_salvage_report(raw, registry.evidence()) {
+            Err(error) => {
+                // A baseline report is one coherent diagnosis. Give the provider
+                // one bounded correction turn for any publication failure. If
+                // that turn was already consumed, fall back as a whole to the
+                // simulator-authored report instead of mixing sanitized prose
+                // with generic explanations that can contradict the trace.
+                if analysis_plan.task_type == AnalysisTaskType::BaselineAnalysis
+                    && repairs < MAX_REPORT_REPAIRS
+                    && accounting.model_turns < limits.max_model_turns
+                {
+                    record_replay(
+                        &replay_sink,
+                        "report_validation",
+                        serde_json::json!({
+                            "status": "baseline_repair_requested",
+                            "validation_code": error.code,
+                            "validation_message": error.message,
+                            "rejected_output": raw,
+                        }),
+                    );
+                    repairs += 1;
+                    repair_message = Some(reasoning_repair_prompt(
+                        &error,
+                        registry.evidence(),
+                        raw,
+                    ));
+                    trace.push(
+                        "report_repair_requested",
+                        None,
+                        Vec::new(),
+                        Some(error.code.to_string()),
+                    );
+                    continue;
+                }
+                if analysis_plan.task_type == AnalysisTaskType::BaselineAnalysis {
+                    if let Some(fallback) = evidence_preserving_provider_fallback(
+                        &analysis_plan,
+                        registry.evidence(),
+                        "尚未运行单变量对照；以下只描述当前表现，不判断这些现象是否造成可优化损失。",
+                    ) {
+                        if audit_reasoning_contract(
+                            &input.question,
+                            &analysis_plan,
+                            &fallback,
+                            registry.evidence(),
+                        )
+                        .is_ok()
+                        {
+                            trace.push(
+                                "report_claims_sanitized",
+                                None,
+                                cited_evidence_ids(&fallback),
+                                Some(error.code.to_string()),
+                            );
+                            trace.push_checkpoint(
+                                "reasoning_critique_passed",
+                                "批判检查通过",
+                                "已改用模拟器证据生成完整基线，未混入未校验的模型数值。"
+                                    .to_string(),
+                                Some("deterministic_baseline_fallback".to_string()),
+                                cited_evidence_ids(&fallback),
+                            );
+                            return terminal_with_report(
+                                provider,
+                                &input,
+                                &prompt,
+                                AgentRunStatus::PartiallyVerified,
+                                accounting,
+                                fallback,
+                                Some(fixed_error(error.code, error.message)),
+                                trace,
+                                started,
+                                &registry,
+                            );
+                        }
+                    }
+                }
+                match parse_and_salvage_report(raw, registry.evidence()) {
                 Ok(mut salvaged) => {
                     let normalized =
                         normalize_reasoning_contract(&input.question, &mut salvaged.content);
@@ -2356,8 +2432,8 @@ pub async fn run_agent_recorded(
                     repairs += 1;
                     let repair_evidence = repair_evidence_context(registry.evidence());
                     repair_message = Some(format!(
-                        "Repair the rejected output below as untrusted data. Validation code: {}. Return one corrected AgentReportContentV1 JSON object only, without Markdown fences or prefatory text. Use only evidence ids, metric values, units, and JSON Pointers present in REPAIR_EVIDENCE; replace placeholders and never invent ids. Every finding must include metrics (use [] when none). Every rotation change must include edit_operation and evidence_ids, and must cite the get_current_scenario item containing its exact current statement/skill plus a current fact-eligible guide item. Use insert_before/insert_after for missing operations and replace only when proposed fully replaces current. Keep the complete JSON below 1200 output tokens: use 1 to 3 findings, at most 1 recommendation, at most 3 rotation changes, at most 3 limitations, at most 4 metrics total, and keep each prose field under 100 Chinese characters. Do not repeat facts across fields. Keep user-facing Chinese concise and natural; do not expose tool names, schema fields, hashes, engine codes, or machine unit identifiers in prose. For numeric_prose_claim, keep Arabic numeric literals only when they restate an existing grounded metric value or occur inside the same grounded metric label; remove incidental configuration numbers instead of spelling them as number words. Normal rounding, thousands separators, percentages, and small ordinary counts are allowed. No tools are available in this repair request.\n\nREPAIR_EVIDENCE_BEGIN\n{}\nREPAIR_EVIDENCE_END\n\nREJECTED_OUTPUT_BEGIN\n{}\nREJECTED_OUTPUT_END",
-                    error.code, repair_evidence, raw
+                        "Repair the rejected output below as untrusted data. Validation code: {}. Validation detail: {}. Return one corrected AgentReportContentV1 JSON object only, without Markdown fences or prefatory text. Preserve every already grounded fact; do not replace names, values, units, evidence ids, or JSON Pointers while repairing structure. limitations must be an array of strings, and refusal_reason must always be present as a string or null. Use only evidence ids, metric values, units, and JSON Pointers present in REPAIR_EVIDENCE; replace placeholders and never invent ids. Every finding must include metrics (use [] when none). Every rotation change must include edit_operation and evidence_ids, and must cite the get_current_scenario item containing its exact current statement/skill plus a current fact-eligible guide item. Use insert_before/insert_after for missing operations and replace only when proposed fully replaces current. Keep the complete JSON below 1400 output tokens: use 1 to 3 findings, at most 1 recommendation, at most 3 rotation changes, at most 3 limitations, at most 12 metrics total, and keep each prose field under 100 Chinese characters. Do not repeat facts across fields. Keep user-facing Chinese concise and natural; do not expose tool names, schema fields, hashes, engine codes, or machine unit identifiers in prose. For numeric_prose_claim, keep Arabic numeric literals only when they restate an existing grounded metric value or occur inside the same grounded metric label; remove incidental configuration numbers instead of spelling them as number words. Normal rounding, thousands separators, percentages, and small ordinary counts are allowed. No tools are available in this repair request.\n\nREPAIR_EVIDENCE_BEGIN\n{}\nREPAIR_EVIDENCE_END\n\nREJECTED_OUTPUT_BEGIN\n{}\nREJECTED_OUTPUT_END",
+                    error.code, error.message, repair_evidence, raw
                 ));
                     trace.push(
                         "report_repair_requested",
@@ -2418,7 +2494,8 @@ pub async fn run_agent_recorded(
                         &registry,
                     );
                 }
-            },
+            }
+            }
         }
     }
 }
@@ -2533,6 +2610,7 @@ fn project_tool_result(tool_name: &str, result: &mut Value) {
             }
         }
         "analyze_timeline" => {
+            let metric_catalog = timeline_metric_catalog(result);
             if let Some(buffs) = result
                 .get_mut("buff_coverage")
                 .and_then(Value::as_array_mut)
@@ -2547,6 +2625,15 @@ fn project_tool_result(tool_name: &str, result: &mut Value) {
                 if let Some(items) = result.get_mut(key).and_then(Value::as_array_mut) {
                     items.truncate(8);
                 }
+            }
+            if let Some(object) = result.as_object_mut() {
+                object.insert("metric_catalog".to_string(), metric_catalog);
+            }
+        }
+        "simulate_scenario" => {
+            let ranked = ranked_damage_sources(result, 8);
+            if let Some(object) = result.as_object_mut() {
+                object.insert("ranked_damage_sources".to_string(), Value::Array(ranked));
             }
         }
         "compare_scenarios" | "compare_saved_macros" | "compare_saved_scenarios" => {
@@ -2577,6 +2664,89 @@ fn project_tool_result(tool_name: &str, result: &mut Value) {
         }
         _ => {}
     }
+}
+
+fn ranked_damage_sources(result: &Value, limit: usize) -> Vec<Value> {
+    let mut ranked = result
+        .get("skills")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .enumerate()
+        .filter_map(|(index, skill)| {
+            let name = skill.get("name").and_then(Value::as_str)?;
+            let damage_share = skill.get("damage_share").and_then(Value::as_f64)?;
+            let total_damage = skill.get("total_damage").and_then(Value::as_f64)?;
+            (total_damage > 0.0).then(|| {
+                serde_json::json!({
+                    "name": name,
+                    "damage_share": damage_share,
+                    "total_damage": total_damage,
+                    "damage_share_json_pointer": format!("/result/skills/{index}/damage_share"),
+                    "total_damage_json_pointer": format!("/result/skills/{index}/total_damage"),
+                })
+            })
+        })
+        .collect::<Vec<_>>();
+    ranked.sort_by(|left, right| {
+        right
+            .get("total_damage")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0)
+            .total_cmp(
+                &left
+                    .get("total_damage")
+                    .and_then(Value::as_f64)
+                    .unwrap_or(0.0),
+            )
+    });
+    ranked.truncate(limit);
+    ranked
+}
+
+fn timeline_metric_catalog(result: &Value) -> Value {
+    let scalar = |label: &str, pointer: &str| {
+        result.pointer(pointer).and_then(Value::as_f64).map(|value| {
+            serde_json::json!({"label": label, "value": value, "json_pointer": pointer})
+        })
+    };
+    let mut metrics = [
+        ("主技能空档次数", "/diagnostic_profile/cadence_gaps/count"),
+        (
+            "主技能空档总时长",
+            "/diagnostic_profile/cadence_gaps/total_seconds",
+        ),
+        (
+            "冷却等待次数",
+            "/diagnostic_profile/cooldown_waits/count",
+        ),
+        (
+            "冷却等待总时长",
+            "/diagnostic_profile/cooldown_waits/total_seconds",
+        ),
+        ("怒气触顶采样", "/rage/at_cap_observations"),
+        ("怒气采样总数", "/rage/sample_count"),
+    ]
+    .into_iter()
+    .filter_map(|(label, relative)| {
+        scalar(label, relative).map(|mut item| {
+            item["json_pointer"] = Value::String(format!("/result{relative}"));
+            item
+        })
+    })
+    .collect::<Vec<_>>();
+    if let Some(coverage) = result.get("buff_coverage").and_then(Value::as_array) {
+        metrics.extend(coverage.iter().enumerate().filter_map(|(index, item)| {
+            let name = item.get("name").and_then(Value::as_str)?;
+            let value = item.get("coverage_percent").and_then(Value::as_f64)?;
+            Some(serde_json::json!({
+                "label": format!("{name}时间覆盖率"),
+                "value": value,
+                "json_pointer": format!("/result/buff_coverage/{index}/coverage_percent"),
+            }))
+        }));
+    }
+    Value::Array(metrics)
 }
 
 fn bound_json_value(value: &mut Value, array_limit: usize, string_limit: usize, depth: usize) {
@@ -2822,7 +2992,7 @@ fn reasoning_repair_prompt(
     rejected: &str,
 ) -> String {
     format!(
-        "Revise the report because it failed the semantic reasoning audit. Audit code: {}. Audit message: {}. Return one corrected AgentReportContentV1 JSON object only. Do not call tools or add facts. Complete the user-requested checkpoints, cite the actual timeline for rotation diagnosis, cite the tested comparison for every published edit, use the inspected workspace for equipment conclusions, and remove unrelated strategy branches. Keep observations, diagnosis, experiment, and decision distinct. Respect an explicit request not to propose an intervention. Use at most 3 findings, 1 recommendation, 3 limitations, and 4 metrics total.\n\nREPAIR_EVIDENCE_BEGIN\n{}\nREPAIR_EVIDENCE_END\n\nREJECTED_OUTPUT_BEGIN\n{}\nREJECTED_OUTPUT_END",
+        "Revise the report because it failed the semantic reasoning audit. Audit code: {}. Audit message: {}. Return one corrected AgentReportContentV1 JSON object only. Do not call tools or add facts. Complete the user-requested checkpoints, cite the actual timeline for rotation diagnosis, cite the tested comparison for every published edit, use the inspected workspace for equipment conclusions, and remove unrelated strategy branches. Keep observations, diagnosis, experiment, and decision distinct. For a baseline report, use ranked_damage_sources and metric_catalog exactly: include DPS and total damage, leading skill shares, cadence, rage, and Buff coverage. Never create an aggregate metric unless the evidence provides its exact value and JSON pointer; do not add cadence-gap duration to cooldown-wait duration because they may describe the same window. If the question only asks for a baseline, do not propose a parameter or macro change. Respect an explicit request not to propose an intervention. Use at most 3 findings, 1 recommendation, 3 limitations, and 12 metrics total.\n\nREPAIR_EVIDENCE_BEGIN\n{}\nREPAIR_EVIDENCE_END\n\nREJECTED_OUTPUT_BEGIN\n{}\nREJECTED_OUTPUT_END",
         error.code,
         error.message,
         repair_evidence_context(evidence),
@@ -3251,6 +3421,58 @@ fn evidence_preserving_provider_fallback(
                 evidence_ids: vec![evidence_id.clone()],
                 metrics,
             });
+
+            let mut ranked_skills = envelope
+                .pointer("/result/skills")
+                .and_then(serde_json::Value::as_array)
+                .into_iter()
+                .flatten()
+                .enumerate()
+                .filter(|(_, skill)| {
+                    skill
+                        .get("total_damage")
+                        .and_then(serde_json::Value::as_f64)
+                        .is_some_and(|damage| damage > 0.0)
+                })
+                .collect::<Vec<_>>();
+            ranked_skills.sort_by(|(_, left), (_, right)| {
+                right
+                    .get("total_damage")
+                    .and_then(serde_json::Value::as_f64)
+                    .partial_cmp(
+                        &left
+                            .get("total_damage")
+                            .and_then(serde_json::Value::as_f64),
+                    )
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            let damage_metrics = ranked_skills
+                .into_iter()
+                .take(3)
+                .filter_map(|(index, skill)| {
+                    let name = skill.get("name").and_then(serde_json::Value::as_str)?;
+                    let share = skill
+                        .get("damage_share")
+                        .and_then(serde_json::Value::as_f64)?;
+                    Some(GroundedMetricV1 {
+                        label: format!("{name}伤害占比"),
+                        value: share,
+                        unit: "ratio".to_string(),
+                        evidence_id: evidence_id.clone(),
+                        json_pointer: format!("/result/skills/{index}/damage_share"),
+                    })
+                })
+                .collect::<Vec<_>>();
+            if !damage_metrics.is_empty() {
+                diagnostic_findings.push(AgentFindingV1 {
+                    title: "主要伤害来源".to_string(),
+                    explanation:
+                        "按本次总伤害从高到低列出主要技能；这里只描述构成，不据占比单独判断循环优劣。"
+                            .to_string(),
+                    evidence_ids: vec![evidence_id.clone()],
+                    metrics: damage_metrics,
+                });
+            }
         }
     }
     if let Some((evidence_id, envelope)) = evidence.iter().find(|(_, envelope)| {
@@ -3272,44 +3494,110 @@ fn evidence_preserving_provider_fallback(
             "manual_sequence" => "手动序列",
             _ => "当前输入",
         };
-        let strengths = profile
-            .get("observed_strengths")
+        let mut observations = Vec::new();
+        if envelope
+            .pointer("/result/skipped")
             .and_then(serde_json::Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(|item| item.get("summary").and_then(serde_json::Value::as_str))
-            .take(3)
-            .collect::<Vec<_>>();
-        if !strengths.is_empty() {
-            diagnostic_findings.push(AgentFindingV1 {
-                title: format!("执行层优点 · {input_label}"),
-                explanation: format!(
-                    "{}。这些是时间轴观察，说明输入执行连续，但不证明技能优先级已经最优。",
-                    strengths.join("；")
-                ),
-                evidence_ids: vec![evidence_id.clone()],
-                metrics: Vec::new(),
-            });
+            .is_some_and(Vec::is_empty)
+        {
+            observations.push("没有输入被模拟器标记为跳过，但这不等于技能时机已经最优".to_string());
         }
-        let risks = profile
-            .get("observed_risks")
+        if let Some(gaps) = envelope
+            .pointer("/result/gcd_gaps")
             .and_then(serde_json::Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(|item| item.get("summary").and_then(serde_json::Value::as_str))
-            .take(3)
-            .collect::<Vec<_>>();
-        if !risks.is_empty() {
-            diagnostic_findings.push(AgentFindingV1 {
-                title: "下一步应验证的循环风险".to_string(),
-                explanation: format!(
-                    "{}。这里只把它标为风险，不在缺少对照实验时直接判定为损失来源。",
-                    risks.join("；")
-                ),
-                evidence_ids: vec![evidence_id.clone()],
-                metrics: Vec::new(),
+            .filter(|gaps| !gaps.is_empty())
+        {
+            let first_pair = gaps.first().and_then(|gap| {
+                Some((
+                    gap.get("previous_skill_name")
+                        .and_then(serde_json::Value::as_str)?,
+                    gap.get("next_skill_name")
+                        .and_then(serde_json::Value::as_str)?,
+                ))
             });
+            if let Some((previous, next)) = first_pair.filter(|(previous, next)| {
+                gaps.iter().all(|gap| {
+                    gap.get("previous_skill_name")
+                        .and_then(serde_json::Value::as_str)
+                        == Some(*previous)
+                        && gap
+                            .get("next_skill_name")
+                            .and_then(serde_json::Value::as_str)
+                            == Some(*next)
+                })
+            }) {
+                observations.push(format!("观察到的主技能空档均位于{previous}接{next}"));
+            } else {
+                observations.push("时间轴观察到主技能空档，具体原因仍需单变量对照".to_string());
+            }
         }
+        if envelope.pointer("/result/rage/at_cap_observations").is_some() {
+            observations.push("怒气触顶是采样现象，不等同于已经测得怒气损失".to_string());
+        }
+        if envelope.pointer("/result/buff_coverage").is_some() {
+            observations.push("增益覆盖率按有效时长计算，与平均层数分开".to_string());
+        }
+
+        let mut metrics = Vec::new();
+        for (pointer, label, unit) in [
+            (
+                "/result/diagnostic_profile/cadence_gaps/count",
+                "主技能空档次数",
+                "count",
+            ),
+            (
+                "/result/diagnostic_profile/cadence_gaps/total_seconds",
+                "主技能空档总时长",
+                "seconds",
+            ),
+            (
+                "/result/rage/at_cap_observations",
+                "怒气触顶采样",
+                "count",
+            ),
+            ("/result/rage/sample_count", "怒气采样总数", "count"),
+        ] {
+            if let Some(value) = envelope.pointer(pointer).and_then(serde_json::Value::as_f64) {
+                metrics.push(GroundedMetricV1 {
+                    label: label.to_string(),
+                    value,
+                    unit: unit.to_string(),
+                    evidence_id: evidence_id.clone(),
+                    json_pointer: pointer.to_string(),
+                });
+            }
+        }
+        if let Some(coverage) = envelope
+            .pointer("/result/buff_coverage")
+            .and_then(serde_json::Value::as_array)
+        {
+            for preferred_name in ["嗜血", "援戈", "血怒·惊涌"] {
+                if let Some((index, item)) = coverage.iter().enumerate().find(|(_, item)| {
+                    item.get("name").and_then(serde_json::Value::as_str) == Some(preferred_name)
+                }) {
+                    if let Some(value) = item
+                        .get("coverage_percent")
+                        .and_then(serde_json::Value::as_f64)
+                    {
+                        metrics.push(GroundedMetricV1 {
+                            label: format!("{preferred_name}时间覆盖率"),
+                            value,
+                            unit: "percent".to_string(),
+                            evidence_id: evidence_id.clone(),
+                            json_pointer: format!(
+                                "/result/buff_coverage/{index}/coverage_percent"
+                            ),
+                        });
+                    }
+                }
+            }
+        }
+        diagnostic_findings.push(AgentFindingV1 {
+            title: format!("执行稳定性与待验证风险 · {input_label}"),
+            explanation: format!("{}。", observations.join("；")),
+            evidence_ids: vec![evidence_id.clone()],
+            metrics,
+        });
     }
     let mut knowledge_findings = Vec::new();
     let mut seen_excerpts = Vec::<String>::new();
@@ -3393,10 +3681,8 @@ fn evidence_preserving_provider_fallback(
                 plan.playbook.label
             )
         } else if has_diagnostic_evidence {
-            format!(
-                "已完成“{}”的模拟器基线与时间线诊断。模型解释未通过发布校验，因此这里只保留模拟器可直接证明的结果。",
-                plan.playbook.label
-            )
+            "当前循环的伤害构成、衔接、资源与增益覆盖如下；这些都是当前冻结条件下的观测结果。"
+                .to_string()
         } else if has_readable_knowledge {
             format!(
                 "模型解释未通过发布校验；以下整理“{}”命中的可溯源资料要点，不补写未经验证的结论。",
@@ -3457,7 +3743,7 @@ fn repair_evidence_context(evidence: &super::report::EvidenceStore) -> String {
                 "total_damage": result.get("total_damage"),
                 "fight_time": result.get("fight_time"),
                 "skill_count": result.get("skill_count"),
-                "skills": bounded_result_array(&result, "skills", 12),
+                "ranked_damage_sources": ranked_damage_sources(&result, 8),
                 "metric_pointers": ["/result/dps", "/result/total_damage", "/result/fight_time", "/result/skill_count"]
             }),
             "analyze_timeline" => serde_json::json!({
@@ -3470,6 +3756,7 @@ fn repair_evidence_context(evidence: &super::report::EvidenceStore) -> String {
                 "skipped": bounded_result_array(&result, "skipped", 12),
                 "cd_waits": bounded_result_array(&result, "cd_waits", 8),
                 "gcd_gaps": bounded_result_array(&result, "gcd_gaps", 8),
+                "metric_catalog": timeline_metric_catalog(&result),
             }),
             "search_knowledge_base" => {
                 let results = result
@@ -3694,7 +3981,7 @@ mod tests {
                 }),
             );
         }
-        let prompt = agent_prompt_v22();
+        let prompt = agent_prompt_v23();
         let request = ModelRequest {
             instructions: prompt.instructions.to_string(),
             messages: compact_handoff_messages(&input, &plan, &evidence, 6 * 1024),
@@ -4039,6 +4326,7 @@ mod tests {
         assert_eq!(limits.max_model_turns, 6);
         assert_eq!(limits.max_tool_calls, 8);
         assert_eq!(limits.max_simulations, 8);
+        assert_eq!(limits.max_output_tokens_per_turn, 4096);
         assert_eq!(limits.wall_time_ms, 120_000);
     }
 
@@ -4185,7 +4473,7 @@ mod tests {
         .await;
 
         assert_eq!(result.status, AgentRunStatus::Completed);
-        assert_eq!(result.prompt_version, "agent-system/v22");
+        assert_eq!(result.prompt_version, "agent-system/v23");
         assert_eq!(result.accounting.knowledge_searches, 1);
         assert_eq!(result.accounting.simulations, 0);
         let report = result.report.unwrap();
@@ -4264,7 +4552,7 @@ mod tests {
         .await;
 
         assert_eq!(result.status, AgentRunStatus::Completed);
-        assert_eq!(result.prompt_version, "agent-system/v22");
+        assert_eq!(result.prompt_version, "agent-system/v23");
         assert_eq!(result.accounting.knowledge_searches, 1);
         assert_eq!(result.accounting.simulations, 1);
         let report = result.report.unwrap();
@@ -5090,7 +5378,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ungrounded_numeric_report_is_salvaged_without_another_model_turn() {
+    async fn invalid_baseline_report_gets_one_repair_then_coherent_fallback() {
         let runtime = AgentRuntime::fixture();
         let bad_report = json!({
             "schema_version": "agent-report-content/v1",
@@ -5115,6 +5403,12 @@ mod tests {
         let provider = ScriptedProvider::new(vec![
             Ok(tool_call("call-diagnose", "analyze_timeline", json!({}))),
             Ok(ModelResponse {
+                assistant_text: Some(bad_report.clone()),
+                tool_calls: Vec::new(),
+                finish_reason: FinishReason::Stop,
+                usage: TokenUsage::default(),
+            }),
+            Ok(ModelResponse {
                 assistant_text: Some(bad_report),
                 tool_calls: Vec::new(),
                 finish_reason: FinishReason::Stop,
@@ -5131,10 +5425,11 @@ mod tests {
         .await;
 
         assert_eq!(result.status, AgentRunStatus::PartiallyVerified);
-        assert_eq!(result.accounting.model_turns, 2);
+        assert_eq!(result.accounting.model_turns, 3);
         let requests = provider.requests();
-        assert_eq!(requests.len(), 2);
+        assert_eq!(requests.len(), 3);
         assert!(requests[1].tools.is_empty());
+        assert!(requests[2].tools.is_empty());
         let report = result.report.unwrap();
         assert!(!report.content.findings.is_empty());
         assert!(report.content.findings[0]
@@ -5145,10 +5440,13 @@ mod tests {
             .trace
             .iter()
             .any(|event| event.kind == "report_claims_sanitized"));
-        assert!(!result
+        assert!(result
             .trace
             .iter()
             .any(|event| event.kind == "report_repair_requested"));
+        assert!(result.trace.iter().any(|event| {
+            event.code.as_deref() == Some("deterministic_baseline_fallback")
+        }));
     }
 
     #[tokio::test]
@@ -5227,13 +5525,101 @@ mod tests {
         assert_eq!(result.status, AgentRunStatus::PartiallyVerified);
         let report = result.report.expect("evidence-preserving report");
         assert!(!report.evidence_ids.is_empty());
-        assert!(report.content.summary.contains("模拟器基线与时间线诊断"));
+        assert!(report.content.summary.contains("伤害构成、衔接、资源与增益覆盖"));
         assert!(report.content.findings[0].title.contains("当前输出基线"));
         assert!(!report.content.findings[0].metrics.is_empty());
         assert!(result
             .trace
             .iter()
-            .any(|event| event.kind == "report_structure_evidence_preserved"));
+            .any(|event| event.code.as_deref() == Some("deterministic_baseline_fallback")));
+    }
+
+    #[test]
+    fn evidence_fallback_keeps_damage_timeline_resource_and_coverage_facts() {
+        let runtime = AgentRuntime::fixture();
+        let plan = select_analysis_plan(
+            "这套循环的整体输出和伤害结构怎么样？",
+            &runtime.fixture_scenario(),
+        );
+        let simulation_id = "a".repeat(64);
+        let timeline_id = "b".repeat(64);
+        let mut evidence = EvidenceStore::new();
+        evidence.insert(
+            simulation_id.clone(),
+            json!({
+                "evidence_id": simulation_id,
+                "tool_name": "simulate_scenario",
+                "result": {
+                    "dps": 2969004.31,
+                    "total_damage": 890701293.0,
+                    "skills": [
+                        {"name": "援戈·血影", "total_damage": 127856419.0, "damage_share": 0.143545788},
+                        {"name": "绝刀·50怒", "total_damage": 296300677.0, "damage_share": 0.332659983},
+                        {"name": "业火焚城", "total_damage": 89616872.0, "damage_share": 0.100613834},
+                        {"name": "业火麟光", "total_damage": 0.0, "damage_share": 0.0}
+                    ]
+                }
+            }),
+        );
+        evidence.insert(
+            timeline_id.clone(),
+            json!({
+                "evidence_id": timeline_id,
+                "tool_name": "analyze_timeline",
+                "result": {
+                    "skipped": [],
+                    "diagnostic_profile": {
+                        "input_mode": "macro",
+                        "cadence_gaps": {"count": 11, "total_seconds": 2.3125}
+                    },
+                    "gcd_gaps": [{
+                        "previous_skill_name": "盾击·三段",
+                        "next_skill_name": "斩刀"
+                    }],
+                    "rage": {"at_cap_observations": 28, "sample_count": 627},
+                    "buff_coverage": [
+                        {"name": "流血", "coverage_percent": 97.8125},
+                        {"name": "嗜血", "coverage_percent": 97.3541666667},
+                        {"name": "援戈", "coverage_percent": 84.875}
+                    ]
+                }
+            }),
+        );
+
+        let report = evidence_preserving_provider_fallback(&plan, &evidence, "模型格式错误")
+            .expect("evidence fallback");
+
+        assert_eq!(report.findings.len(), 3);
+        assert_eq!(report.findings[1].title, "主要伤害来源");
+        assert_eq!(
+            report.findings[1]
+                .metrics
+                .iter()
+                .map(|metric| metric.label.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "绝刀·50怒伤害占比",
+                "援戈·血影伤害占比",
+                "业火焚城伤害占比"
+            ]
+        );
+        let quality = &report.findings[2];
+        assert!(quality.explanation.contains("盾击·三段接斩刀"));
+        assert!(quality.explanation.contains("与平均层数分开"));
+        assert!(!quality.explanation.contains("。。"));
+        assert!(!quality.explanation.contains("。；"));
+        assert!(quality
+            .metrics
+            .iter()
+            .any(|metric| metric.label == "援戈时间覆盖率" && metric.value == 84.875));
+        super::super::report::validate_report(&report, &evidence).unwrap();
+        audit_reasoning_contract(
+            "这套循环的整体输出和伤害结构怎么样？",
+            &plan,
+            &report,
+            &evidence,
+        )
+        .unwrap();
     }
 
     #[test]

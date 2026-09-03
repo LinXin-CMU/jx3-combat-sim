@@ -89,6 +89,12 @@ const AGENT_SYSTEM_PROMPT_V22: &str = concat!(
     include_str!("../../prompts/agent_system_v21.md"),
     include_str!("../../prompts/agent_system_v22_addendum.md")
 );
+pub const AGENT_PROMPT_VERSION_V23: &str = "agent-system/v23";
+const AGENT_SYSTEM_PROMPT_V23: &str = concat!(
+    include_str!("../../prompts/agent_system_v21.md"),
+    include_str!("../../prompts/agent_system_v22_addendum.md"),
+    include_str!("../../prompts/agent_system_v23_addendum.md")
+);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PromptSpec {
@@ -291,6 +297,15 @@ pub fn agent_prompt_v22() -> PromptSpec {
     }
 }
 
+pub fn agent_prompt_v23() -> PromptSpec {
+    let sha256 = format!("{:x}", Sha256::digest(AGENT_SYSTEM_PROMPT_V23.as_bytes()));
+    PromptSpec {
+        version: AGENT_PROMPT_VERSION_V23,
+        sha256,
+        instructions: AGENT_SYSTEM_PROMPT_V23,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -417,5 +432,18 @@ mod tests {
         assert!(prompt.instructions.contains("not report prose"));
         assert!(prompt.instructions.contains("服务端解析显示"));
         assert!(prompt.instructions.contains("Finding titles must name the gameplay result"));
+    }
+
+    #[test]
+    fn v23_prompt_defines_a_complete_but_bounded_baseline_report() {
+        let prompt = agent_prompt_v23();
+        assert_eq!(prompt.version, "agent-system/v23");
+        assert_eq!(prompt.sha256.len(), 64);
+        assert!(prompt.instructions.len() < 12_000);
+        assert!(prompt.instructions.contains("single high-level"));
+        assert!(prompt.instructions.contains("combat diagnostic"));
+        assert!(prompt.instructions.contains("up to twelve grounded metrics"));
+        assert!(prompt.instructions.contains("array of plain strings"));
+        assert!(prompt.instructions.contains("never includes stack count"));
     }
 }

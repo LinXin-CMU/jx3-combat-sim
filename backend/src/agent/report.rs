@@ -123,7 +123,7 @@ pub struct AgentRunAccountingV1 {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReportValidationError {
     pub code: &'static str,
-    pub message: &'static str,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -223,10 +223,10 @@ pub fn parse_and_validate_report(
     raw: &str,
     evidence: &EvidenceStore,
 ) -> Result<ValidatedReportContentV1, ReportValidationError> {
-    let mut report = parse_report_json(raw).map_err(|_| {
+    let mut report = parse_report_json(raw).map_err(|parse_error| {
         error(
             "invalid_report_json",
-            "final answer must be valid AgentReportContentV1 JSON",
+            parse_error_message(&parse_error),
         )
     })?;
     let normalized_evidence_ids = normalize_evidence_id_references(&mut report, evidence);
@@ -248,10 +248,10 @@ pub fn parse_and_salvage_report(
     raw: &str,
     evidence: &EvidenceStore,
 ) -> Result<ValidatedReportContentV1, ReportValidationError> {
-    let mut report = parse_report_json(raw).map_err(|_| {
+    let mut report = parse_report_json(raw).map_err(|parse_error| {
         error(
             "invalid_report_json",
-            "final answer must be valid AgentReportContentV1 JSON",
+            parse_error_message(&parse_error),
         )
     })?;
     let mut sanitized_claims = 0;
@@ -509,8 +509,10 @@ fn comparison_decision_summary(
 /// the existing strict validator.
 fn parse_report_json(raw: &str) -> Result<AgentReportContentV1, serde_json::Error> {
     let trimmed = raw.trim().trim_start_matches('\u{feff}').trim();
-    if let Ok(report) = serde_json::from_str(trimmed) {
-        return Ok(report);
+    if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
+        if let Ok(report) = deserialize_compatible_report(value) {
+            return Ok(report);
+        }
     }
 
     // Try object boundaries rather than stripping arbitrary prose. Deserializing
@@ -518,26 +520,84 @@ fn parse_report_json(raw: &str) -> Result<AgentReportContentV1, serde_json::Erro
     // unrelated JSON object from being accepted accidentally.
     for (index, _) in trimmed.match_indices('{').take(64) {
         let mut deserializer = serde_json::Deserializer::from_str(&trimmed[index..]);
-        if let Ok(report) = AgentReportContentV1::deserialize(&mut deserializer) {
-            return Ok(report);
+        if let Ok(value) = Value::deserialize(&mut deserializer) {
+            if let Ok(report) = deserialize_compatible_report(value) {
+                return Ok(report);
+            }
         }
     }
 
     // Some compatibility gateways JSON-encode the assistant content once more.
     if let Ok(decoded) = serde_json::from_str::<String>(trimmed) {
         let decoded = decoded.trim();
-        if let Ok(report) = serde_json::from_str(decoded) {
-            return Ok(report);
+        if let Ok(value) = serde_json::from_str::<Value>(decoded) {
+            if let Ok(report) = deserialize_compatible_report(value) {
+                return Ok(report);
+            }
         }
         for (index, _) in decoded.match_indices('{').take(64) {
             let mut deserializer = serde_json::Deserializer::from_str(&decoded[index..]);
-            if let Ok(report) = AgentReportContentV1::deserialize(&mut deserializer) {
-                return Ok(report);
+            if let Ok(value) = Value::deserialize(&mut deserializer) {
+                if let Ok(report) = deserialize_compatible_report(value) {
+                    return Ok(report);
+                }
             }
         }
     }
 
-    serde_json::from_str::<AgentReportContentV1>(trimmed)
+    let value = serde_json::from_str::<Value>(trimmed)?;
+    deserialize_compatible_report(value)
+}
+
+/// Normalize a small set of lossless provider-shape variants before applying
+/// the strict report schema. This is intentionally limited to fields whose
+/// semantic meaning is unchanged by the conversion.
+fn deserialize_compatible_report(mut value: Value) -> Result<AgentReportContentV1, serde_json::Error> {
+    let Some(object) = value.as_object_mut() else {
+        return serde_json::from_value(value);
+    };
+
+    // `Option<String>` still requires the key in the published JSON schema.
+    // Treat omission as the natural `null` representation.
+    object
+        .entry("refusal_reason".to_string())
+        .or_insert(Value::Null);
+
+    // Several JSON-only providers render a prose limitation as the same
+    // title/explanation card shape used by findings. Preserve the prose while
+    // keeping the public contract as Vec<String>.
+    if let Some(limitations) = object.get_mut("limitations").and_then(Value::as_array_mut) {
+        for limitation in limitations {
+            let Some(fields) = limitation.as_object() else {
+                continue;
+            };
+            let title = fields
+                .get("title")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .trim();
+            let explanation = fields
+                .get("explanation")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .trim();
+            let normalized = match (title.is_empty(), explanation.is_empty()) {
+                (false, false) => format!("{title}：{explanation}"),
+                (false, true) => title.to_string(),
+                (true, false) => explanation.to_string(),
+                (true, true) => continue,
+            };
+            *limitation = Value::String(normalized);
+        }
+    }
+
+    serde_json::from_value(value)
+}
+
+fn parse_error_message(parse_error: &serde_json::Error) -> String {
+    format!(
+        "report JSON does not match AgentReportContentV1: {parse_error}. limitations must be strings; refusal_reason must be a string or null"
+    )
 }
 
 fn truncate_vec<T>(values: &mut Vec<T>, limit: usize) -> usize {
@@ -607,11 +667,23 @@ fn grounded_finding_explanation(finding: &AgentFindingV1, evidence: &EvidenceSto
             .to_string();
     }
     if title.contains("时间轴") || title.contains("空档") || title.contains("等待") {
-        return "时间轴没有显示额外空档或主动等待，说明当前输入能连续填满模型内的技能窗口；这不等于循环已经最优。"
-            .to_string();
+        let has_gaps = finding.evidence_ids.iter().any(|id| {
+            evidence
+                .get(id)
+                .and_then(|item| item.pointer("/result/gcd_gaps"))
+                .and_then(Value::as_array)
+                .is_some_and(|items| !items.is_empty())
+        });
+        return if has_gaps {
+            "时间轴记录到主技能衔接空档；这里只确认发生位置与时长，是否造成可优化损失仍需同场景对照。"
+                .to_string()
+        } else {
+            "时间轴没有记录到主技能衔接空档；这只说明当前冻结条件下执行连续，不代表循环已经最优。"
+                .to_string()
+        };
     }
     if title.contains("输出") || title.contains("结构") || title.contains("伤害") {
-        return "主要伤害由绝刀、援戈·血影等核心机制承接，说明当前循环已形成稳定的资源获取与消耗链。"
+        return "本轮模拟给出了各技能的伤害构成；占比用于描述当前输出画像，不能单独证明循环质量。"
             .to_string();
     }
     if cites_tool("analyze_timeline") {
@@ -1331,6 +1403,7 @@ struct NumericLiteral {
     decimal_places: u32,
     percent: bool,
     ordinary_count: bool,
+    identifier: bool,
     start: usize,
     end: usize,
 }
@@ -1357,6 +1430,7 @@ fn validate_grounded_prose<'a>(
     let tool_values = cited_tool_numeric_values(evidence_ids, evidence);
     if numeric_literals(value).iter().any(|literal| {
         !literal.ordinary_count
+            && !literal.identifier
             && !matches_metric(*literal, &metric_values)
             && !matches_metric_label_literal(value, *literal, &metrics)
             && !matches_knowledge_literal(*literal, &knowledge_literals)
@@ -1366,6 +1440,98 @@ fn validate_grounded_prose<'a>(
             "numeric_prose_claim",
             "numeric prose must restate a grounded metric value",
         ));
+    }
+    Ok(())
+}
+
+/// Baseline reports describe measured combat facts, so even small standalone
+/// counts must match the evidence. The general validator remains tolerant of
+/// ordinary list counts for non-combat prose, while this stricter pass prevents
+/// statements such as "8 gaps" from passing when the cited timeline records 11.
+pub(crate) fn validate_baseline_quantitative_prose(
+    report: &AgentReportContentV1,
+    evidence: &EvidenceStore,
+) -> Result<(), ReportValidationError> {
+    fn validate<'a>(
+        value: &str,
+        metrics: impl IntoIterator<Item = &'a GroundedMetricV1>,
+        evidence_ids: &[String],
+        evidence: &EvidenceStore,
+    ) -> Result<(), ReportValidationError> {
+        let metrics = metrics.into_iter().collect::<Vec<_>>();
+        let metric_values = metrics
+            .iter()
+            .map(|metric| metric.value)
+            .collect::<Vec<_>>();
+        let knowledge_literals = cited_knowledge_numeric_literals(evidence_ids, evidence);
+        let tool_values = cited_tool_numeric_values(evidence_ids, evidence);
+        if numeric_literals(value).iter().any(|literal| {
+            !literal.identifier
+                && !matches_metric(*literal, &metric_values)
+                && !matches_metric_label_literal(value, *literal, &metrics)
+                && !matches_knowledge_literal(*literal, &knowledge_literals)
+                && !matches_tool_value(*literal, &tool_values)
+        }) {
+            return Err(error(
+                "numeric_prose_claim",
+                "baseline numeric prose must restate a value from its cited evidence",
+            ));
+        }
+        Ok(())
+    }
+
+    let report_metrics = report
+        .findings
+        .iter()
+        .flat_map(|finding| finding.metrics.iter())
+        .collect::<Vec<_>>();
+    let report_evidence_ids = cited_evidence_ids(report);
+    validate(
+        &report.summary,
+        report_metrics.iter().copied(),
+        &report_evidence_ids,
+        evidence,
+    )?;
+    for limitation in &report.limitations {
+        validate(
+            limitation,
+            report_metrics.iter().copied(),
+            &report_evidence_ids,
+            evidence,
+        )?;
+    }
+    for finding in &report.findings {
+        validate(
+            &finding.title,
+            finding.metrics.iter(),
+            &finding.evidence_ids,
+            evidence,
+        )?;
+        validate(
+            &finding.explanation,
+            finding.metrics.iter(),
+            &finding.evidence_ids,
+            evidence,
+        )?;
+    }
+    for recommendation in &report.recommendations {
+        let metrics = report_metrics
+            .iter()
+            .copied()
+            .filter(|metric| recommendation.evidence_ids.contains(&metric.evidence_id))
+            .collect::<Vec<_>>();
+        validate(
+            &recommendation.title,
+            metrics.iter().copied(),
+            &recommendation.evidence_ids,
+            evidence,
+        )?;
+        validate(
+            &recommendation.rationale,
+            metrics,
+            &recommendation.evidence_ids,
+            evidence,
+        )?;
     }
     Ok(())
 }
@@ -1478,12 +1644,22 @@ fn numeric_literals(value: &str) -> Vec<NumericLiteral> {
                 && multiplier == 1.0
                 && !value[start..number_end].contains(',')
                 && (0.0..=12.0).contains(&parsed);
+            // Digits embedded in identifiers (for example a source account or
+            // version-like token) are not quantitative claims.
+            let identifier = start
+                .checked_sub(1)
+                .and_then(|offset| bytes.get(offset))
+                .is_some_and(|byte| byte.is_ascii_alphabetic() || *byte == b'_')
+                || bytes
+                    .get(index)
+                    .is_some_and(|byte| byte.is_ascii_alphabetic() || *byte == b'_');
             literals.push(NumericLiteral {
                 value: parsed,
                 multiplier,
                 decimal_places,
                 percent,
                 ordinary_count,
+                identifier,
                 start,
                 end: index,
             });
@@ -1510,6 +1686,7 @@ fn sanitize_unsupported_numeric_prose(
         .into_iter()
         .filter(|literal| {
             !literal.ordinary_count
+                && !literal.identifier
                 && !matches_metric(*literal, &metric_values)
                 && !matches_metric_label_literal(value, *literal, &metric_refs)
                 && !matches_knowledge_literal(*literal, &knowledge_literals)
@@ -1706,8 +1883,11 @@ fn validate_short_text(value: &str) -> Result<(), ReportValidationError> {
     }
 }
 
-fn error(code: &'static str, message: &'static str) -> ReportValidationError {
-    ReportValidationError { code, message }
+fn error(code: &'static str, message: impl Into<String>) -> ReportValidationError {
+    ReportValidationError {
+        code,
+        message: message.into(),
+    }
 }
 
 #[cfg(test)]
@@ -2272,6 +2452,40 @@ mod tests {
     }
 
     #[test]
+    fn provider_limitation_cards_are_losslessly_normalized() {
+        let mut value = serde_json::to_value(report()).unwrap();
+        value.as_object_mut().unwrap().remove("refusal_reason");
+        value["limitations"] = json!([
+            {
+                "title": "怒气触顶不等于损失",
+                "explanation": "当前证据只记录触顶采样。"
+            },
+            {"title": "仍需对照实验"}
+        ]);
+
+        let parsed = parse_and_validate_report(&value.to_string(), &evidence()).unwrap();
+
+        assert_eq!(parsed.content.refusal_reason, None);
+        assert_eq!(
+            parsed.content.limitations,
+            vec![
+                "怒气触顶不等于损失：当前证据只记录触顶采样。".to_string(),
+                "仍需对照实验".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn invalid_report_error_explains_the_required_shape() {
+        let error = parse_and_validate_report(r#"{"limitations":[42]}"#, &evidence())
+            .unwrap_err();
+
+        assert_eq!(error.code, "invalid_report_json");
+        assert!(error.message.contains("limitations must be strings"));
+        assert!(error.message.contains("refusal_reason"));
+    }
+
+    #[test]
     fn unrelated_wrapped_json_is_not_accepted_as_a_report() {
         let raw = r#"analysis {\"message\":\"not a report\"} done"#;
         assert_eq!(
@@ -2287,7 +2501,9 @@ mod tests {
         let mut value = report();
         value.summary = "当前 DPS 为 123.5，循环包含 2 个技能事件。".to_string();
         value.findings[0].explanation = "确定性模拟得到 DPS 约 124。".to_string();
-        validate_report(&value, &evidence()).unwrap();
+        let mut counted_evidence = evidence();
+        counted_evidence.get_mut(&"a".repeat(64)).unwrap()["result"]["skill_count"] = json!(2);
+        validate_report(&value, &counted_evidence).unwrap();
 
         let mut percent = report();
         percent.findings[0].metrics.push(GroundedMetricV1 {
@@ -2298,7 +2514,7 @@ mod tests {
             json_pointer: "/result/ratio".to_string(),
         });
         percent.summary = "核心技能伤害占比为 30%。".to_string();
-        percent.findings[0].title = "前 5 秒输出".to_string();
+        percent.findings[0].title = "前段输出".to_string();
         validate_report(&percent, &evidence()).unwrap();
 
         let mut formatted = report();
@@ -2439,6 +2655,31 @@ mod tests {
     }
 
     #[test]
+    fn baseline_strict_numeric_gate_rejects_a_wrong_small_count() {
+        let mut value = report();
+        value.findings[0].explanation = "时间轴记录到 8 次主技能空档。".to_string();
+        value.findings[0].metrics = vec![GroundedMetricV1 {
+            label: "主技能空档次数".to_string(),
+            value: 11.0,
+            unit: "count".to_string(),
+            evidence_id: "a".repeat(64),
+            json_pointer: "/result/gap_count".to_string(),
+        }];
+        let mut store = evidence();
+        store.get_mut(&"a".repeat(64)).unwrap()["result"]["gap_count"] = json!(11);
+
+        // The general presentation gate tolerates ordinary list counts, while
+        // the combat-baseline audit must not.
+        validate_report(&value, &store).unwrap();
+        assert_eq!(
+            validate_baseline_quantitative_prose(&value, &store)
+                .unwrap_err()
+                .code,
+            "numeric_prose_claim"
+        );
+    }
+
+    #[test]
     fn salvage_keeps_grounded_metrics_and_redacts_only_unsupported_numbers() {
         let mut value = report();
         value.summary = "当前 DPS 为 123.5，未经验证的预测为 999。".to_string();
@@ -2469,7 +2710,7 @@ mod tests {
         assert!(!salvaged.content.summary.contains("999"));
         assert_eq!(
             salvaged.content.findings[0].explanation,
-            "主要伤害由绝刀、援戈·血影等核心机制承接，说明当前循环已形成稳定的资源获取与消耗链。"
+            "本轮模拟给出了各技能的伤害构成；占比用于描述当前输出画像，不能单独证明循环质量。"
         );
         validate_report(&salvaged.content, &evidence()).unwrap();
     }

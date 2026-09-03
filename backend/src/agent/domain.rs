@@ -1290,7 +1290,7 @@ const ROUTE_PROFILES: &[RouteProfile] = &[
     },
     RouteProfile {
         task_type: AnalysisTaskType::BaselineAnalysis,
-        signals: &[("输出基线", 10), ("伤害构成", 9), ("输出分析", 9), ("循环优缺点", 8), ("整体输出", 7), ("基线", 7), ("调优", 5), ("优化", 4), ("当前循环", 3)],
+        signals: &[("输出基线", 10), ("伤害构成", 9), ("输出分析", 9), ("数值事实", 9), ("能打多少", 9), ("循环优缺点", 8), ("整体输出", 7), ("dps 基线", 7), ("dps基线", 7), ("模拟器真正验证", 7), ("基线", 7), ("调优", 5), ("优化", 4), ("当前循环", 3), ("dps", 3)],
         prototypes: &["分析当前循环的输出基线、伤害结构、节奏优缺点和主要瓶颈", "我手上的这套循环打得顺不顺", "整体输出表现和优缺点怎么样"],
     },
     RouteProfile {
@@ -1331,10 +1331,20 @@ fn classify_task(
                 .filter(|score| score.task_type == profile.task_type)
                 .map(|score| score.similarity_millis)
                 .max();
-            let semantic_component = semantic_similarity_millis
-                .unwrap_or(0)
-                .saturating_sub(500)
-                .saturating_mul(8);
+            // Access to a user's private saved catalog is an explicit-intent
+            // domain. Semantic resemblance alone must not route an unrelated
+            // combat question into it.
+            let semantic_component = if profile.task_type
+                == AnalysisTaskType::SavedArtifactAnalysis
+                && lexical_score == 0
+            {
+                0
+            } else {
+                semantic_similarity_millis
+                    .unwrap_or(0)
+                    .saturating_sub(500)
+                    .saturating_mul(8)
+            };
             let surface_component = match (surface, profile.task_type) {
                 (Some(AnalysisSurface::Equipment), AnalysisTaskType::EquipmentAnalysis) => 500,
                 (Some(AnalysisSurface::Simulation), AnalysisTaskType::BaselineAnalysis | AnalysisTaskType::RotationStallDiagnosis | AnalysisTaskType::MacroAnalysis | AnalysisTaskType::PracticalAdaptation) => 180,
@@ -1482,12 +1492,12 @@ fn playbook(task: AnalysisTaskType, client: DomainClient) -> AnalysisPlaybookV1 
                 "get_current_scenario",
                 "search_knowledge_base",
                 "analyze_timeline",
-                "simulate_scenario",
             ],
             &["当前分山循环 输出结构", "高质量技能 血怒 援戈 业火"],
             &[
                 "不能仅凭伤害占比断言循环错误",
                 "未观测到的覆盖、漂移或溢出只能作为假设",
+                "没有对照实验时，不把单次伤害结构评价为健康、合理或符合预期",
             ],
             &[
                 (
@@ -2138,35 +2148,93 @@ pub fn trace_annotation(
     tool_name: Option<&str>,
     evidence_count: usize,
 ) -> TraceAnnotation {
-    let stage_id = match (kind, tool_name) {
-        ("planning" | "analysis_plan_selected", _) => "scope",
-        ("tool_started" | "tool_finished", Some("get_current_scenario")) => "scope",
-        ("tool_started" | "tool_finished", Some("search_knowledge_base")) => "knowledge",
-        ("tool_started" | "tool_finished", Some("simulate_scenario")) => "baseline",
-        ("tool_started" | "tool_finished", Some("analyze_timeline")) => "locate",
-        ("tool_started" | "tool_finished", Some("compare_scenarios")) => "compare",
-        ("tool_started" | "tool_finished", Some("list_saved_artifacts")) => "saved",
-        ("tool_started" | "tool_finished", Some("read_saved_artifact")) => "saved",
-        ("tool_started" | "tool_finished", Some("compare_saved_macros")) => "compare",
-        ("tool_started" | "tool_finished", Some("compare_saved_scenarios")) => "compare",
-        ("tool_started" | "tool_finished", Some("inspect_equipment_workspace")) => "equipment",
-        ("tool_started" | "tool_finished", Some("search_equipment_catalog")) => "equipment",
-        ("tool_started" | "tool_finished", Some("compare_focused_equipment")) => "compare",
-        ("tool_started" | "tool_finished", Some("compare_equipment_strategies")) => "compare",
-        ("evidence_gap_requires_tool", Some("analyze_timeline")) => "locate",
-        ("evidence_gap_requires_tool", Some("compare_scenarios")) => "compare",
-        ("evidence_coverage_checked" | "reasoning_state_updated", _) => "coverage",
-        ("reasoning_critique_started" | "reasoning_critique_failed" | "reasoning_critique_passed", _) => "validation",
-        ("validating", _) => "validation",
-        ("model_started" | "model_finished", _) => "synthesis",
-        _ => "result",
+    let stage_candidates: &[&str] = match (kind, tool_name) {
+        ("planning" | "analysis_plan_selected", _) => &["scope", "entity"],
+        (
+            "tool_started" | "tool_finished" | "tool_deferred",
+            Some("get_current_scenario"),
+        ) => &["scope", "baseline"],
+        (
+            "tool_started" | "tool_finished" | "tool_deferred",
+            Some("search_knowledge_base"),
+        ) => &["knowledge", "quality", "cross_check", "evidence", "lookup"],
+        (
+            "tool_started" | "tool_finished" | "tool_deferred",
+            Some("simulate_scenario"),
+        ) => &["baseline", "experiment", "compare", "evidence"],
+        (
+            "tool_started" | "tool_finished" | "tool_deferred",
+            Some("analyze_timeline"),
+        ) => &["locate", "quality", "cross_check", "baseline", "evidence"],
+        (
+            "tool_started" | "tool_finished" | "tool_deferred",
+            Some(
+                "compare_scenarios"
+                | "compare_saved_macros"
+                | "compare_saved_scenarios"
+                | "compare_focused_equipment"
+                | "compare_equipment_strategies",
+            ),
+        ) => &["compare", "experiment", "decision", "evidence"],
+        (
+            "tool_started" | "tool_finished" | "tool_deferred",
+            Some("list_saved_artifacts" | "read_saved_artifact"),
+        ) => &["saved", "scope", "evidence"],
+        (
+            "tool_started" | "tool_finished" | "tool_deferred",
+            Some("inspect_equipment_workspace" | "search_equipment_catalog"),
+        ) => &["equipment", "baseline", "evidence", "scope"],
+        ("evidence_gap_requires_tool", Some("analyze_timeline")) => {
+            &["locate", "quality", "cross_check", "baseline"]
+        }
+        ("evidence_gap_requires_tool", Some("compare_scenarios")) => {
+            &["compare", "experiment", "decision"]
+        }
+        ("evidence_coverage_checked" | "reasoning_state_updated", _) => {
+            &["quality", "cross_check", "evidence", "decision"]
+        }
+        (
+            "reasoning_critique_started"
+            | "reasoning_critique_failed"
+            | "reasoning_critique_passed"
+            | "validating"
+            | "model_started"
+            | "model_finished"
+            | "provider_empty_retry"
+            | "report_repair_requested"
+            | "report_structure_evidence_preserved"
+            | "decision_checkpoint",
+            _,
+        ) => &["decision", "report", "synthesis"],
+        _ => &["decision", "report", "synthesis", "result"],
     };
+    let stage = stage_candidates
+        .iter()
+        .find_map(|candidate| {
+            plan.playbook
+                .stages
+                .iter()
+                .find(|stage| stage.stage_id == *candidate)
+        })
+        .or_else(|| {
+            let final_stage = stage_candidates
+                .iter()
+                .any(|candidate| matches!(*candidate, "decision" | "report" | "synthesis"));
+            if final_stage {
+                plan.playbook.stages.last()
+            } else {
+                plan.playbook.stages.first()
+            }
+        });
+    let stage_id = stage
+        .map(|stage| stage.stage_id.as_str())
+        .unwrap_or("result");
     let stage = plan
         .playbook
         .stages
         .iter()
         .find(|stage| stage.stage_id == stage_id)
-        .or_else(|| plan.playbook.stages.first());
+        .or(stage);
     let stage_label = stage
         .map(|stage| stage.label.as_str())
         .unwrap_or("可验证分析");
@@ -2174,13 +2242,21 @@ pub fn trace_annotation(
         .map(|stage| stage.purpose.as_str())
         .unwrap_or(plan.playbook.goal.as_str());
     let (label, overview) = match kind {
-        "planning" | "analysis_plan_selected" => (
+        "planning" => (
+            "理解分析任务".to_string(),
+            "识别用户目标、当前上下文和需要验证的事实类型。".to_string(),
+        ),
+        "analysis_plan_selected" => (
             format!("选择任务路径 · {}", plan.playbook.label),
             plan.playbook.goal.clone(),
         ),
         "tool_started" => (format!("{} · 取得证据", stage_label), purpose.to_string()),
         "tool_finished" => (
-            format!("{} · 已取得证据", stage_label),
+            if evidence_count > 0 {
+                format!("{} · 已取得证据", stage_label)
+            } else {
+                format!("{} · 未产生新证据", stage_label)
+            },
             if evidence_count > 0 {
                 format!(
                     "已登记{evidence_count}份本轮证据；继续按“{}”检查覆盖。",
@@ -2189,6 +2265,11 @@ pub fn trace_annotation(
             } else {
                 "本阶段没有产生新证据，后续不会据此扩展事实。".to_string()
             },
+        ),
+        "tool_deferred" => (
+            format!("{} · 暂缓", stage_label),
+            "前置诊断尚未完成；该动作不计为新证据，系统先执行必要的诊断步骤。"
+                .to_string(),
         ),
         "evidence_coverage_checked" => (
             "检查专业维度覆盖".to_string(),
@@ -2224,6 +2305,18 @@ pub fn trace_annotation(
         "validating" => (
             "校验结论与证据".to_string(),
             "核对报告结构、数值、版本范围、资料引用和实现边界。".to_string(),
+        ),
+        "provider_empty_retry" => (
+            "重试生成结论".to_string(),
+            "模型正文为空；保留现有证据并进行一次有界重试，不重复调用工具。".to_string(),
+        ),
+        "report_repair_requested" => (
+            "修复报告结构".to_string(),
+            "报告未满足结构或证据协议；仅修复报告，不改变已取得事实。".to_string(),
+        ),
+        "report_structure_evidence_preserved" => (
+            "发布证据兜底报告".to_string(),
+            "模型报告未通过校验；系统直接从已登记证据生成可验证摘要。".to_string(),
         ),
         _ => (stage_label.to_string(), purpose.to_string()),
     };
@@ -2796,5 +2889,80 @@ mod tests {
             .coverage
             .missing_dimensions
             .contains(&"timeline".to_string()));
+    }
+
+    #[test]
+    fn baseline_trace_uses_existing_playbook_stages() {
+        let runtime = AgentRuntime::fixture();
+        let plan = select_analysis_plan(
+            "这套循环的整体输出和伤害结构怎么样？",
+            &runtime.fixture_scenario(),
+        );
+        assert!(plan
+            .playbook
+            .preferred_tools
+            .contains(&"analyze_timeline".to_string()));
+        assert!(!plan
+            .playbook
+            .preferred_tools
+            .contains(&"simulate_scenario".to_string()));
+
+        let knowledge = trace_annotation(&plan, "tool_finished", Some("search_knowledge_base"), 4);
+        assert_eq!(knowledge.stage_id, "quality");
+        assert_eq!(knowledge.label, "检查循环质量 · 已取得证据");
+
+        let validation = trace_annotation(&plan, "validating", None, 0);
+        assert_eq!(validation.stage_id, "decision");
+        assert_eq!(validation.label, "校验结论与证据");
+    }
+
+    #[test]
+    fn zero_evidence_and_deferred_tools_are_not_labeled_as_success() {
+        let runtime = AgentRuntime::fixture();
+        let plan = select_analysis_plan(
+            "这套循环的整体输出和伤害结构怎么样？",
+            &runtime.fixture_scenario(),
+        );
+
+        let empty = trace_annotation(&plan, "tool_finished", Some("simulate_scenario"), 0);
+        assert!(empty.label.contains("未产生新证据"));
+        let deferred = trace_annotation(&plan, "tool_deferred", Some("simulate_scenario"), 0);
+        assert!(deferred.label.contains("暂缓"));
+        assert!(!deferred.label.contains("已取得证据"));
+    }
+
+    #[test]
+    fn baseline_language_outweighs_unanchored_saved_catalog_similarity() {
+        let runtime = AgentRuntime::fixture();
+        let scores = vec![
+            SemanticRouteScoreV1 {
+                task_type: AnalysisTaskType::SavedArtifactAnalysis,
+                similarity_millis: 604,
+            },
+            SemanticRouteScoreV1 {
+                task_type: AnalysisTaskType::PracticalAdaptation,
+                similarity_millis: 552,
+            },
+            SemanticRouteScoreV1 {
+                task_type: AnalysisTaskType::BaselineAnalysis,
+                similarity_millis: 546,
+            },
+        ];
+
+        let plan = select_analysis_plan_routed(
+            "如果我是战斗策划，这套循环目前有哪些可以确认的数值事实？",
+            None,
+            None,
+            &scores,
+            None,
+            &runtime.fixture_scenario(),
+        );
+
+        assert_eq!(plan.task_type, AnalysisTaskType::BaselineAnalysis);
+        assert_eq!(plan.playbook.playbook_id, "current_rotation_baseline");
+        assert!(!plan
+            .playbook
+            .preferred_tools
+            .contains(&"list_saved_artifacts".to_string()));
     }
 }

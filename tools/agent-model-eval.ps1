@@ -35,11 +35,18 @@ function Invoke-ExpectedError {
     Invoke-Json $Method $Path $Body | Out-Null
     throw "Expected HTTP $Status $Code."
   } catch {
+    $errorRecord = $_
     $response = $_.Exception.Response
     Assert-True ($null -ne $response) "Missing error response for $Code."
     Assert-True ([int]$response.StatusCode -eq $Status) "Unexpected HTTP status for $Code."
-    $reader = New-Object System.IO.StreamReader($response.GetResponseStream())
-    try { $payload = $reader.ReadToEnd() | ConvertFrom-Json } finally { $reader.Dispose() }
+    if (-not [string]::IsNullOrWhiteSpace($errorRecord.ErrorDetails.Message)) {
+      $payload = $errorRecord.ErrorDetails.Message | ConvertFrom-Json
+    } elseif ($response -is [System.Net.Http.HttpResponseMessage]) {
+      $payload = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult() | ConvertFrom-Json
+    } else {
+      $reader = New-Object System.IO.StreamReader($response.GetResponseStream())
+      try { $payload = $reader.ReadToEnd() | ConvertFrom-Json } finally { $reader.Dispose() }
+    }
     Assert-True ($payload.error.code -eq $Code) "Unexpected error code; wanted $Code."
   }
 }

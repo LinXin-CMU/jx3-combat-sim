@@ -2,7 +2,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::domain::{AnalysisPlanV1, AnalysisTaskType, EvidencePackV1};
-use super::report::{AgentReportContentV1, EvidenceStore, ReportValidationError};
+use super::report::{
+    validate_baseline_quantitative_prose, AgentReportContentV1, EvidenceStore,
+    ReportValidationError,
+};
 
 pub const REASONING_STATE_SCHEMA_V1: &str = "agent-reasoning-state/v1";
 
@@ -260,12 +263,13 @@ pub fn normalize_reasoning_contract(
         changes += content.limitations.len() - 3;
         content.limitations.truncate(3);
     }
-    for (index, finding) in content.findings.iter_mut().enumerate() {
-        let limit = if index == 0 { 2 } else { 1 };
-        if finding.metrics.len() > limit {
-            changes += finding.metrics.len() - limit;
-            finding.metrics.truncate(limit);
+    let mut remaining_metrics = 12usize;
+    for finding in &mut content.findings {
+        if finding.metrics.len() > remaining_metrics {
+            changes += finding.metrics.len() - remaining_metrics;
+            finding.metrics.truncate(remaining_metrics);
         }
+        remaining_metrics = remaining_metrics.saturating_sub(finding.metrics.len());
     }
     let normalized_question = question.to_lowercase();
     if contains_any(
@@ -300,7 +304,7 @@ pub fn audit_reasoning_contract(
     if content.findings.len() > 3
         || content.recommendations.len() > 1
         || content.limitations.len() > 3
-        || total_metrics > 4
+        || total_metrics > 12
     {
         return Err(reasoning_error(
             "report_focus_exceeded",
@@ -403,6 +407,111 @@ pub fn audit_reasoning_contract(
                     "rotation_causality_overstated",
                     "Rotation report converted an observed signal into untested loss or waste",
                 ));
+            }
+            if plan.task_type == AnalysisTaskType::BaselineAnalysis
+                && [
+                    "结构合理",
+                    "结构健康",
+                    "结构清晰",
+                    "符合预期",
+                    "不影响整体",
+                    "唯一风险",
+                    "较频繁",
+                    "绝对核心",
+                    "稳定来源",
+                    "衔接不紧",
+                ]
+                .iter()
+                .any(|term| contains_unnegated_term(&assertive_text, term))
+            {
+                return Err(reasoning_error(
+                    "baseline_quality_overstated",
+                    "Baseline report assigned quality or optimality without a comparison; publish the observed structure and mark quality as untested",
+                ));
+            }
+            if plan.task_type == AnalysisTaskType::BaselineAnalysis {
+                let asks_for_intervention = contains_any(
+                    &normalized_question,
+                    &[
+                        "优化", "调优", "修改", "怎么改", "如何改", "提升", "提高", "降低",
+                    ],
+                );
+                let recommendation_text = content
+                    .recommendations
+                    .iter()
+                    .map(|item| format!("{} {}", item.title, item.rationale))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                if !asks_for_intervention
+                    && contains_any(
+                        &recommendation_text,
+                        &[
+                            "更早", "更晚", "改为", "调整", "修改", "降低", "提高", "替换",
+                            "门槛", "阈值", "前置条件",
+                        ],
+                    )
+                {
+                    return Err(reasoning_error(
+                        "unrequested_baseline_intervention",
+                        "Baseline-only question received a concrete intervention; keep only observations or a neutral next experiment",
+                    ));
+                }
+
+                let has_complete_baseline_evidence = evidence.values().any(|item| {
+                    item.get("tool_name").and_then(serde_json::Value::as_str)
+                        == Some("simulate_scenario")
+                        && item.pointer("/result/dps").is_some()
+                        && item
+                            .pointer("/result/skills")
+                            .and_then(serde_json::Value::as_array)
+                            .is_some_and(|skills| {
+                                skills.iter().any(|skill| skill.get("damage_share").is_some())
+                            })
+                }) && evidence.values().any(|item| {
+                    item.get("tool_name").and_then(serde_json::Value::as_str)
+                        == Some("analyze_timeline")
+                        && item.pointer("/result/diagnostic_profile").is_some()
+                        && item.pointer("/result/rage").is_some()
+                        && item
+                            .pointer("/result/buff_coverage")
+                            .and_then(serde_json::Value::as_array)
+                            .is_some_and(|coverage| !coverage.is_empty())
+                });
+                if has_complete_baseline_evidence {
+                    validate_baseline_quantitative_prose(content, evidence)?;
+                    let pointers = content
+                        .findings
+                        .iter()
+                        .flat_map(|finding| finding.metrics.iter())
+                        .map(|metric| metric.json_pointer.as_str())
+                        .collect::<Vec<_>>();
+                    let has = |predicate: &dyn Fn(&str) -> bool| {
+                        pointers.iter().any(|pointer| predicate(pointer))
+                    };
+                    let complete = has(&|pointer| pointer == "/result/dps")
+                        && has(&|pointer| pointer == "/result/total_damage")
+                        && has(&|pointer| {
+                            pointer.starts_with("/result/skills/")
+                                && pointer.ends_with("/damage_share")
+                        })
+                        && has(&|pointer| {
+                            pointer.starts_with("/result/diagnostic_profile/cadence_gaps/")
+                                || pointer.starts_with(
+                                    "/result/diagnostic_profile/cooldown_waits/",
+                                )
+                        })
+                        && has(&|pointer| pointer.starts_with("/result/rage/"))
+                        && has(&|pointer| {
+                            pointer.starts_with("/result/buff_coverage/")
+                                && pointer.ends_with("/coverage_percent")
+                        });
+                    if !complete {
+                        return Err(reasoning_error(
+                            "baseline_dimension_missing",
+                            "Baseline report omitted one or more available dimensions: output total, damage composition, cadence, resource, or Buff coverage",
+                        ));
+                    }
+                }
             }
         }
     }
@@ -803,7 +912,10 @@ fn contains_unnegated_term(value: &str, term: &str) -> bool {
 }
 
 fn reasoning_error(code: &'static str, message: &'static str) -> ReportValidationError {
-    ReportValidationError { code, message }
+    ReportValidationError {
+        code,
+        message: message.to_string(),
+    }
 }
 
 #[cfg(test)]
@@ -988,6 +1100,46 @@ mod tests {
     }
 
     #[test]
+    fn baseline_audit_rejects_uncompared_quality_judgements() {
+        let scenario = scenario();
+        let plan = select_analysis_plan("这套循环的整体输出和伤害结构怎么样？", &scenario);
+        let mut store = EvidenceStore::new();
+        store.insert(
+            "timeline".to_string(),
+            evidence(
+                "analyze_timeline",
+                serde_json::json!({"diagnostic_profile": {}}),
+            ),
+        );
+        let content = AgentReportContentV1 {
+            schema_version: "agent-report-content/v1".to_string(),
+            summary: "这套循环伤害结构健康，整体符合预期。".to_string(),
+            findings: vec![super::super::report::AgentFindingV1 {
+                title: "当前结构".to_string(),
+                explanation: "已读取本轮时间轴。".to_string(),
+                evidence_ids: vec!["timeline".to_string()],
+                metrics: vec![],
+            }],
+            recommendations: vec![],
+            rotation_changes: vec![],
+            limitations: vec![],
+            refusal_reason: None,
+        };
+
+        assert_eq!(
+            audit_reasoning_contract(
+                "这套循环的整体输出和伤害结构怎么样？",
+                &plan,
+                &content,
+                &store,
+            )
+            .unwrap_err()
+            .code,
+            "baseline_quality_overstated"
+        );
+    }
+
+    #[test]
     fn presentation_normalization_focuses_metrics_and_removes_declined_edits() {
         let mut content = AgentReportContentV1 {
             schema_version: "agent-report-content/v1".to_string(),
@@ -1027,7 +1179,7 @@ mod tests {
         };
         assert!(normalize_reasoning_contract("这次不要改宏", &mut content) > 0);
         assert_eq!(content.findings.len(), 3);
-        assert_eq!(content.findings.iter().map(|item| item.metrics.len()).sum::<usize>(), 4);
+        assert_eq!(content.findings.iter().map(|item| item.metrics.len()).sum::<usize>(), 12);
         assert!(content.recommendations.is_empty());
         assert!(content.rotation_changes.is_empty());
         assert_eq!(content.limitations.len(), 3);
