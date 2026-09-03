@@ -134,6 +134,32 @@ body.agent-fullheight #page-agent.active {
 .agent-card-copy.is-copied { border-color: var(--green); color: var(--green); }
 .agent-card-copy.is-error { border-color: var(--warning); color: var(--warning); }
 .agent-card-copy.is-compact { min-height: 22px; padding: 2px 6px; font-size: 9px; }
+.agent-feedback-copy {
+  --agent-feedback-pad: 8px;
+  max-width: 0;
+  padding-right: 0;
+  padding-left: 0;
+  overflow: hidden;
+  border-color: transparent;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(10px);
+  transition: max-width .24s cubic-bezier(.22,1,.36,1), padding .24s cubic-bezier(.22,1,.36,1), opacity .18s ease, transform .24s cubic-bezier(.22,1,.36,1), border-color .16s ease, color .16s ease, background .16s ease;
+}
+.agent-feedback-copy.is-compact { --agent-feedback-pad: 6px; }
+.agent-message.user:hover .agent-feedback-copy,
+.agent-message.user:focus-within .agent-feedback-copy,
+.sim-ai-bubble.user:hover .agent-feedback-copy,
+.sim-ai-bubble.user:focus-within .agent-feedback-copy {
+  max-width: 74px;
+  padding-right: var(--agent-feedback-pad);
+  padding-left: var(--agent-feedback-pad);
+  border-color: var(--agent-line);
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(0);
+}
+.agent-feedback-copy:disabled { cursor: default; opacity: .42; }
 .agent-trace-note { margin: 4px 0 0; color: var(--agent-muted); font-size: 10px; line-height: 1.5; }
 .agent-trace-steps { display: grid; gap: 0; margin-top: 7px; }
 .agent-trace-step { position: relative; display: flex; min-height: 44px; gap: 9px; padding: 4px 6px; color: var(--agent-muted); font-size: 11px; }
@@ -471,7 +497,10 @@ body.agent-fullheight #page-agent.active {
 .sim-ai-chat > .ai-thinking { animation: sim-ai-content-in .28s cubic-bezier(.22,1,.36,1) both; }
 .sim-ai-bubble.user { margin-left: auto; }
 .sim-ai-bubble.agent { margin-right: auto; }
+.sim-ai-bubble-head { display: flex; min-height: 22px; align-items: center; gap: 6px; margin: 0 4px 4px; }
+.sim-ai-bubble.user .sim-ai-bubble-head { justify-content: flex-end; }
 .sim-ai-bubble-label { margin: 0 4px 4px; color: var(--agent-muted); font-size: 11px; }
+.sim-ai-bubble-head .sim-ai-bubble-label { margin: 0; }
 .sim-ai-bubble.user .sim-ai-bubble-label { text-align: right; }
 .sim-ai-bubble-body { padding: 9px 11px; border: 1px solid var(--agent-line); border-radius: 6px 6px 6px 2px; background: var(--agent-panel-2); font-size: 12px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
 .sim-ai-bubble.user .sim-ai-bubble-body { border-color: var(--gold-dim); border-radius: 6px 6px 2px 6px; background: var(--gold-tint); }
@@ -615,6 +644,18 @@ body.agent-fullheight #page-agent.active {
   .sim-ai-dock.open { transform: translate3d(0,0,0) scale(1); }
 }
 
+@media (hover: none) {
+  .agent-feedback-copy {
+    max-width: 74px;
+    padding-right: var(--agent-feedback-pad);
+    padding-left: var(--agent-feedback-pad);
+    border-color: var(--agent-line);
+    opacity: 1;
+    pointer-events: auto;
+    transform: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .sim-ai-fab { transition: opacity .14s ease; }
   .sim-ai-dock {
@@ -647,6 +688,7 @@ body.agent-fullheight #page-agent.active {
   .sim-ai-chat > .ai-thinking { animation: sim-ai-reduced-fade .16s ease both; }
   .sim-ai-progress-step,
   .sim-ai-result-metric { animation: sim-ai-reduced-fade .12s ease both; }
+  .agent-feedback-copy { transition: opacity .12s ease; transform: none; }
   .agent-trace-step.is-running,
   .sim-ai-progress-step.is-running { background: var(--gold-tint); animation: none; }
   .sim-ai-dock.is-loading .sim-ai-dock-head::after { animation-duration: 2.4s; }

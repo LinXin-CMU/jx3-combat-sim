@@ -57,6 +57,8 @@
   let dockTrace = null;
   let activeThinking = null;
   let dockThinking = null;
+  let activeFeedbackTurn = null;
+  let dockFeedbackTurn = null;
   let sessionSummaries = [];
   let dockMode = 'simulation';
 
@@ -202,6 +204,39 @@
       copyCardText(button, getText());
     });
     return button;
+  }
+
+  function createFeedbackTurn(question, compact) {
+    return {
+      question: String(question || '').trim(),
+      compact: !!compact,
+      traceWrap: null,
+      result: null,
+      button: null,
+    };
+  }
+
+  function feedbackCopyButton(turn) {
+    const button = cardCopyButton('复制反馈', () => buildFeedbackBundle(turn), turn.compact);
+    button.classList.add('agent-feedback-copy');
+    button.disabled = true;
+    button.title = '任务完成后复制问题、阶段概述、回复与脱敏调试信息';
+    turn.button = button;
+    return button;
+  }
+
+  function attachFeedbackTrace(turn, trace) {
+    if (turn) turn.traceWrap = trace?.wrap || null;
+  }
+
+  function completeFeedbackTurn(turn, result) {
+    if (!turn) return;
+    turn.result = result || null;
+    if (!turn.button) return;
+    turn.button.disabled = !turn.result;
+    turn.button.title = turn.result
+      ? '复制本轮问题、阶段概述、完整回复与脱敏调试信息'
+      : '本轮尚未形成可复制结果';
   }
 
   function traceCardText(wrap, compact) {
@@ -1086,10 +1121,13 @@
     requestAnimationFrame(() => { els.dockChat.scrollTop = els.dockChat.scrollHeight; });
   }
 
-  function appendDockBubble(role, text, isError) {
+  function appendDockBubble(role, text, isError, feedbackTurn) {
     prepareDockChat();
     const wrap = element('article', `sim-ai-bubble ${role}${isError ? ' sim-ai-error' : ''}`);
-    wrap.appendChild(element('div', 'sim-ai-bubble-label', role === 'user' ? '你' : 'AI 分析'));
+    const head = element('div', 'sim-ai-bubble-head');
+    if (feedbackTurn) head.appendChild(feedbackCopyButton(feedbackTurn));
+    head.appendChild(element('div', 'sim-ai-bubble-label', role === 'user' ? '你' : 'AI 分析'));
+    wrap.appendChild(head);
     wrap.appendChild(element('div', 'sim-ai-bubble-body', text));
     els.dockChat.appendChild(wrap);
     scrollDock();
@@ -1281,24 +1319,33 @@
       clear(els.transcript);
       let trace = null;
       let traceRunId = null;
+      let feedbackTurn = null;
       body.events.forEach(event => {
         if (event.kind === 'user_message') {
-          appendMessage('user', event.question);
+          feedbackTurn = createFeedbackTurn(event.question, false);
+          appendMessage('user', event.question, [feedbackCopyButton(feedbackTurn)]);
         } else if (event.kind === 'run_started') {
           trace = createTrace(event.run_id);
           traceRunId = event.run_id;
+          attachFeedbackTrace(feedbackTurn, trace);
           appendTraceStep(trace, { sequence: event.sequence, kind: 'planning' });
         } else if (event.kind === 'run_trace') {
           if (!trace || traceRunId !== event.run_id) {
             trace = createTrace(event.run_id);
             traceRunId = event.run_id;
+            attachFeedbackTrace(feedbackTurn, trace);
           }
           appendTraceStep(trace, event);
         } else if (event.kind === 'cancel_requested' || event.kind === 'run_interrupted') {
-          if (!trace || traceRunId !== event.run_id) trace = createTrace(event.run_id);
+          if (!trace || traceRunId !== event.run_id) {
+            trace = createTrace(event.run_id);
+            attachFeedbackTrace(feedbackTurn, trace);
+          }
           appendTraceStep(trace, { ...event, trace_kind: event.kind });
         } else if (event.kind === 'run_result') {
-          renderReport(event.result || { status: 'finished', scenario_hash: event.scenario_hash });
+          const result = event.result || { status: 'finished', scenario_hash: event.scenario_hash };
+          completeFeedbackTurn(feedbackTurn, result);
+          renderReport(result);
         }
       });
       if (!body.events.length) renderWelcome();
@@ -1333,24 +1380,33 @@
       clearDockChat();
       let trace = null;
       let traceRunId = null;
+      let feedbackTurn = null;
       body.events.forEach(event => {
         if (event.kind === 'user_message') {
-          appendDockBubble('user', event.question);
+          feedbackTurn = createFeedbackTurn(event.question, true);
+          appendDockBubble('user', event.question, false, feedbackTurn);
         } else if (event.kind === 'run_started') {
           trace = createDockTrace(event.run_id);
           traceRunId = event.run_id;
+          attachFeedbackTrace(feedbackTurn, trace);
           appendDockTraceStep(trace, { sequence: event.sequence, kind: 'planning' });
         } else if (event.kind === 'run_trace') {
           if (!trace || traceRunId !== event.run_id) {
             trace = createDockTrace(event.run_id);
             traceRunId = event.run_id;
+            attachFeedbackTrace(feedbackTurn, trace);
           }
           appendDockTraceStep(trace, event);
         } else if (event.kind === 'cancel_requested' || event.kind === 'run_interrupted') {
-          if (!trace || traceRunId !== event.run_id) trace = createDockTrace(event.run_id);
+          if (!trace || traceRunId !== event.run_id) {
+            trace = createDockTrace(event.run_id);
+            attachFeedbackTrace(feedbackTurn, trace);
+          }
           appendDockTraceStep(trace, { ...event, trace_kind: event.kind });
         } else if (event.kind === 'run_result') {
-          renderDockReport(event.result || { status: 'finished', scenario_hash: event.scenario_hash });
+          const result = event.result || { status: 'finished', scenario_hash: event.scenario_hash };
+          completeFeedbackTurn(feedbackTurn, result);
+          renderDockReport(result);
         }
       });
       if (body.summary.corrupted_event_count) {
@@ -1419,8 +1475,10 @@
     setStatus('正在冻结当前循环…');
     try {
       const captured = await captureScenario(dockMode);
-      appendDockBubble('user', question);
+      dockFeedbackTurn = createFeedbackTurn(question, true);
+      appendDockBubble('user', question, false, dockFeedbackTurn);
       dockTrace = createDockTrace('准备创建 run');
+      attachFeedbackTrace(dockFeedbackTurn, dockTrace);
       dockThinking = createThinking(els.dockChat);
       const payload = {
         question,
@@ -1450,6 +1508,8 @@
     } catch (error) {
       setBusy(false);
       activeRun = null;
+      dockTrace = null;
+      dockFeedbackTurn = null;
       appendDockBubble('agent', error.message || 'Agent 运行失败', true);
       setStatus(error.message || 'Agent 运行失败', true);
     }
@@ -1468,11 +1528,13 @@
           source.close();
           activeSource = null;
           clearThinking();
+          completeFeedbackTurn(dockFeedbackTurn, event.result);
           renderDockReport(event.result);
           const persistenceError = !!event.persistence_error;
           setTerminalStatus(event.result, persistenceError, false);
           activeRun = null;
           dockTrace = null;
+          dockFeedbackTurn = null;
           setBusy(false);
           loadSessions();
         } else {
@@ -1498,10 +1560,12 @@
       const body = await safeJson(response);
       if (response.ok && !body.running && body.result) {
         clearThinking();
+        completeFeedbackTurn(dockFeedbackTurn, body.result);
         renderDockReport(body.result);
         setTerminalStatus(body.result, !!body.persistence_error, true);
         activeRun = null;
         dockTrace = null;
+        dockFeedbackTurn = null;
         setBusy(false);
         await loadSessions();
         return;
@@ -1518,6 +1582,7 @@
       setStatus(error.message || '任务状态恢复失败', true);
       activeRun = null;
       dockTrace = null;
+      dockFeedbackTurn = null;
       setBusy(false);
     }
   }
@@ -1531,8 +1596,10 @@
     setStatus('正在冻结当前场景…');
     try {
       const captured = await captureScenario('simulation');
-      appendMessage('user', question);
+      activeFeedbackTurn = createFeedbackTurn(question, false);
+      appendMessage('user', question, [feedbackCopyButton(activeFeedbackTurn)]);
       activeTrace = createTrace('准备创建 run');
+      attachFeedbackTrace(activeFeedbackTurn, activeTrace);
       activeThinking = createThinking(els.transcript);
       const payload = {
         question,
@@ -1560,6 +1627,8 @@
     } catch (error) {
       setBusy(false);
       activeRun = null;
+      activeTrace = null;
+      activeFeedbackTurn = null;
       setStatus(error.message || 'Agent 运行失败', true);
     }
   }
@@ -1577,11 +1646,13 @@
           source.close();
           activeSource = null;
           clearThinking();
+          completeFeedbackTurn(activeFeedbackTurn, event.result);
           renderReport(event.result);
           const persistenceError = !!event.persistence_error;
           setTerminalStatus(event.result, persistenceError, false);
           activeRun = null;
           activeTrace = null;
+          activeFeedbackTurn = null;
           setBusy(false);
           loadSessions();
         } else {
@@ -1607,10 +1678,12 @@
       const body = await safeJson(response);
       if (response.ok && !body.running && body.result) {
         clearThinking();
+        completeFeedbackTurn(activeFeedbackTurn, body.result);
         renderReport(body.result);
         setTerminalStatus(body.result, !!body.persistence_error, true);
         activeRun = null;
         activeTrace = null;
+        activeFeedbackTurn = null;
         setBusy(false);
         await loadSessions();
         return;
@@ -1626,6 +1699,7 @@
       setStatus(error.message || '任务状态恢复失败', true);
       activeRun = null;
       activeTrace = null;
+      activeFeedbackTurn = null;
       setBusy(false);
     }
   }
@@ -1747,6 +1821,29 @@
         : 'legacy_run: this historical run predates the full debug projection',
     };
     return JSON.stringify(bundle, null, 2);
+  }
+
+  function buildFeedbackBundle(turn) {
+    if (!turn?.result) return '';
+    const trace = turn.traceWrap
+      ? traceCardText(turn.traceWrap, turn.compact)
+      : '# 可验证分析流程 · 阶段概述\n- 本轮没有可用的公开阶段记录';
+    return [
+      '# 苍云战斗分析 Agent · 反馈包',
+      '',
+      '## 用户问题',
+      turn.question || turn.result?.debug?.question || '—',
+      '',
+      trace,
+      '',
+      '## Agent 回复',
+      buildSummary(turn.result),
+      '',
+      '## 完整脱敏调试信息',
+      '```json',
+      buildDebugBundle(turn.result),
+      '```',
+    ].join('\n');
   }
 
   function newSession() {
