@@ -802,6 +802,20 @@ fn normalize_metric_citations(
                 finding.evidence_ids.push(metric.evidence_id.clone());
                 normalized += 1;
             }
+            // `ranked_damage_sources` is a compact model-facing view. Its
+            // entries carry pointers into the immutable skills array, but a
+            // provider may cite the view's own array position instead. Resolve
+            // that losslessly before validation so the system does not reject
+            // a correct metric for following its projected context.
+            if let Some(candidate) = evidence
+                .get(&metric.evidence_id)
+                .and_then(|envelope| {
+                    ranked_damage_metric_source_pointer(&metric.json_pointer, envelope)
+                })
+            {
+                metric.json_pointer = candidate;
+                normalized += 1;
+            }
             // Models occasionally copy a JSON Pointer relative to the
             // evidence result object even though the public report contract
             // requires the explicit /result prefix. Repair only when the
@@ -825,6 +839,30 @@ fn normalize_metric_citations(
         }
     }
     normalized
+}
+
+fn ranked_damage_metric_source_pointer(pointer: &str, envelope: &Value) -> Option<String> {
+    let suffix = pointer.strip_prefix("/result/ranked_damage_sources/")?;
+    let (rank, field) = suffix.split_once('/')?;
+    let rank = rank.parse::<usize>().ok()?;
+    if !matches!(field, "damage_share" | "total_damage") {
+        return None;
+    }
+    let mut ranked = envelope
+        .pointer("/result/skills")?
+        .as_array()?
+        .iter()
+        .enumerate()
+        .filter_map(|(index, skill)| {
+            let total_damage = skill.get("total_damage")?.as_f64()?;
+            (total_damage > 0.0).then_some((index, total_damage))
+        })
+        .collect::<Vec<_>>();
+    ranked.sort_by(|left, right| right.1.total_cmp(&left.1));
+    let source_index = ranked.get(rank)?.0;
+    let candidate = format!("/result/skills/{source_index}/{field}");
+    envelope.pointer(&candidate)?.as_f64()?;
+    Some(candidate)
 }
 
 fn normalize_evidence_id_references(
@@ -2051,6 +2089,42 @@ mod tests {
             validate_report(&value, &store).unwrap_err().code,
             "metric_value_mismatch"
         );
+    }
+
+    #[test]
+    fn projected_ranked_damage_pointer_resolves_to_immutable_skill_source() {
+        let evidence_id = "d".repeat(64);
+        let store = BTreeMap::from([(
+            evidence_id.clone(),
+            json!({
+                "evidence_id": evidence_id,
+                "tool_name": "simulate_scenario",
+                "result": {
+                    "skills": [
+                        {"name": "斩刀", "total_damage": 66_000_000.0, "damage_share": 0.075},
+                        {"name": "绝刀·50怒", "total_damage": 296_000_000.0, "damage_share": 0.3327}
+                    ]
+                }
+            }),
+        )]);
+        let mut value = report();
+        value.findings[0].evidence_ids = vec!["d".repeat(64)];
+        value.findings[0].explanation = "绝刀·50怒是当前最大伤害来源。".to_string();
+        value.findings[0].metrics[0] = GroundedMetricV1 {
+            label: "绝刀·50怒伤害占比".to_string(),
+            value: 33.27,
+            unit: "percent".to_string(),
+            evidence_id: "d".repeat(64),
+            json_pointer: "/result/ranked_damage_sources/0/damage_share".to_string(),
+        };
+
+        let parsed = parse_and_validate_report(&serde_json::to_string(&value).unwrap(), &store)
+            .expect("projected pointer should be normalized");
+        assert_eq!(
+            parsed.content.findings[0].metrics[0].json_pointer,
+            "/result/skills/1/damage_share"
+        );
+        assert_eq!(parsed.normalized_metric_citations, 1);
     }
 
     #[test]

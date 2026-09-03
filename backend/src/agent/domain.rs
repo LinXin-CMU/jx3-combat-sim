@@ -975,6 +975,33 @@ fn apply_rotation_diagnosis_contract(
         return;
     }
 
+    // A simulator baseline should not be forced through guide retrieval. Promote
+    // current-version knowledge only when the user asks for a guide/mechanic
+    // interpretation; otherwise keep it available as an optional model choice.
+    if plan.task_type == AnalysisTaskType::BaselineAnalysis {
+        let needs_versioned_explanation = contains_any(
+            normalized_question,
+            &["攻略", "资料", "白皮书", "机制", "根据", "结合当前版本"],
+        );
+        if needs_versioned_explanation {
+            plan.playbook
+                .optional_dimensions
+                .retain(|dimension| dimension != "versioned_knowledge");
+            if !plan
+                .playbook
+                .required_dimensions
+                .iter()
+                .any(|dimension| dimension == "versioned_knowledge")
+            {
+                plan.playbook
+                    .required_dimensions
+                    .push("versioned_knowledge".to_string());
+            }
+        } else {
+            demote_required_dimension(&mut plan.playbook, "versioned_knowledge");
+        }
+    }
+
     plan.playbook
         .required_dimensions
         .retain(|dimension| dimension != "macro_context");
@@ -1387,9 +1414,12 @@ fn classify_task(
         let semantic = candidate.semantic_similarity_millis.unwrap_or(0);
         let margin = candidate.score.saturating_sub(second_score);
         let lexical_ready = candidate.lexical_score >= 3;
-        let semantic_ready = semantic >= 580 && margin >= 120;
+        // A margin of 80 is already non-ambiguous below. Requiring 120 here
+        // created a dead zone where a clear top semantic route still fell back
+        // to the generic playbook, losing its domain evidence contract.
+        let semantic_ready = semantic >= 580 && margin >= 80;
         let surface_semantic_ready = semantic >= 540
-            && margin >= 120
+            && margin >= 80
             && matches!(
                 (surface, candidate.task_type),
                 (Some(AnalysisSurface::Equipment), AnalysisTaskType::EquipmentAnalysis)
@@ -1480,14 +1510,8 @@ fn playbook(task: AnalysisTaskType, client: DomainClient) -> AnalysisPlaybookV1 
             "current_rotation_baseline",
             "当前循环输出基线",
             "先说明当前输出结构，再把资源、覆盖和稳定性拆成可观察事实与待验证假设。",
-            &[
-                "scope",
-                "scenario",
-                "baseline_metrics",
-                "timeline",
-                "versioned_knowledge",
-            ],
-            &[],
+            &["scope", "scenario", "baseline_metrics", "timeline"],
+            &["versioned_knowledge"],
             &[
                 "get_current_scenario",
                 "search_knowledge_base",
@@ -2396,6 +2420,26 @@ mod tests {
     }
 
     #[test]
+    fn baseline_knowledge_is_adaptive_instead_of_mandatory() {
+        let scenario = AgentRuntime::fixture().fixture_scenario();
+        let measured = select_analysis_plan("分析当前循环输出基线", &scenario);
+        assert!(!measured
+            .playbook
+            .required_dimensions
+            .contains(&"versioned_knowledge".to_string()));
+        assert!(measured
+            .playbook
+            .optional_dimensions
+            .contains(&"versioned_knowledge".to_string()));
+
+        let explained = select_analysis_plan("结合当前版本攻略分析当前循环输出基线", &scenario);
+        assert!(explained
+            .playbook
+            .required_dimensions
+            .contains(&"versioned_knowledge".to_string()));
+    }
+
+    #[test]
     fn structured_task_hint_overrides_wording() {
         let scenario = AgentRuntime::fixture().fixture_scenario();
         let plan = select_analysis_plan_routed(
@@ -2444,6 +2488,32 @@ mod tests {
         assert_eq!(plan.task_type, AnalysisTaskType::HasteDecision);
         assert_eq!(plan.routing_decision.strategy, RoutingStrategy::HybridSemantic);
         assert_eq!(plan.routing_decision.candidates[0].semantic_similarity_millis, Some(720));
+    }
+
+    #[test]
+    fn related_semantic_near_neighbors_keep_the_clear_top_domain_route() {
+        let scenario = AgentRuntime::fixture().fixture_scenario();
+        let scores = [
+            SemanticRouteScoreV1 {
+                task_type: AnalysisTaskType::BaselineAnalysis,
+                similarity_millis: 580,
+            },
+            SemanticRouteScoreV1 {
+                task_type: AnalysisTaskType::RotationStallDiagnosis,
+                similarity_millis: 568,
+            },
+        ];
+        let plan = select_analysis_plan_routed(
+            "这套循环做得好的地方和最主要的问题是什么？",
+            None,
+            None,
+            &scores,
+            None,
+            &scenario,
+        );
+        assert_eq!(plan.task_type, AnalysisTaskType::BaselineAnalysis);
+        assert_eq!(plan.playbook.playbook_id, "current_rotation_baseline");
+        assert_eq!(plan.routing_decision.strategy, RoutingStrategy::HybridSemantic);
     }
 
     #[test]

@@ -18,7 +18,7 @@ use super::domain::{
     equipment_strategy_comparison_requested,
 };
 use super::evidence::validate_trace_id;
-use super::prompt::agent_prompt_v23;
+use super::prompt::agent_prompt_v26;
 use super::provider::{
     FinishReason, LlmProvider, ModelMessage, ModelRequest, ProviderToolCall,
     StructuredOutputDefinition, TokenUsage,
@@ -542,7 +542,7 @@ pub async fn run_agent_recorded(
     replay_sink: Option<AgentReplaySink>,
 ) -> AgentRunResultV1 {
     let started = Instant::now();
-    let prompt = agent_prompt_v23();
+    let prompt = agent_prompt_v26();
     let semantic_prototypes = routing_semantic_prototypes();
     let semantic_result = if input.task_hint.is_none() {
         runtime.knowledge().map(|knowledge| {
@@ -1067,6 +1067,35 @@ pub async fn run_agent_recorded(
             );
         }
         if started.elapsed() >= Duration::from_millis(limits.wall_time_ms) {
+            if let Some(content) = recover_report_from_messages(
+                &input.question,
+                &analysis_plan,
+                &messages,
+                registry.evidence(),
+            )
+            .or_else(|| {
+                evidence_preserving_provider_fallback(
+                    &analysis_plan,
+                    registry.evidence(),
+                    "本轮达到时限；已保留时限内形成的可验证分析。",
+                )
+            }) {
+                return terminal_with_report(
+                    provider,
+                    &input,
+                    &prompt,
+                    AgentRunStatus::PartiallyVerified,
+                    accounting,
+                    content,
+                    Some(fixed_error(
+                        "run_timeout",
+                        "Agent run exceeded its wall-time limit",
+                    )),
+                    trace,
+                    started,
+                    &registry,
+                );
+            }
             return terminal_with_registry(
                 provider,
                 &input,
@@ -1084,11 +1113,19 @@ pub async fn run_agent_recorded(
             );
         }
         if accounting.model_turns >= limits.max_model_turns {
-            if let Some(content) = evidence_preserving_provider_fallback(
+            if let Some(content) = recover_report_from_messages(
+                &input.question,
                 &analysis_plan,
+                &messages,
                 registry.evidence(),
-                "模型已用完本轮规划次数；下方保留已取得的本地证据，不把未完成的解释伪装成结论。",
-            ) {
+            )
+            .or_else(|| {
+                evidence_preserving_provider_fallback(
+                    &analysis_plan,
+                    registry.evidence(),
+                    "模型已用完本轮规划次数；下方保留已取得的本地证据，不把未完成的解释伪装成结论。",
+                )
+            }) {
                 trace.push(
                     "model_turn_budget_evidence_preserved",
                     None,
@@ -1353,6 +1390,24 @@ pub async fn run_agent_recorded(
                     }),
                 );
                 add_usage(&mut accounting, &error.usage);
+                if error.code == "provider_balance_insufficient" {
+                    let content = refusal_content(
+                        "模型服务当前不可用，尚未生成战斗分析。",
+                        "供应商返回余额不足；已取得的攻略片段不会冒充本次循环诊断。",
+                    );
+                    return terminal_with_report(
+                        provider,
+                        &input,
+                        &prompt,
+                        AgentRunStatus::ProviderFailed,
+                        accounting,
+                        content,
+                        Some(fixed_error(error.code, error.message)),
+                        trace,
+                        started,
+                        &registry,
+                    );
+                }
                 if error.code == "provider_tool_arguments_invalid"
                     && provider_protocol_retries < MAX_PROVIDER_PROTOCOL_RETRIES
                     && accounting.model_turns < limits.max_model_turns
@@ -1625,6 +1680,19 @@ pub async fn run_agent_recorded(
             let effective_tool_calls =
                 (response.tool_calls.len() as u32).saturating_sub(coalesced_knowledge_calls);
             if accounting.tool_calls.saturating_add(effective_tool_calls) > limits.max_tool_calls {
+                if accounting.model_turns < limits.max_model_turns {
+                    final_report_only = true;
+                    messages.push(ModelMessage::User {
+                        content: "The requested tool batch is larger than the remaining tool budget. Do not call more tools. Finish from the evidence already registered and mark any unrun check as a limitation; do not replace the answer with a budget error.".to_string(),
+                    });
+                    trace.push(
+                        "budget_limit_reached",
+                        None,
+                        Vec::new(),
+                        Some("tool_call_batch_trimmed_to_report".to_string()),
+                    );
+                    continue;
+                }
                 if let Some(content) = evidence_preserving_provider_fallback(
                     &analysis_plan,
                     registry.evidence(),
@@ -2098,6 +2166,29 @@ pub async fn run_agent_recorded(
                         ));
                         continue;
                     }
+                    if reasoning_audit_is_advisory(error.code) {
+                        let mut content = validated.content;
+                        add_advisory_reasoning_boundary(&mut content, error.code);
+                        trace.push_checkpoint(
+                            "reasoning_critique_passed",
+                            "批判检查完成",
+                            "报告存在非阻断的完整度问题；已保留通过事实校验的模型分析，并明确其覆盖边界。".to_string(),
+                            Some("advisory_reasoning_boundary".to_string()),
+                            cited_evidence_ids(&content),
+                        );
+                        return terminal_with_report(
+                            provider,
+                            &input,
+                            &prompt,
+                            AgentRunStatus::PartiallyVerified,
+                            accounting,
+                            content,
+                            Some(fixed_error(error.code, error.message)),
+                            trace,
+                            started,
+                            &registry,
+                        );
+                    }
                     if let Some(content) = evidence_preserving_provider_fallback(
                         &analysis_plan,
                         registry.evidence(),
@@ -2202,7 +2293,9 @@ pub async fn run_agent_recorded(
                     );
                     continue;
                 }
-                if analysis_plan.task_type == AnalysisTaskType::BaselineAnalysis {
+                if analysis_plan.task_type == AnalysisTaskType::BaselineAnalysis
+                    && parse_and_salvage_report(raw, registry.evidence()).is_err()
+                {
                     if let Some(fallback) = evidence_preserving_provider_fallback(
                         &analysis_plan,
                         registry.evidence(),
@@ -2336,6 +2429,33 @@ pub async fn run_agent_recorded(
                                 raw,
                             ));
                             continue;
+                        }
+                        if reasoning_audit_is_advisory(reasoning_error.code) {
+                            let mut content = salvaged.content;
+                            add_advisory_reasoning_boundary(&mut content, reasoning_error.code);
+                            trace.push_checkpoint(
+                                "reasoning_critique_passed",
+                                "批判检查完成",
+                                "可信片段存在非阻断的完整度问题；已保留模型分析并明确其覆盖边界。"
+                                    .to_string(),
+                                Some("advisory_reasoning_boundary_after_salvage".to_string()),
+                                cited_evidence_ids(&content),
+                            );
+                            return terminal_with_report(
+                                provider,
+                                &input,
+                                &prompt,
+                                AgentRunStatus::PartiallyVerified,
+                                accounting,
+                                content,
+                                Some(fixed_error(
+                                    reasoning_error.code,
+                                    reasoning_error.message,
+                                )),
+                                trace,
+                                started,
+                                &registry,
+                            );
                         }
                         if let Some(content) = evidence_preserving_provider_fallback(
                             &analysis_plan,
@@ -2519,10 +2639,35 @@ fn recover_report_from_messages(
             .or_else(|_| parse_and_salvage_report(raw, evidence).map(|salvaged| salvaged.content))
             .ok()?;
         normalize_reasoning_contract(question, &mut content);
-        audit_reasoning_contract(question, plan, &content, evidence)
-            .ok()
-            .map(|_| content)
+        match audit_reasoning_contract(question, plan, &content, evidence) {
+            Ok(()) => Some(content),
+            Err(error) if reasoning_audit_is_advisory(error.code) => {
+                add_advisory_reasoning_boundary(&mut content, error.code);
+                Some(content)
+            }
+            Err(_) => None,
+        }
     })
+}
+
+fn reasoning_audit_is_advisory(code: &str) -> bool {
+    matches!(
+        code,
+        "report_focus_exceeded" | "rotation_diagnosis_incomplete" | "baseline_core_missing"
+    )
+}
+
+fn add_advisory_reasoning_boundary(content: &mut AgentReportContentV1, code: &str) {
+    let boundary = match code {
+        "baseline_core_missing" => "本次回答只覆盖已引用的循环维度，不代表完整诊断。",
+        "rotation_diagnosis_incomplete" => {
+            "本次回答未完全拆开优势与风险；已发布部分仍须按各自证据理解。"
+        }
+        _ => "本次回答已聚焦当前问题；未展开的维度不自动构成结论。",
+    };
+    if !content.limitations.iter().any(|item| item == boundary) {
+        content.limitations.push(boundary.to_string());
+    }
 }
 
 fn model_tool_output(output: &Value) -> Value {
@@ -2631,8 +2776,23 @@ fn project_tool_result(tool_name: &str, result: &mut Value) {
             }
         }
         "simulate_scenario" => {
-            let ranked = ranked_damage_sources(result, 8);
+            let ranked = {
+                let derived = ranked_damage_sources(result, 12);
+                if derived.is_empty() {
+                    result
+                        .get("ranked_damage_sources")
+                        .and_then(Value::as_array)
+                        .map(|items| items.iter().take(12).cloned().collect())
+                        .unwrap_or_default()
+                } else {
+                    derived
+                }
+            };
             if let Some(object) = result.as_object_mut() {
+                // The full unordered skill list remains in immutable server-side
+                // evidence for validation. The model sees a compact damage-ranked
+                // view so low-charge variants cannot eclipse the actual carrier.
+                object.remove("skills");
                 object.insert("ranked_damage_sources".to_string(), Value::Array(ranked));
             }
         }
@@ -2677,13 +2837,16 @@ fn ranked_damage_sources(result: &Value, limit: usize) -> Vec<Value> {
             let name = skill.get("name").and_then(Value::as_str)?;
             let damage_share = skill.get("damage_share").and_then(Value::as_f64)?;
             let total_damage = skill.get("total_damage").and_then(Value::as_f64)?;
+            let event_count = skill.get("event_count").and_then(Value::as_u64);
             (total_damage > 0.0).then(|| {
                 serde_json::json!({
                     "name": name,
                     "damage_share": damage_share,
                     "total_damage": total_damage,
+                    "event_count": event_count,
                     "damage_share_json_pointer": format!("/result/skills/{index}/damage_share"),
                     "total_damage_json_pointer": format!("/result/skills/{index}/total_damage"),
+                    "event_count_json_pointer": format!("/result/skills/{index}/event_count"),
                 })
             })
         })
@@ -3900,6 +4063,50 @@ mod tests {
     }
 
     #[test]
+    fn simulation_projection_is_ranked_and_does_not_expose_unordered_skills() {
+        let full = json!({
+            "schema_version": "agent-tool-result/v1",
+            "ok": true,
+            "tool_name": "simulate_scenario",
+            "evidence_ids": ["a".repeat(64)],
+            "evidence": [{
+                "evidence_id": "a".repeat(64),
+                "tool_name": "simulate_scenario",
+                "result": {
+                    "dps": 100.0,
+                    "skills": [
+                        {"name": "绝刀·20怒", "damage_share": 0.01, "total_damage": 10.0, "event_count": 1},
+                        {"name": "绝刀·50怒", "damage_share": 0.40, "total_damage": 400.0, "event_count": 80}
+                    ]
+                }
+            }]
+        });
+        let projected = model_tool_output(&full);
+        assert!(projected.pointer("/evidence/0/result/skills").is_none());
+        assert_eq!(
+            projected
+                .pointer("/evidence/0/result/ranked_damage_sources/0/name")
+                .and_then(Value::as_str),
+            Some("绝刀·50怒")
+        );
+        assert_eq!(
+            projected
+                .pointer("/evidence/0/result/ranked_damage_sources/0/event_count")
+                .and_then(Value::as_u64),
+            Some(80)
+        );
+        assert!(full.pointer("/evidence/0/result/skills").is_some());
+
+        let projected_twice = model_tool_output(&projected);
+        assert_eq!(
+            projected_twice
+                .pointer("/evidence/0/result/ranked_damage_sources/0/name")
+                .and_then(Value::as_str),
+            Some("绝刀·50怒")
+        );
+    }
+
+    #[test]
     fn evidence_handoff_has_a_hard_byte_budget() {
         let mut evidence = EvidenceStore::new();
         for index in 0..20 {
@@ -3981,7 +4188,7 @@ mod tests {
                 }),
             );
         }
-        let prompt = agent_prompt_v23();
+        let prompt = agent_prompt_v26();
         let request = ModelRequest {
             instructions: prompt.instructions.to_string(),
             messages: compact_handoff_messages(&input, &plan, &evidence, 6 * 1024),
@@ -4473,7 +4680,7 @@ mod tests {
         .await;
 
         assert_eq!(result.status, AgentRunStatus::Completed);
-        assert_eq!(result.prompt_version, "agent-system/v23");
+        assert_eq!(result.prompt_version, "agent-system/v26");
         assert_eq!(result.accounting.knowledge_searches, 1);
         assert_eq!(result.accounting.simulations, 0);
         let report = result.report.unwrap();
@@ -4552,7 +4759,7 @@ mod tests {
         .await;
 
         assert_eq!(result.status, AgentRunStatus::Completed);
-        assert_eq!(result.prompt_version, "agent-system/v23");
+        assert_eq!(result.prompt_version, "agent-system/v26");
         assert_eq!(result.accounting.knowledge_searches, 1);
         assert_eq!(result.accounting.simulations, 1);
         let report = result.report.unwrap();
@@ -5076,10 +5283,12 @@ mod tests {
             }),
         ]);
 
+        let mut run_input = input(&runtime, "run-two-knowledge-searches");
+        run_input.question = "结合当前版本资料分析当前循环的确定性输出。".to_string();
         let result = run_agent(
             &provider,
             &runtime,
-            input(&runtime, "run-two-knowledge-searches"),
+            run_input,
             AgentRunLimits::default(),
             AgentCancellation::default(),
         )
@@ -5136,10 +5345,12 @@ mod tests {
             }),
         ]);
 
+        let mut run_input = input(&runtime, "run-parallel-knowledge-searches");
+        run_input.question = "结合当前版本资料分析当前循环的确定性输出。".to_string();
         let result = run_agent(
             &provider,
             &runtime,
-            input(&runtime, "run-parallel-knowledge-searches"),
+            run_input,
             AgentRunLimits::default(),
             AgentCancellation::default(),
         )
@@ -5215,6 +5426,30 @@ mod tests {
             .any(|call| call.server_initiated && call.tool_name == "get_current_scenario"));
         assert!(debug.evidence_pack.is_some());
         assert_eq!(result.error.unwrap().code, "provider_http_429");
+    }
+
+    #[tokio::test]
+    async fn insufficient_balance_never_masquerades_knowledge_as_analysis() {
+        let runtime = AgentRuntime::fixture();
+        let provider = ScriptedProvider::new(vec![Err(ProviderError::upstream_status(402))]);
+        let result = run_agent(
+            &provider,
+            &runtime,
+            input(&runtime, "run-provider-balance"),
+            AgentRunLimits::default(),
+            AgentCancellation::default(),
+        )
+        .await;
+
+        assert_eq!(result.status, AgentRunStatus::ProviderFailed);
+        assert_eq!(
+            result.error.as_ref().map(|error| error.code.as_str()),
+            Some("provider_balance_insufficient")
+        );
+        let content = &result.report.expect("explicit provider failure report").content;
+        assert!(content.findings.is_empty());
+        assert!(content.summary.contains("尚未生成战斗分析"));
+        assert!(content.limitations[0].contains("不会冒充"));
     }
 
     #[tokio::test]
@@ -5378,7 +5613,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn invalid_baseline_report_gets_one_repair_then_coherent_fallback() {
+    async fn invalid_baseline_report_gets_one_repair_then_restores_required_timeline() {
         let runtime = AgentRuntime::fixture();
         let bad_report = json!({
             "schema_version": "agent-report-content/v1",
@@ -5445,7 +5680,7 @@ mod tests {
             .iter()
             .any(|event| event.kind == "report_repair_requested"));
         assert!(result.trace.iter().any(|event| {
-            event.code.as_deref() == Some("deterministic_baseline_fallback")
+            event.code.as_deref() == Some("deterministic_timeline_fallback")
         }));
     }
 

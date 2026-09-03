@@ -95,6 +95,30 @@ const AGENT_SYSTEM_PROMPT_V23: &str = concat!(
     include_str!("../../prompts/agent_system_v22_addendum.md"),
     include_str!("../../prompts/agent_system_v23_addendum.md")
 );
+pub const AGENT_PROMPT_VERSION_V24: &str = "agent-system/v24";
+const AGENT_SYSTEM_PROMPT_V24: &str = concat!(
+    include_str!("../../prompts/agent_system_v21.md"),
+    include_str!("../../prompts/agent_system_v22_addendum.md"),
+    include_str!("../../prompts/agent_system_v23_addendum.md"),
+    include_str!("../../prompts/agent_system_v24_addendum.md")
+);
+pub const AGENT_PROMPT_VERSION_V25: &str = "agent-system/v25";
+const AGENT_SYSTEM_PROMPT_V25: &str = concat!(
+    include_str!("../../prompts/agent_system_v21.md"),
+    include_str!("../../prompts/agent_system_v22_addendum.md"),
+    include_str!("../../prompts/agent_system_v23_addendum.md"),
+    include_str!("../../prompts/agent_system_v24_addendum.md"),
+    include_str!("../../prompts/agent_system_v25_addendum.md")
+);
+pub const AGENT_PROMPT_VERSION_V26: &str = "agent-system/v26";
+const AGENT_SYSTEM_PROMPT_V26: &str = concat!(
+    include_str!("../../prompts/agent_system_v21.md"),
+    include_str!("../../prompts/agent_system_v22_addendum.md"),
+    include_str!("../../prompts/agent_system_v23_addendum.md"),
+    include_str!("../../prompts/agent_system_v24_addendum.md"),
+    include_str!("../../prompts/agent_system_v25_addendum.md"),
+    include_str!("../../prompts/agent_system_v26_addendum.md")
+);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PromptSpec {
@@ -306,6 +330,33 @@ pub fn agent_prompt_v23() -> PromptSpec {
     }
 }
 
+pub fn agent_prompt_v24() -> PromptSpec {
+    let sha256 = format!("{:x}", Sha256::digest(AGENT_SYSTEM_PROMPT_V24.as_bytes()));
+    PromptSpec {
+        version: AGENT_PROMPT_VERSION_V24,
+        sha256,
+        instructions: AGENT_SYSTEM_PROMPT_V24,
+    }
+}
+
+pub fn agent_prompt_v25() -> PromptSpec {
+    let sha256 = format!("{:x}", Sha256::digest(AGENT_SYSTEM_PROMPT_V25.as_bytes()));
+    PromptSpec {
+        version: AGENT_PROMPT_VERSION_V25,
+        sha256,
+        instructions: AGENT_SYSTEM_PROMPT_V25,
+    }
+}
+
+pub fn agent_prompt_v26() -> PromptSpec {
+    let sha256 = format!("{:x}", Sha256::digest(AGENT_SYSTEM_PROMPT_V26.as_bytes()));
+    PromptSpec {
+        version: AGENT_PROMPT_VERSION_V26,
+        sha256,
+        instructions: AGENT_SYSTEM_PROMPT_V26,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -445,5 +496,39 @@ mod tests {
         assert!(prompt.instructions.contains("up to twelve grounded metrics"));
         assert!(prompt.instructions.contains("array of plain strings"));
         assert!(prompt.instructions.contains("never includes stack count"));
+    }
+
+    #[test]
+    fn v24_prompt_restores_grounded_analyst_voice() {
+        let prompt = agent_prompt_v24();
+        assert_eq!(prompt.version, "agent-system/v24");
+        assert_eq!(prompt.sha256.len(), 64);
+        assert!(prompt.instructions.len() < 14_000);
+        assert!(prompt.instructions.contains("knowledgeable combat analyst"));
+        assert!(prompt.instructions.contains("testable hypothesis"));
+        assert!(prompt.instructions.contains("roughly three to eight decisive metrics"));
+        assert!(prompt.instructions.contains("Omitted dimensions may be stated"));
+    }
+
+    #[test]
+    fn v25_prompt_defines_the_two_part_baseline_minimum_and_wait_semantics() {
+        let prompt = agent_prompt_v25();
+        assert_eq!(prompt.version, "agent-system/v25");
+        assert_eq!(prompt.sha256.len(), 64);
+        assert!(prompt.instructions.len() < 16_000);
+        assert!(prompt.instructions.contains("For a broad current-loop question"));
+        assert!(prompt.instructions.contains("still unavailable"));
+        assert!(prompt.instructions.contains("input failed to cast it"));
+    }
+
+    #[test]
+    fn v26_prompt_requires_ranked_damage_reading_before_skill_judgement() {
+        let prompt = agent_prompt_v26();
+        assert_eq!(prompt.version, "agent-system/v26");
+        assert_eq!(prompt.sha256.len(), 64);
+        assert!(prompt.instructions.len() < 18_000);
+        assert!(prompt.instructions.contains("read `ranked_damage_sources` before judging"));
+        assert!(prompt.instructions.contains("low-rage and full-rage versions"));
+        assert!(prompt.instructions.contains("Cap samples identify"));
     }
 }

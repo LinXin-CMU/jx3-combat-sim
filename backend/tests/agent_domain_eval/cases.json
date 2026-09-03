@@ -5,7 +5,7 @@
       "id": "domain_01_baseline",
       "question": "分析当前循环输出基线。",
       "expected_playbook": "current_rotation_baseline",
-      "required_dimensions": ["scope", "scenario", "baseline_metrics", "timeline", "versioned_knowledge"],
+      "required_dimensions": ["scope", "scenario", "baseline_metrics", "timeline"],
       "expected_tools_any": ["simulate_scenario", "analyze_timeline"],
       "forbidden_tools": [],
       "required_terms_any": ["基线", "输出", "伤害"],

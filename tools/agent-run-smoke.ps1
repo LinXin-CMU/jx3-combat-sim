@@ -90,7 +90,7 @@ $stream = Invoke-WebRequest `
   -TimeoutSec $TimeoutSec
 $streamContentType = [string]::Join(',', @($stream.Headers.'Content-Type'))
 Assert-True ($streamContentType -match '^text/event-stream') 'SSE content type is missing.'
-Assert-True ($stream.Content -match 'event: planning') 'Planning event was not replayed.'
+Assert-True ($stream.Content -match 'event: analysis_plan_selected') 'Analysis-plan event was not replayed.'
 Assert-True ($stream.Content -match 'event: tool_started') 'Tool event was not replayed.'
 Assert-True ($stream.Content -match 'event: run_result') 'Terminal result event was not replayed.'
 Assert-True (-not ($stream.Content -match 'Authorization|api_key|hidden_reasoning')) 'Sensitive field leaked into SSE.'

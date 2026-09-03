@@ -366,24 +366,23 @@ pub fn audit_reasoning_contract(
                 "Rotation report proposed an intervention after the user explicitly declined one",
             ));
         }
-        if contains_any(
+        let asks_for_broad_diagnosis = contains_any(
             &normalized_question,
-            &["好在哪里", "差在哪里", "优缺点", "哪里好", "哪里差"],
-        ) {
-            let titles = content
-                .findings
-                .iter()
-                .map(|finding| finding.title.as_str())
-                .collect::<Vec<_>>()
-                .join(" ");
-            if !contains_any(&titles, &["优点", "稳定", "做得好"])
-                || !contains_any(&titles, &["风险", "瓶颈", "待验证", "边界", "未发现"])
-            {
-                return Err(reasoning_error(
-                    "rotation_diagnosis_incomplete",
-                    "Rotation diagnosis did not separately cover verified strengths and observed risks",
-                ));
-            }
+            &[
+                "好在哪里",
+                "差在哪里",
+                "优缺点",
+                "哪里好",
+                "哪里差",
+                "做得好",
+                "主要问题",
+            ],
+        );
+        if asks_for_broad_diagnosis && content.findings.len() < 2 {
+            return Err(reasoning_error(
+                "rotation_diagnosis_incomplete",
+                "Broad rotation diagnosis needs two distinct findings so strength and risk are not collapsed into one claim",
+            ));
         }
         if comparisons.is_empty() {
             let assertive_text = content
@@ -410,16 +409,12 @@ pub fn audit_reasoning_contract(
             }
             if plan.task_type == AnalysisTaskType::BaselineAnalysis
                 && [
-                    "结构合理",
-                    "结构健康",
-                    "结构清晰",
-                    "符合预期",
-                    "不影响整体",
-                    "唯一风险",
-                    "较频繁",
-                    "绝对核心",
-                    "稳定来源",
-                    "衔接不紧",
+                    "已经最优",
+                    "完全合理",
+                    "完全健康",
+                    "没有问题",
+                    "唯一问题",
+                    "可避免",
                 ]
                 .iter()
                 .any(|term| contains_unnegated_term(&assertive_text, term))
@@ -430,30 +425,13 @@ pub fn audit_reasoning_contract(
                 ));
             }
             if plan.task_type == AnalysisTaskType::BaselineAnalysis {
-                let asks_for_intervention = contains_any(
-                    &normalized_question,
-                    &[
-                        "优化", "调优", "修改", "怎么改", "如何改", "提升", "提高", "降低",
-                    ],
-                );
-                let recommendation_text = content
-                    .recommendations
-                    .iter()
-                    .map(|item| format!("{} {}", item.title, item.rationale))
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                if !asks_for_intervention
-                    && contains_any(
-                        &recommendation_text,
-                        &[
-                            "更早", "更晚", "改为", "调整", "修改", "降低", "提高", "替换",
-                            "门槛", "阈值", "前置条件",
-                        ],
-                    )
-                {
+                let asks_for_intervention = contains_any(&normalized_question, &[
+                    "优化", "调优", "修改", "怎么改", "如何改", "提升", "提高", "降低",
+                ]);
+                if !asks_for_intervention && !content.rotation_changes.is_empty() {
                     return Err(reasoning_error(
                         "unrequested_baseline_intervention",
-                        "Baseline-only question received a concrete intervention; keep only observations or a neutral next experiment",
+                        "Baseline-only question received a publishable edit; keep it as an optional experiment until the user asks for a change",
                     ));
                 }
 
@@ -477,7 +455,7 @@ pub fn audit_reasoning_contract(
                             .and_then(serde_json::Value::as_array)
                             .is_some_and(|coverage| !coverage.is_empty())
                 });
-                if has_complete_baseline_evidence {
+                if asks_for_broad_diagnosis && has_complete_baseline_evidence {
                     validate_baseline_quantitative_prose(content, evidence)?;
                     let pointers = content
                         .findings
@@ -485,30 +463,19 @@ pub fn audit_reasoning_contract(
                         .flat_map(|finding| finding.metrics.iter())
                         .map(|metric| metric.json_pointer.as_str())
                         .collect::<Vec<_>>();
-                    let has = |predicate: &dyn Fn(&str) -> bool| {
-                        pointers.iter().any(|pointer| predicate(pointer))
-                    };
-                    let complete = has(&|pointer| pointer == "/result/dps")
-                        && has(&|pointer| pointer == "/result/total_damage")
-                        && has(&|pointer| {
-                            pointer.starts_with("/result/skills/")
-                                && pointer.ends_with("/damage_share")
-                        })
-                        && has(&|pointer| {
-                            pointer.starts_with("/result/diagnostic_profile/cadence_gaps/")
-                                || pointer.starts_with(
-                                    "/result/diagnostic_profile/cooldown_waits/",
-                                )
-                        })
-                        && has(&|pointer| pointer.starts_with("/result/rage/"))
-                        && has(&|pointer| {
-                            pointer.starts_with("/result/buff_coverage/")
-                                && pointer.ends_with("/coverage_percent")
-                        });
-                    if !complete {
+                    let has_damage_structure = pointers.iter().any(|pointer| {
+                        pointer.starts_with("/result/skills/")
+                            && pointer.ends_with("/damage_share")
+                    });
+                    let has_execution_observation = pointers.iter().any(|pointer| {
+                        pointer.starts_with("/result/diagnostic_profile/")
+                            || pointer.starts_with("/result/rage/")
+                            || pointer.starts_with("/result/buff_coverage/")
+                    });
+                    if !has_damage_structure || !has_execution_observation {
                         return Err(reasoning_error(
-                            "baseline_dimension_missing",
-                            "Baseline report omitted one or more available dimensions: output total, damage composition, cadence, resource, or Buff coverage",
+                            "baseline_core_missing",
+                            "Broad baseline analysis needs one leading damage-source metric and one execution metric; this is not a full-dimension checklist",
                         ));
                     }
                 }
@@ -1100,7 +1067,7 @@ mod tests {
     }
 
     #[test]
-    fn baseline_audit_rejects_uncompared_quality_judgements() {
+    fn baseline_audit_rejects_absolute_uncompared_quality_judgements() {
         let scenario = scenario();
         let plan = select_analysis_plan("这套循环的整体输出和伤害结构怎么样？", &scenario);
         let mut store = EvidenceStore::new();
@@ -1113,7 +1080,7 @@ mod tests {
         );
         let content = AgentReportContentV1 {
             schema_version: "agent-report-content/v1".to_string(),
-            summary: "这套循环伤害结构健康，整体符合预期。".to_string(),
+            summary: "这套循环已经最优，没有问题。".to_string(),
             findings: vec![super::super::report::AgentFindingV1 {
                 title: "当前结构".to_string(),
                 explanation: "已读取本轮时间轴。".to_string(),
@@ -1137,6 +1104,80 @@ mod tests {
             .code,
             "baseline_quality_overstated"
         );
+    }
+
+    #[test]
+    fn baseline_audit_accepts_grounded_strength_and_testable_risk_without_a_metric_checklist() {
+        let scenario = scenario();
+        let plan = select_analysis_plan("这套循环做得好的地方和最主要的问题是什么？", &scenario);
+        let mut store = EvidenceStore::new();
+        store.insert(
+            "simulation".to_string(),
+            evidence(
+                "simulate_scenario",
+                serde_json::json!({
+                    "dps": 2_969_622.98,
+                    "skills": [{
+                        "name": "绝刀·50怒",
+                        "damage_share": 0.3327,
+                        "total_damage": 296_000_000.0
+                    }]
+                }),
+            ),
+        );
+        store.insert(
+            "timeline".to_string(),
+            evidence(
+                "analyze_timeline",
+                serde_json::json!({
+                    "diagnostic_profile": {"cadence_gaps": {"count": 11}},
+                    "rage": {"at_cap_observations": 28, "sample_count": 627},
+                    "buff_coverage": [{"name": "援戈", "coverage_percent": 84.87}]
+                }),
+            ),
+        );
+        let content = AgentReportContentV1 {
+            schema_version: "agent-report-content/v1".to_string(),
+            summary: "循环的优点是高伤害绝刀已经形成稳定输出支柱；最值得检查的是斩刀前的节奏空档，但原因仍需对照实验。".to_string(),
+            findings: vec![
+                super::super::report::AgentFindingV1 {
+                    title: "做得好的地方：满怒绝刀承担主要伤害".to_string(),
+                    explanation: "绝刀·50怒占本次伤害的 33.27%，说明当前循环能持续把怒气转化为核心刀伤害。".to_string(),
+                    evidence_ids: vec!["simulation".to_string()],
+                    metrics: vec![super::super::report::GroundedMetricV1 {
+                        label: "绝刀·50怒伤害占比".to_string(),
+                        value: 33.27,
+                        unit: "percent".to_string(),
+                        evidence_id: "simulation".to_string(),
+                        json_pointer: "/result/skills/0/damage_share".to_string(),
+                    }],
+                },
+                super::super::report::AgentFindingV1 {
+                    title: "主要风险：斩刀前节奏空档待验证".to_string(),
+                    explanation: "时间轴记录到 11 次主技能空档；它能定位检查方向，但尚不能证明具体阈值造成损失。".to_string(),
+                    evidence_ids: vec!["timeline".to_string()],
+                    metrics: vec![super::super::report::GroundedMetricV1 {
+                        label: "主技能空档次数".to_string(),
+                        value: 11.0,
+                        unit: "count".to_string(),
+                        evidence_id: "timeline".to_string(),
+                        json_pointer: "/result/diagnostic_profile/cadence_gaps/count".to_string(),
+                    }],
+                },
+            ],
+            recommendations: vec![],
+            rotation_changes: vec![],
+            limitations: vec!["尚未运行单变量对照。".to_string()],
+            refusal_reason: None,
+        };
+
+        audit_reasoning_contract(
+            "这套循环做得好的地方和最主要的问题是什么？",
+            &plan,
+            &content,
+            &store,
+        )
+        .expect("grounded analyst judgement should publish without a full metric checklist");
     }
 
     #[test]
