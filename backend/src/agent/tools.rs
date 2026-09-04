@@ -291,7 +291,12 @@ fn macro_condition_ast(condition: &crate::macro_engine::MacroCondition) -> serde
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ManualOperationSummary {
+    /// Stable identity for this exact occurrence. It does not depend on UI
+    /// wrapping, zoom level, or display mode.
+    pub anchor_id: String,
     pub sequence_index: usize,
+    /// Human-facing one-based operation number.
+    pub operation_number: usize,
     pub skill_name: String,
     pub channel_ticks: Option<u32>,
     pub timing_offset_seconds: Option<f64>,
@@ -300,10 +305,13 @@ pub struct ManualOperationSummary {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct RotationInputEntryV1 {
+    /// Stable identity for this exact occurrence. A skill name alone is not an
+    /// anchor because the same skill may appear many times in one sequence.
+    pub anchor_id: String,
     /// Stable zero-based index for typed tool patches.
     pub sequence_index: usize,
-    /// Human-facing one-based line number.
-    pub line_number: usize,
+    /// Human-facing one-based operation number. This is never a visual row.
+    pub operation_number: usize,
     pub skill_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub channel_ticks: Option<u32>,
@@ -335,8 +343,9 @@ fn manual_rotation_entry(
     sequence_index: usize,
 ) -> RotationInputEntryV1 {
     RotationInputEntryV1 {
+        anchor_id: format!("sequence:{sequence_index}"),
         sequence_index,
-        line_number: sequence_index + 1,
+        operation_number: sequence_index + 1,
         skill_name: simulation.sequence[sequence_index].clone(),
         channel_ticks: simulation
             .channel_ticks
@@ -553,7 +562,9 @@ fn summarize_rotation_input(simulation: &crate::SimulateRequest) -> RotationInpu
             .take(MAX_ROTATION_INPUT_ITEMS)
             .enumerate()
             .map(|(sequence_index, skill_name)| ManualOperationSummary {
+                anchor_id: format!("sequence:{sequence_index}"),
                 sequence_index,
+                operation_number: sequence_index + 1,
                 skill_name: skill_name.clone(),
                 channel_ticks: simulation.channel_ticks.get(&sequence_index.to_string()).copied(),
                 timing_offset_seconds: simulation
@@ -933,9 +944,10 @@ mod tests {
         assert_eq!(evidence.result.matches.len(), 1);
         let matched = &evidence.result.matches[0];
         assert_eq!(matched.matched.sequence_index, 167);
-        assert_eq!(matched.matched.line_number, 168);
-        assert_eq!(matched.before[1].line_number, 167);
-        assert_eq!(matched.after[0].line_number, 169);
+        assert_eq!(matched.matched.anchor_id, "sequence:167");
+        assert_eq!(matched.matched.operation_number, 168);
+        assert_eq!(matched.before[1].operation_number, 167);
+        assert_eq!(matched.after[0].operation_number, 169);
     }
 
     #[test]
@@ -968,7 +980,7 @@ mod tests {
             &ToolProvenance::fixture(),
         )
         .unwrap();
-        assert_eq!(second.result.matches[0].matched.line_number, 9);
+        assert_eq!(second.result.matches[0].matched.operation_number, 9);
     }
 
     #[test]

@@ -877,6 +877,147 @@
       .replaceAll(hidden, '未核验');
   }
 
+  function parseOperationRanges(spec) {
+    const ranges = [];
+    String(spec || '').replaceAll('，', ',').replaceAll('、', ',').split(/[,/;]/).forEach(part => {
+      const numbers = part.match(/\d+/g)?.map(Number).filter(value => value > 0) || [];
+      if (!numbers.length) return;
+      const start = numbers[0] - 1;
+      const end = (numbers[1] || numbers[0]) - 1;
+      ranges.push({ start: Math.min(start, end), end: Math.max(start, end) });
+    });
+    return ranges;
+  }
+
+  let rotationRefPopover = null;
+  let rotationRefCloseTimer = null;
+
+  function closeRotationReferencePopover() {
+    if (rotationRefCloseTimer) window.clearTimeout(rotationRefCloseTimer);
+    rotationRefCloseTimer = window.setTimeout(() => {
+      rotationRefPopover?.remove();
+      rotationRefPopover = null;
+    }, 180);
+  }
+
+  function keepRotationReferencePopover() {
+    if (rotationRefCloseTimer) window.clearTimeout(rotationRefCloseTimer);
+    rotationRefCloseTimer = null;
+  }
+
+  function positionRotationReferencePopover(popover, anchor) {
+    const rect = anchor.getBoundingClientRect();
+    const margin = 10;
+    const width = Math.min(420, window.innerWidth - margin * 2);
+    popover.style.width = `${width}px`;
+    popover.style.left = `${Math.max(margin, Math.min(window.innerWidth - width - margin, rect.left))}px`;
+    const height = popover.offsetHeight;
+    const below = rect.bottom + 8;
+    popover.style.top = `${below + height <= window.innerHeight - margin
+      ? below
+      : Math.max(margin, rect.top - height - 8)}px`;
+  }
+
+  function showRotationReferencePopover(anchor, label, ranges) {
+    keepRotationReferencePopover();
+    rotationRefPopover?.remove();
+    const popover = element('aside', 'agent-rotation-popover');
+    popover.setAttribute('role', 'dialog');
+    popover.setAttribute('aria-label', `${label}的技能轴位置`);
+    const head = element('div', 'agent-rotation-popover-head');
+    head.appendChild(element('b', '', label));
+    head.appendChild(element('span', '', ranges.length > 1 ? `${ranges.length} 个时间点` : '技能轴摘要'));
+    popover.appendChild(head);
+    const descriptions = window.Jx3TimelineBridge?.describe?.(ranges) || [];
+    if (!descriptions.length) {
+      popover.appendChild(element('p', 'agent-rotation-popover-empty', '当前页面没有可对应的模拟技能轴。'));
+    } else {
+      descriptions.forEach((description, index) => {
+        const row = element('div', 'agent-rotation-occurrence');
+        const meta = element('div', 'agent-rotation-occurrence-meta');
+        meta.appendChild(element('b', '', descriptions.length > 1 ? `位置 ${index + 1} · ${description.timeLabel}` : description.timeLabel));
+        meta.appendChild(element('span', '', '当前模拟时间'));
+        row.appendChild(meta);
+        const skills = element('div', 'agent-rotation-skill-strip');
+        description.skills.forEach(skill => {
+          const chip = element('span', skill.selected ? 'is-target' : '', skill.short);
+          chip.title = `${Number.isFinite(skill.time) ? `${skill.time.toFixed(2)}s · ` : ''}${skill.name}`;
+          skills.appendChild(chip);
+        });
+        row.appendChild(skills);
+        const button = element('button', 'agent-rotation-locate', '在技能轴中标记');
+        button.type = 'button';
+        button.disabled = !description.valid;
+        button.addEventListener('click', event => {
+          event.stopPropagation();
+          window.Jx3TimelineBridge?.focus?.(description);
+          rotationRefPopover?.remove();
+          rotationRefPopover = null;
+        });
+        row.appendChild(button);
+        popover.appendChild(row);
+      });
+    }
+    popover.addEventListener('mouseenter', keepRotationReferencePopover);
+    popover.addEventListener('mouseleave', closeRotationReferencePopover);
+    document.body.appendChild(popover);
+    rotationRefPopover = popover;
+    positionRotationReferencePopover(popover, anchor);
+  }
+
+  /**
+   * 渲染模型给出的稳定操作引用。
+   * 新格式 [[显示文字|op:22,23,24]] 可把同名技能的多个具体出现位置
+   * 绑定到同一段文字；旧会话中的“行20”也会兼容成单点引用。
+   */
+  function appendRichProse(parent, tagName, className, value, metrics) {
+    const text = readableProse(value, metrics);
+    const node = element(tagName, className);
+    const pattern = /\[\[([^|\]]+)\|op:([^\]]+)\]\]|行(\d+)/g;
+    let cursor = 0;
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+      if (match.index > cursor) node.appendChild(document.createTextNode(text.slice(cursor, match.index)));
+      const label = match[1] || '对应位置';
+      const ranges = parseOperationRanges(match[2] || match[3]);
+      const legacyMacroLine = !!match[3] && !!window._lastSimBody?.macro_text;
+      if (!ranges.length || legacyMacroLine) {
+        node.appendChild(document.createTextNode(label));
+      } else {
+        const reference = element('button', 'agent-rotation-reference', label);
+        reference.type = 'button';
+        reference.setAttribute('aria-haspopup', 'dialog');
+        reference.title = ranges.length > 1 ? `查看 ${ranges.length} 个具体技能轴位置` : '查看对应技能轴位置';
+        const timeLabels = window.Jx3TimelineBridge?.describe?.(ranges)
+          ?.map(item => item.timeLabel)
+          .filter(value => value && !value.includes('未找到')) || [];
+        if (timeLabels.length) {
+          const visibleTimes = timeLabels.length <= 3
+            ? timeLabels.join(' · ')
+            : `${timeLabels.slice(0, 2).join(' · ')} · 共${timeLabels.length}处`;
+          reference.appendChild(element('span', 'agent-rotation-reference-time', visibleTimes));
+        }
+        reference.addEventListener('mouseenter', () => showRotationReferencePopover(reference, label, ranges));
+        reference.addEventListener('mouseleave', closeRotationReferencePopover);
+        reference.addEventListener('focus', () => showRotationReferencePopover(reference, label, ranges));
+        reference.addEventListener('blur', closeRotationReferencePopover);
+        reference.addEventListener('click', event => {
+          event.stopPropagation();
+          showRotationReferencePopover(reference, label, ranges);
+        });
+        node.appendChild(reference);
+      }
+      cursor = pattern.lastIndex;
+    }
+    if (cursor < text.length) node.appendChild(document.createTextNode(text.slice(cursor)));
+    parent.appendChild(node);
+    return node;
+  }
+
+  function plainAgentText(value) {
+    return String(value || '').replace(/\[\[([^|\]]+)\|op:([^\]]+)\]\]/g, '$1');
+  }
+
   function appendMetricGrid(parent, metrics, className) {
     if (!metrics?.length) return;
     const grid = element('div', className);
@@ -1005,13 +1146,13 @@
       if (result.error?.code) notice.title = `首个校验码：${result.error.code}`;
       card.appendChild(notice);
     }
-    card.appendChild(element('div', 'agent-report-summary', readableProse(report.content?.summary, allMetrics)));
+    appendRichProse(card, 'div', 'agent-report-summary', report.content?.summary, allMetrics);
     appendEquipmentComparisons(card, report.equipment_comparisons || [], false);
 
     (report.content?.findings || []).forEach(finding => {
       const block = element('section', 'agent-finding');
       block.appendChild(element('h4', '', finding.title));
-      block.appendChild(element('p', '', readableProse(finding.explanation, finding.metrics)));
+      appendRichProse(block, 'p', '', finding.explanation, finding.metrics);
       appendMetricGrid(block, finding.metrics, 'agent-metrics');
       card.appendChild(block);
     });
@@ -1022,7 +1163,13 @@
     if (recommendations.length) {
       const block = element('section', 'agent-finding');
       block.appendChild(element('h4', '', '建议的下一步实验'));
-      recommendations.forEach(item => block.appendChild(element('p', '', `${readableProse(item.title, allMetrics)}：${readableProse(item.rationale, allMetrics)}`)));
+      recommendations.forEach(item => appendRichProse(
+        block,
+        'p',
+        '',
+        `${readableProse(item.title, allMetrics)}：${readableProse(item.rationale, allMetrics)}`,
+        allMetrics,
+      ));
       card.appendChild(block);
     }
     appendKnowledgeSources(card, report.sources || [], false);
@@ -1061,7 +1208,7 @@
       proposed.appendChild(element('span', '', '修改'));
       proposed.appendChild(element('code', '', change.proposed || '—'));
       item.appendChild(proposed);
-      item.appendChild(element('p', '', readableProse(change.rationale, allMetrics)));
+      appendRichProse(item, 'p', '', change.rationale, allMetrics);
       block.appendChild(item);
     });
     parent.appendChild(block);
@@ -1297,12 +1444,12 @@
       : result?.status === 'provider_failed'
         ? providerErrorText(result?.error)
         : result.error?.message || '本次任务没有生成可展示的结论。';
-    card.appendChild(element('div', 'sim-ai-result-summary', summary));
+    appendRichProse(card, 'div', 'sim-ai-result-summary', summary, allMetrics);
     appendEquipmentComparisons(card, report?.equipment_comparisons || [], true);
     (report?.content?.findings || []).slice(0, 4).forEach(finding => {
       const block = element('div', 'sim-ai-result-finding');
       block.appendChild(element('b', '', finding.title));
-      block.appendChild(element('p', '', readableProse(finding.explanation, finding.metrics)));
+      appendRichProse(block, 'p', '', finding.explanation, finding.metrics);
       appendMetricGrid(block, (finding.metrics || []).slice(0, 4), 'sim-ai-result-metrics');
       card.appendChild(block);
     });
@@ -1775,7 +1922,7 @@
       `- knowledge searches: ${result.accounting?.knowledge_searches || 0}`,
       `- evidence: ${(report?.evidence_ids || []).join(', ') || 'none'}`,
       '',
-      report?.content?.summary || result.clarification?.question || result.error?.message || 'No report',
+      plainAgentText(report?.content?.summary || result.clarification?.question || result.error?.message || 'No report'),
     ];
     if (result.clarification) {
       lines.push('', '## 需要用户补充', result.clarification.reason || '');
@@ -1784,7 +1931,7 @@
     if (report?.content?.findings?.length) {
       lines.push('', '## 分析结论');
       report.content.findings.forEach(finding => {
-        lines.push('', `### ${finding.title || '分析'}`, finding.explanation || '');
+        lines.push('', `### ${plainAgentText(finding.title || '分析')}`, plainAgentText(finding.explanation || ''));
         (finding.metrics || []).forEach(metric => {
           lines.push(`- ${metricLabel(metric)}：${metricValue(metric)}`);
         });
@@ -1793,7 +1940,7 @@
     if (report?.content?.recommendations?.length) {
       lines.push('', '## 下一步建议');
       report.content.recommendations.forEach(recommendation => {
-        lines.push(`- **${recommendation.title || '建议'}**：${recommendation.rationale || ''}`);
+        lines.push(`- **${plainAgentText(recommendation.title || '建议')}**：${plainAgentText(recommendation.rationale || '')}`);
       });
     }
     if (report?.content?.rotation_changes?.length) {
@@ -1803,7 +1950,7 @@
         lines.push('', `### ${change.change_type === 'macro_statement' ? '宏语句' : '手动操作点'} · ${operationLabels[change.edit_operation] || '修改'} · ${change.target || '当前循环'}`);
         lines.push(`- 当前：\`${change.current || '—'}\``);
         lines.push(`- 修改：\`${change.proposed || '—'}\``);
-        lines.push(`- 依据：${change.rationale || ''}`);
+        lines.push(`- 依据：${plainAgentText(change.rationale || '')}`);
       });
     }
     if (report?.content?.limitations?.length) {

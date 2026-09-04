@@ -3514,6 +3514,30 @@ body.sim-fullheight #page-sim > .sim-splitter-h.sim-splitter-hidden {
   border-color: var(--tl-border-hover);
 }
 
+/* Agent 引用定位：精确高亮某次操作，不按技能名批量匹配。 */
+.tl-slot.agent-axis-focus {
+  z-index: 20;
+}
+.tl-slot.agent-axis-focus .tl-main,
+.tl-slot.agent-axis-focus .tl-top,
+.tl-slot.agent-axis-focus .tl-sub {
+  border-color: var(--gold);
+  background: var(--gold-tint);
+  box-shadow: 0 0 0 2px rgba(var(--gold-rgb), .2), 0 0 12px rgba(var(--gold-rgb), .28);
+  animation: agent-axis-focus-pulse 1.15s ease-in-out 2;
+}
+.sim-seq-item.agent-axis-focus {
+  z-index: 18;
+  border-color: var(--gold) !important;
+  background: var(--gold-tint) !important;
+  box-shadow: 0 0 0 2px rgba(var(--gold-rgb), .18), 0 0 14px rgba(var(--gold-rgb), .3);
+  animation: agent-axis-focus-pulse 1.15s ease-in-out 2;
+}
+@keyframes agent-axis-focus-pulse {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.3); }
+}
+
 /* 特殊技能（移除气劲等）时间轴样式 */
 .tl-custom {
   border-style: dashed;

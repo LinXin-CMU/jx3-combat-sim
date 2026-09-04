@@ -1795,7 +1795,16 @@ fn numeric_literals(value: &str) -> Vec<NumericLiteral> {
                 && (0.0..=12.0).contains(&parsed);
             // Digits embedded in identifiers (for example a source account or
             // version-like token) are not quantitative claims.
-            let identifier = start
+            let inside_rotation_anchor = value[..start]
+                .rfind("[[")
+                .is_some_and(|open| {
+                    value[..start]
+                        .rfind("]]")
+                        .is_none_or(|close| close < open)
+                        && value[open..start].contains("|op:")
+                });
+            let identifier = inside_rotation_anchor
+                || start
                 .checked_sub(1)
                 .and_then(|offset| bytes.get(offset))
                 .is_some_and(|byte| byte.is_ascii_alphabetic() || *byte == b'_')
@@ -2046,6 +2055,13 @@ fn error(code: &'static str, message: impl Into<String>) -> ReportValidationErro
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn rotation_anchor_numbers_are_navigation_ids_not_numeric_claims() {
+        let literals = numeric_literals("[[这些绝刀|op:24,57,91]] 与 [[这一段|op:20-25]]");
+        assert_eq!(literals.len(), 3);
+        assert!(literals.iter().all(|literal| literal.identifier));
+    }
 
     fn evidence() -> EvidenceStore {
         BTreeMap::from([(

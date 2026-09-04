@@ -4297,7 +4297,7 @@ mod tests {
         .await;
 
         assert_eq!(result.status, AgentRunStatus::Completed);
-        assert_eq!(result.prompt_version, "agent-system/v29");
+        assert_eq!(result.prompt_version, "agent-system/v30");
         assert_eq!(result.accounting.knowledge_searches, 1);
         assert_eq!(result.accounting.simulations, 0);
         let report = result.report.unwrap();
@@ -4377,7 +4377,7 @@ mod tests {
         .await;
 
         assert_eq!(result.status, AgentRunStatus::Completed);
-        assert_eq!(result.prompt_version, "agent-system/v29");
+        assert_eq!(result.prompt_version, "agent-system/v30");
         assert_eq!(result.accounting.knowledge_searches, 1);
         assert_eq!(result.accounting.simulations, 1);
         let report = result.report.unwrap();

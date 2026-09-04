@@ -1469,6 +1469,29 @@ function tlTip(ev) {
 /** 渲染时间轴 */
 const PX_PER_SEC = 8;
 
+/**
+ * 给主动事件绑定冻结输入中的稳定序号。
+ * 这个映射只看后端 sequence 顺序与实际 cast 名称，不依赖技能块宽度、
+ * flex 换行、缩放比例或当前显示模式。
+ */
+function annotateTimelineSequenceAnchors(timeline) {
+  if (!Array.isArray(timeline) || typeof readSequence !== 'function') return;
+  const sequence = readSequence();
+  const casts = timeline.filter(ev => ev && !ev.triggered);
+  casts.forEach(ev => { delete ev._sequenceIndex; });
+  let castIndex = 0;
+  sequence.forEach((skill, sequenceIndex) => {
+    if (!skill || skill.startsWith('__clearCD__') || skill === '__切体态延迟中__' || skill === '__战绝回怒__') return;
+    const ev = casts[castIndex];
+    if (!ev) return;
+    const baseName = String(ev.name || '').split('·')[0];
+    const isMacro = skill === '__macro__';
+    if (!isMacro && skill !== ev.name && skill !== baseName) return;
+    ev._sequenceIndex = sequenceIndex;
+    castIndex += 1;
+  });
+}
+
 /** 技能简称 */
 function shortName(name) {
   const map = {
@@ -1502,6 +1525,7 @@ function renderTimeline(timeline, opts) {
   track.innerHTML = '';
 
   if (!timeline || timeline.length === 0) return;
+  if (track.id === 'timeline_track') annotateTimelineSequenceAnchors(timeline);
 
   // 先按 cast_time 分组非触发事件，再把触发事件归入最近的 group
   const groupMap = new Map();
@@ -1575,6 +1599,11 @@ function renderTimeline(timeline, opts) {
     const slotEl = document.createElement('div');
     slotEl.className = 'tl-slot';
     slotEl.style.left = left + 'px';
+    const sequenceIndices = [group.main, ...group.top]
+      .map(ev => ev?._sequenceIndex)
+      .filter(Number.isInteger);
+    if (sequenceIndices.length) slotEl.dataset.sequenceIndices = sequenceIndices.join(',');
+    slotEl.dataset.castTime = String(group.time);
 
     // 等待块（所有行共用，放在 slot 最左侧）
     let waitEl = null;
@@ -1658,6 +1687,113 @@ function renderTimeline(timeline, opts) {
     if (scroll) scroll.scrollLeft = scroll.scrollWidth;
   }
 }
+
+/** Agent 文本引用 ↔ 当前技能轴的只读桥。 */
+(function installAgentTimelineBridge() {
+  let clearFocusTimer = null;
+
+  const normalizeRanges = ranges => (Array.isArray(ranges) ? ranges : [])
+    .map(range => ({
+      start: Math.max(0, Number(range?.start) || 0),
+      end: Math.max(0, Number(range?.end ?? range?.start) || 0),
+    }))
+    .map(range => range.start <= range.end ? range : { start: range.end, end: range.start });
+
+  function activeEvents() {
+    const timeline = Array.isArray(lastSimResult?.timeline) ? lastSimResult.timeline : [];
+    annotateTimelineSequenceAnchors(timeline);
+    return timeline.filter(ev => ev && !ev.triggered && Number.isInteger(ev._sequenceIndex));
+  }
+
+  function describe(ranges) {
+    const sequence = typeof readSequence === 'function' ? readSequence() : [];
+    const events = activeEvents();
+    return normalizeRanges(ranges).map(range => {
+      const valid = range.start < sequence.length && range.end < sequence.length;
+      const contextStart = range.start === range.end ? Math.max(0, range.start - 2) : range.start;
+      const contextEnd = range.start === range.end ? Math.min(sequence.length - 1, range.end + 2) : range.end;
+      const contextEvents = events.filter(ev => ev._sequenceIndex >= contextStart && ev._sequenceIndex <= contextEnd);
+      const selectedEvents = events.filter(ev => ev._sequenceIndex >= range.start && ev._sequenceIndex <= range.end);
+      const eventByIndex = new Map(contextEvents.map(ev => [ev._sequenceIndex, ev]));
+      const first = selectedEvents[0] || contextEvents[0];
+      const last = selectedEvents[selectedEvents.length - 1] || contextEvents[contextEvents.length - 1];
+      const endDuration = last ? (last.channel_duration || last.gcd || 0) : 0;
+      return {
+        ...range,
+        valid,
+        operationLabel: range.start === range.end
+          ? `操作 #${range.start + 1}`
+          : `操作 #${range.start + 1}–#${range.end + 1}`,
+        timeLabel: first && last
+          ? (range.start === range.end
+            ? `${Number(first.cast_time).toFixed(2)}s`
+            : `${Number(first.cast_time).toFixed(2)}s–${Number(last.cast_time + endDuration).toFixed(2)}s`)
+          : '当前技能轴未找到对应事件',
+        skills: Array.from({ length: Math.max(0, contextEnd - contextStart + 1) }, (_, offset) => {
+          const index = contextStart + offset;
+          const name = sequence[index] || '未释放';
+          return {
+            index,
+            name,
+            short: typeof shortName === 'function' ? shortName(name) : name.slice(0, 1),
+            selected: index >= range.start && index <= range.end,
+            time: eventByIndex.has(index) ? Number(eventByIndex.get(index).cast_time) : null,
+          };
+        }),
+      };
+    });
+  }
+
+  function clearFocus() {
+    document.querySelectorAll('.tl-slot.agent-axis-focus, .sim-seq-item.agent-axis-focus')
+      .forEach(el => el.classList.remove('agent-axis-focus'));
+  }
+
+  function focus(range) {
+    const [normalized] = normalizeRanges([range]);
+    if (!normalized) return false;
+    window.Jx3Nav?.switchPage('page-sim');
+    const panel = document.getElementById('sim_timeline_panel');
+    if (panel?.classList.contains('sim-timeline-collapsed')) {
+      document.getElementById('sim_timeline_header')?.click();
+    }
+    window.setTimeout(() => {
+      clearFocus();
+      const slots = Array.from(document.querySelectorAll('#timeline_track .tl-slot[data-sequence-indices]'))
+        .filter(slot => slot.dataset.sequenceIndices.split(',').some(value => {
+          const index = Number(value);
+          return index >= normalized.start && index <= normalized.end;
+        }));
+      slots.forEach(slot => slot.classList.add('agent-axis-focus'));
+      const scroll = document.querySelector('#sim_timeline_panel .sim-timeline-scroll');
+      if (scroll && slots.length) {
+        const left = Math.min(...slots.map(slot => slot.offsetLeft));
+        const right = Math.max(...slots.map(slot => slot.offsetLeft + slot.offsetWidth));
+        scroll.scrollTo({ left: Math.max(0, (left + right) / 2 - scroll.clientWidth / 2), behavior: 'smooth' });
+      }
+
+      const sequenceItems = Array.from(document.querySelectorAll('#sim_sequence .sim-seq-item[data-sequence-index]'))
+        .filter(item => {
+          const index = Number(item.dataset.sequenceIndex);
+          return index >= normalized.start && index <= normalized.end;
+        });
+      sequenceItems.forEach(item => item.classList.add('agent-axis-focus'));
+      const sequencePanel = document.getElementById('sim_sequence');
+      if (sequencePanel && sequenceItems.length) {
+        const first = sequenceItems[0];
+        sequencePanel.scrollTo({
+          top: Math.max(0, first.offsetTop - sequencePanel.clientHeight / 2 + first.offsetHeight / 2),
+          behavior: 'smooth',
+        });
+      }
+      if (clearFocusTimer) window.clearTimeout(clearFocusTimer);
+      clearFocusTimer = window.setTimeout(clearFocus, 8000);
+    }, 320);
+    return true;
+  }
+
+  window.Jx3TimelineBridge = { describe, focus, clearFocus };
+})();
 
 /** 时间→像素位置（使用技能轴的映射，找最近的已知点插值） */
 function timeToPixel(t, timeToLeft) {
@@ -2408,6 +2544,7 @@ function decorateSeqItems(result) {
   let castIdx = 0;
   visibleItems.forEach((el, vi) => {
     const seqIdx = visibleToBackendIdx[vi];
+    el.dataset.sequenceIndex = String(seqIdx);
     el.querySelectorAll('.seq-time, .seq-channel-badge, .seq-cd-wait-badge, .seq-timing-badge, .seq-rank-badge, .seq-qijin-warn, .seq-yuange-badge').forEach(e => e.remove());
     el.classList.remove('seq-invalid', 'seq-xuenu-static');
     if (el.dataset.skill === '__macro__') delete el.dataset.resolvedSkill;
