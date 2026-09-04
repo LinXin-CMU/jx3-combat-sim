@@ -25,6 +25,11 @@ pub enum ModelMessage {
         content: Option<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         tool_calls: Vec<ProviderToolCall>,
+        /// Provider-owned reasoning state needed to continue a thinking-mode
+        /// tool loop. It is deliberately omitted from persisted/debug JSON and
+        /// is never part of the public Agent trace.
+        #[serde(skip)]
+        reasoning_content: Option<String>,
     },
     ToolResult {
         call_id: String,
@@ -91,6 +96,10 @@ pub enum FinishReason {
 pub struct ModelResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assistant_text: Option<String>,
+    /// Transient provider reasoning state. The orchestrator may echo it back
+    /// during the current tool loop, but must never persist or display it.
+    #[serde(skip)]
+    pub reasoning_content: Option<String>,
     #[serde(default)]
     pub tool_calls: Vec<ProviderToolCall>,
     pub finish_reason: FinishReason,
@@ -191,6 +200,7 @@ impl ModelRequest {
                 ModelMessage::Assistant {
                     content,
                     tool_calls,
+                    reasoning_content,
                 } => {
                     if content.as_deref().is_none_or(str::is_empty) && tool_calls.is_empty() {
                         return Err(protocol_error(
@@ -200,6 +210,15 @@ impl ModelRequest {
                     }
                     if let Some(content) = content {
                         validate_text(content)?;
+                    }
+                    if reasoning_content
+                        .as_deref()
+                        .is_some_and(|content| validate_text(content).is_err())
+                    {
+                        return Err(protocol_error(
+                            "invalid_reasoning_context",
+                            "provider reasoning context is invalid",
+                        ));
                     }
                     for call in tool_calls {
                         validate_call(call)?;
@@ -395,6 +414,7 @@ mod tests {
         let request = request();
         let unknown = ModelResponse {
             assistant_text: None,
+            reasoning_content: None,
             tool_calls: vec![ProviderToolCall {
                 call_id: "call-1".to_string(),
                 name: "write_files".to_string(),
@@ -415,6 +435,7 @@ mod tests {
         };
         let duplicate = ModelResponse {
             assistant_text: None,
+            reasoning_content: None,
             tool_calls: vec![call.clone(), call],
             finish_reason: FinishReason::ToolCalls,
             usage: TokenUsage::default(),

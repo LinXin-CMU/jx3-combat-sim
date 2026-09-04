@@ -593,6 +593,18 @@ impl<'a> AgentToolRegistry<'a> {
                 }
             }
             "search_knowledge_base" => {
+                let mut arguments = arguments;
+                if let Some(fields) = arguments.as_object_mut() {
+                    for key in ["season", "category"] {
+                        if fields
+                            .get(key)
+                            .and_then(Value::as_str)
+                            .is_some_and(|value| value.eq_ignore_ascii_case("null"))
+                        {
+                            fields.insert(key.to_string(), Value::Null);
+                        }
+                    }
+                }
                 let args = match serde_json::from_value::<KnowledgeArguments>(arguments) {
                     Ok(args) => args,
                     Err(_) => return invalid_arguments(tool_name),

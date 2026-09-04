@@ -53,6 +53,7 @@ impl LlmProvider for FakeProvider {
                         request,
                         ModelResponse {
                             assistant_text: None,
+                            reasoning_content: None,
                             tool_calls: vec![ProviderToolCall {
                                 call_id: "fake-call-knowledge".to_string(),
                                 name: "search_knowledge_base".to_string(),
@@ -73,6 +74,7 @@ impl LlmProvider for FakeProvider {
                         request,
                         ModelResponse {
                             assistant_text: Some(refusal_report()),
+                            reasoning_content: None,
                             tool_calls: Vec::new(),
                             finish_reason: FinishReason::Stop,
                             usage: TokenUsage::default(),
@@ -85,6 +87,7 @@ impl LlmProvider for FakeProvider {
                         assistant_text: Some(
                             "先取得当前循环的基线诊断，再判断是否需要候选实验。".to_string(),
                         ),
+                        reasoning_content: None,
                         tool_calls: vec![ProviderToolCall {
                             call_id: "fake-call-2".to_string(),
                             name: baseline_tool.to_string(),
@@ -114,6 +117,7 @@ impl LlmProvider for FakeProvider {
                                 "攻略证据已取得；下一步运行基线时间轴，区分已确认优点与观察到的风险。"
                                     .to_string(),
                             ),
+                            reasoning_content: None,
                             tool_calls: vec![ProviderToolCall {
                                 call_id: "fake-call-2".to_string(),
                                 name: baseline_tool.to_string(),
@@ -130,6 +134,7 @@ impl LlmProvider for FakeProvider {
                         assistant_text: Some(
                             knowledge_report(output).unwrap_or_else(refusal_report),
                         ),
+                        reasoning_content: None,
                         tool_calls: Vec::new(),
                         finish_reason: FinishReason::Stop,
                         usage: TokenUsage::default(),
@@ -142,6 +147,7 @@ impl LlmProvider for FakeProvider {
                 request,
                 ModelResponse {
                     assistant_text: Some(report),
+                    reasoning_content: None,
                     tool_calls: Vec::new(),
                     finish_reason: FinishReason::Stop,
                     usage: TokenUsage::default(),
@@ -152,6 +158,7 @@ impl LlmProvider for FakeProvider {
         if request.tools.is_empty() {
             let response = ModelResponse {
                 assistant_text: Some(refusal_report()),
+                reasoning_content: None,
                 tool_calls: Vec::new(),
                 finish_reason: FinishReason::Stop,
                 usage: TokenUsage::default(),
@@ -164,6 +171,7 @@ impl LlmProvider for FakeProvider {
 
         let response = ModelResponse {
             assistant_text: None,
+            reasoning_content: None,
             tool_calls: vec![ProviderToolCall {
                 call_id: "fake-call-1".to_string(),
                 name: request
@@ -392,6 +400,7 @@ mod tests {
                 ModelMessage::Assistant {
                     content: None,
                     tool_calls: first.tool_calls,
+                    reasoning_content: None,
                 },
                 ModelMessage::ToolResult {
                     call_id: "fake-call-1".to_string(),
@@ -430,6 +439,7 @@ mod tests {
                     name: "get_current_scenario".to_string(),
                     arguments: json!({}),
                 }],
+                reasoning_content: None,
             },
             ModelMessage::ToolResult {
                 call_id: "prefetch".to_string(),
@@ -455,6 +465,7 @@ mod tests {
         final_messages.push(ModelMessage::Assistant {
             content: None,
             tool_calls: first.tool_calls,
+            reasoning_content: None,
         });
         final_messages.push(ModelMessage::ToolResult {
             call_id: "fake-call-knowledge".to_string(),
@@ -498,6 +509,7 @@ mod tests {
                         name: "search_knowledge_base".to_string(),
                         arguments: json!({}),
                     }],
+                    reasoning_content: None,
                 },
                 ModelMessage::ToolResult {
                     call_id: "server-prefetch-knowledge".to_string(),

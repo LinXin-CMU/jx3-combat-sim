@@ -89,7 +89,7 @@ impl Default for AgentRunLimits {
             max_model_turns: 10,
             max_tool_calls: 12,
             max_simulations: 8,
-            max_output_tokens_per_turn: 4096,
+            max_output_tokens_per_turn: 8192,
             wall_time_ms: 180_000,
         }
     }
@@ -785,6 +785,7 @@ pub async fn run_agent_recorded(
             name: PREFETCH_TOOL.to_string(),
             arguments: serde_json::json!({}),
         }],
+        reasoning_content: None,
     });
     messages.push(ModelMessage::ToolResult {
         call_id: PREFETCH_CALL_ID.to_string(),
@@ -808,7 +809,7 @@ pub async fn run_agent_recorded(
         }));
         messages.push(ModelMessage::Assistant { content: None, tool_calls: vec![ProviderToolCall {
             call_id: EQUIPMENT_INSPECT_CALL_ID.to_string(), name: EQUIPMENT_INSPECT_TOOL.to_string(), arguments: serde_json::json!({}),
-        }]});
+        }], reasoning_content: None });
         messages.push(ModelMessage::ToolResult { call_id: EQUIPMENT_INSPECT_CALL_ID.to_string(), output: model_tool_output(&inspected.output) });
 
     }
@@ -1426,6 +1427,24 @@ pub async fn run_agent_recorded(
 
         trace.push("model_finished", None, Vec::new(), None);
 
+        if response.tool_calls.is_empty()
+            && tools_available
+            && looks_like_unexecuted_plan(response.assistant_text.as_deref())
+            && accounting.model_turns < limits.max_model_turns
+        {
+            messages.push(ModelMessage::User {
+                content: "你刚才形成了下一步计划，但尚未执行动作。现在直接调用最有价值的工具；若现有证据已经足够，则直接提交最终报告。".to_string(),
+            });
+            trace.push_checkpoint(
+                "model_plan_continued",
+                "继续执行模型计划",
+                "模型已经选出下一步，正在把计划转为实际工具动作。".to_string(),
+                Some("unexecuted_action_plan".to_string()),
+                Vec::new(),
+            );
+            continue;
+        }
+
         if !response.tool_calls.is_empty() {
             trace.push_decision_summary(public_decision_summary(
                 response.assistant_text.as_deref(),
@@ -1484,6 +1503,7 @@ pub async fn run_agent_recorded(
                         messages.push(ModelMessage::Assistant {
                             content: response.assistant_text,
                             tool_calls: response.tool_calls.clone(),
+                            reasoning_content: response.reasoning_content,
                         });
                         messages.push(ModelMessage::ToolResult {
                             call_id: call.call_id.clone(),
@@ -1575,6 +1595,7 @@ pub async fn run_agent_recorded(
             messages.push(ModelMessage::Assistant {
                 content: response.assistant_text,
                 tool_calls: response.tool_calls.clone(),
+                reasoning_content: response.reasoning_content,
             });
             let mut knowledge_calls_processed = 0_u32;
             let mut knowledge_calls_coalesced = 0_u32;
@@ -1871,10 +1892,11 @@ pub async fn run_agent_recorded(
                             "rejected_output": raw,
                         }),
                     );
-                    if let Some(content) = evidence_preserving_provider_fallback(
+                    if let Some(content) = model_judgment_with_evidence_fallback(
+                        raw,
                         &analysis_plan,
                         registry.evidence(),
-                        "模型报告结构连续两次未通过校验，未发布其中的玩法结论。",
+                        "模型正文已保留；结构化证据附录未完全通过协议校验。",
                     ) {
                         trace.push(
                             "report_structure_evidence_preserved",
@@ -2407,9 +2429,11 @@ fn compact_transcript_messages(messages: &[ModelMessage]) -> Vec<ModelMessage> {
             ModelMessage::Assistant {
                 content,
                 tool_calls,
+                reasoning_content,
             } => Some(ModelMessage::Assistant {
                 content: content.as_ref().map(|text| clip_model_text(text, 1_000)),
                 tool_calls: tool_calls.clone(),
+                reasoning_content: reasoning_content.clone(),
             }),
             ModelMessage::ToolResult { call_id, output } => Some(ModelMessage::ToolResult {
                 call_id: call_id.clone(),
@@ -2465,7 +2489,7 @@ fn compact_handoff_messages(
         content: model_evidence_handoff(evidence, evidence_bytes),
     });
     messages.push(ModelMessage::User {
-        content: "The earlier provider transcript was compacted. Rebuild and update your working plan from the user goal and registered evidence, then choose the next useful action.".to_string(),
+        content: "Earlier provider messages were compacted into the evidence above. Continue from the current conclusions. Reuse registered evidence, avoid repeating completed deterministic tools, and choose only an action that can materially change the answer; otherwise answer the user now.".to_string(),
     });
     messages
 }
@@ -2478,9 +2502,25 @@ fn clip_model_text(value: &str, max_chars: usize) -> String {
 }
 
 fn request_bytes(request: &ModelRequest) -> usize {
-    serde_json::to_vec(request)
+    let serialized = serde_json::to_vec(request)
         .map(|encoded| encoded.len())
-        .unwrap_or(usize::MAX)
+        .unwrap_or(usize::MAX);
+    if serialized == usize::MAX {
+        return serialized;
+    }
+    serialized.saturating_add(
+        request
+            .messages
+            .iter()
+            .filter_map(|message| match message {
+                ModelMessage::Assistant {
+                    reasoning_content: Some(content),
+                    ..
+                } => Some(content.len()),
+                _ => None,
+            })
+            .sum::<usize>(),
+    )
 }
 
 fn public_decision_summary(
@@ -2507,6 +2547,23 @@ fn public_decision_summary(
         .collect::<Vec<_>>()
         .join("、");
     format!("模型未提供公开决策摘要；本轮请求调用：{tools}。可在私有复现记录中检查供应商原始响应。")
+}
+
+fn looks_like_unexecuted_plan(assistant_text: Option<&str>) -> bool {
+    let Some(value) = assistant_text
+        .map(str::trim)
+        .filter(|text| text.starts_with('{'))
+        .and_then(|text| serde_json::from_str::<Value>(text).ok())
+    else {
+        return false;
+    };
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    object.contains_key("next_action")
+        && (object.contains_key("action_plan") || object.contains_key("current_understanding"))
+        && !object.contains_key("findings")
+        && !object.contains_key("summary")
 }
 
 fn is_reusable_deterministic_tool(tool_name: &str) -> bool {
@@ -3196,6 +3253,120 @@ fn evidence_preserving_provider_fallback(
     })
 }
 
+/// Keep the model's useful expert judgment visible even when its JSON dialect
+/// misses the typed report contract. Deterministic metric cards are rebuilt
+/// separately from immutable evidence, so prose transport errors cannot erase
+/// the actual answer and malformed metric citations cannot become facts.
+fn model_judgment_with_evidence_fallback(
+    raw: &str,
+    plan: &AnalysisPlanV1,
+    evidence: &super::report::EvidenceStore,
+    limitation: &str,
+) -> Option<AgentReportContentV1> {
+    let mut verified = evidence_preserving_provider_fallback(plan, evidence, limitation)?;
+    let trimmed = raw.trim().trim_matches('`').trim();
+    let value = serde_json::from_str::<Value>(trimmed).ok();
+    let object = value.as_ref().and_then(Value::as_object);
+
+    let summary = object
+        .and_then(|fields| fields.get("summary"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(|text| clip_model_text(text, 1_024));
+
+    let mut judgments = object
+        .and_then(|fields| fields.get("findings"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_object)
+        .filter_map(|fields| {
+            let explanation = ["explanation", "claim", "description", "statement", "finding"]
+                .into_iter()
+                .find_map(|key| fields.get(key).and_then(Value::as_str))?
+                .trim();
+            if explanation.is_empty() {
+                return None;
+            }
+            let title = fields
+                .get("title")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|title| !title.is_empty())
+                .map(|title| clip_model_text(title, 160))
+                .unwrap_or_else(|| explanation.chars().take(36).collect::<String>());
+            let evidence_ids = fields
+                .get("evidence_ids")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .filter(|id| evidence.contains_key(*id))
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            Some(AgentFindingV1 {
+                title,
+                explanation: clip_model_text(explanation, 1_024),
+                evidence_ids,
+                metrics: Vec::new(),
+            })
+        })
+        .take(8)
+        .collect::<Vec<_>>();
+
+    if judgments.is_empty() && value.is_none() && trimmed.chars().count() >= 40 {
+        judgments.push(AgentFindingV1 {
+            title: "模型分析".to_string(),
+            explanation: clip_model_text(trimmed, 1_024),
+            evidence_ids: Vec::new(),
+            metrics: Vec::new(),
+        });
+    }
+    if summary.is_none() && judgments.is_empty() {
+        return Some(verified);
+    }
+
+    if let Some(summary) = summary {
+        verified.summary = summary;
+    }
+    judgments.extend(verified.findings);
+    verified.findings = judgments;
+
+    let recommendation_text = object
+        .and_then(|fields| fields.get("recommendations"))
+        .and_then(|recommendations| match recommendations {
+            Value::String(text) => Some(text.as_str()),
+            Value::Array(items) => items.iter().find_map(|item| {
+                item.as_str().or_else(|| {
+                    item.as_object()
+                        .and_then(|fields| fields.get("rationale"))
+                        .and_then(Value::as_str)
+                })
+            }),
+            _ => None,
+        })
+        .map(str::trim)
+        .filter(|text| !text.is_empty());
+    if let Some(rationale) = recommendation_text {
+        verified.recommendations.insert(
+            0,
+            super::report::AgentRecommendationV1 {
+                title: "模型建议".to_string(),
+                rationale: clip_model_text(rationale, 1_024),
+                evidence_ids: verified
+                    .findings
+                    .iter()
+                    .flat_map(|finding| finding.evidence_ids.iter().cloned())
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .into_iter()
+                    .collect(),
+            },
+        );
+    }
+    Some(verified)
+}
+
 fn concise_evidence_excerpt(value: &str, max_chars: usize) -> String {
     let normalized = value
         .lines()
@@ -3642,6 +3813,7 @@ mod tests {
         let transcript = vec![ModelMessage::Assistant {
             content: Some("已确认白刀的资料定义，下一步定位当前循环。".to_string()),
             tool_calls: Vec::new(),
+            reasoning_content: None,
         }];
         let request = ModelRequest {
             instructions: prompt.instructions.to_string(),
@@ -3723,6 +3895,7 @@ mod tests {
                         }))
                         .unwrap(),
                     ),
+                    reasoning_content: None,
                     tool_calls: Vec::new(),
                     finish_reason: FinishReason::Stop,
                     usage: TokenUsage::default(),
@@ -3809,6 +3982,7 @@ mod tests {
                         }))
                         .unwrap(),
                     ),
+                    reasoning_content: None,
                     tool_calls: Vec::new(),
                     finish_reason: FinishReason::Stop,
                     usage: TokenUsage::default(),
@@ -3894,6 +4068,7 @@ mod tests {
                         }))
                         .unwrap(),
                     ),
+                    reasoning_content: None,
                     tool_calls: Vec::new(),
                     finish_reason: FinishReason::Stop,
                     usage: TokenUsage::default(),
@@ -3975,6 +4150,7 @@ mod tests {
     fn tool_call(call_id: &str, name: &str, arguments: serde_json::Value) -> ModelResponse {
         ModelResponse {
             assistant_text: None,
+            reasoning_content: None,
             tool_calls: vec![ProviderToolCall {
                 call_id: call_id.to_string(),
                 name: name.to_string(),
@@ -3991,7 +4167,7 @@ mod tests {
         assert_eq!(limits.max_model_turns, 10);
         assert_eq!(limits.max_tool_calls, 12);
         assert_eq!(limits.max_simulations, 8);
-        assert_eq!(limits.max_output_tokens_per_turn, 4096);
+        assert_eq!(limits.max_output_tokens_per_turn, 8192);
         assert_eq!(limits.wall_time_ms, 180_000);
     }
 
@@ -4121,7 +4297,7 @@ mod tests {
         .await;
 
         assert_eq!(result.status, AgentRunStatus::Completed);
-        assert_eq!(result.prompt_version, "agent-system/v28");
+        assert_eq!(result.prompt_version, "agent-system/v29");
         assert_eq!(result.accounting.knowledge_searches, 1);
         assert_eq!(result.accounting.simulations, 0);
         let report = result.report.unwrap();
@@ -4148,6 +4324,7 @@ mod tests {
                 ))
                 .unwrap(),
             ),
+            reasoning_content: None,
             tool_calls: Vec::new(),
             finish_reason: FinishReason::Stop,
             usage: TokenUsage::default(),
@@ -4200,7 +4377,7 @@ mod tests {
         .await;
 
         assert_eq!(result.status, AgentRunStatus::Completed);
-        assert_eq!(result.prompt_version, "agent-system/v28");
+        assert_eq!(result.prompt_version, "agent-system/v29");
         assert_eq!(result.accounting.knowledge_searches, 1);
         assert_eq!(result.accounting.simulations, 1);
         let report = result.report.unwrap();
@@ -4271,6 +4448,7 @@ mod tests {
                     ))
                     .unwrap(),
                 ),
+                reasoning_content: None,
                 tool_calls: Vec::new(),
                 finish_reason: FinishReason::Stop,
                 usage: TokenUsage::default(),
@@ -4374,6 +4552,7 @@ mod tests {
                 ))
                 .unwrap(),
             ),
+            reasoning_content: None,
             tool_calls: Vec::new(),
             finish_reason: FinishReason::Stop,
             usage: TokenUsage::default(),
@@ -4398,6 +4577,7 @@ mod tests {
                 serde_json::to_string(&refusal_content("仅验证上下文传输。", "该测试不执行分析。"))
                     .unwrap(),
             ),
+            reasoning_content: None,
             tool_calls: Vec::new(),
             finish_reason: FinishReason::Stop,
             usage: TokenUsage::default(),
@@ -4458,6 +4638,7 @@ mod tests {
                     ))
                     .unwrap(),
                 ),
+                reasoning_content: None,
                 tool_calls: Vec::new(),
                 finish_reason: FinishReason::Stop,
                 usage: TokenUsage::default(),
@@ -4550,6 +4731,7 @@ mod tests {
                 ))
                 .unwrap(),
             ),
+            reasoning_content: None,
             tool_calls: Vec::new(),
             finish_reason: FinishReason::Stop,
             usage: TokenUsage::default(),
@@ -4604,6 +4786,7 @@ mod tests {
                     ))
                     .unwrap(),
                 ),
+                reasoning_content: None,
                 tool_calls: Vec::new(),
                 finish_reason: FinishReason::Stop,
                 usage: TokenUsage::default(),
@@ -4649,6 +4832,7 @@ mod tests {
                     ))
                     .unwrap(),
                 ),
+                reasoning_content: None,
                 tool_calls: Vec::new(),
                 finish_reason: FinishReason::Stop,
                 usage: TokenUsage::default(),
@@ -4702,6 +4886,7 @@ mod tests {
                     ))
                     .unwrap(),
                 ),
+                reasoning_content: None,
                 tool_calls: Vec::new(),
                 finish_reason: FinishReason::Stop,
                 usage: TokenUsage::default(),
@@ -4755,6 +4940,7 @@ mod tests {
         let provider = ScriptedProvider::new(vec![
             Ok(ModelResponse {
                 assistant_text: None,
+                reasoning_content: None,
                 tool_calls: calls,
                 finish_reason: FinishReason::ToolCalls,
                 usage: TokenUsage::default(),
@@ -4767,6 +4953,7 @@ mod tests {
                     ))
                     .unwrap(),
                 ),
+                reasoning_content: None,
                 tool_calls: Vec::new(),
                 finish_reason: FinishReason::Stop,
                 usage: TokenUsage::default(),
@@ -4928,6 +5115,7 @@ mod tests {
                     ))
                     .unwrap(),
                 ),
+                reasoning_content: None,
                 tool_calls: Vec::new(),
                 finish_reason: FinishReason::Stop,
                 usage: TokenUsage::default(),
@@ -4977,6 +5165,7 @@ mod tests {
                     ))
                     .unwrap(),
                 ),
+                reasoning_content: None,
                 tool_calls: Vec::new(),
                 finish_reason: FinishReason::Stop,
                 usage: TokenUsage::default(),
@@ -5020,6 +5209,7 @@ mod tests {
                     ))
                     .unwrap(),
                 ),
+                reasoning_content: None,
                 tool_calls: Vec::new(),
                 finish_reason: FinishReason::Stop,
                 usage: TokenUsage::default(),
@@ -5111,12 +5301,14 @@ mod tests {
             Ok(tool_call("call-diagnose", "analyze_timeline", json!({}))),
             Ok(ModelResponse {
                 assistant_text: Some(bad_report.clone()),
+                reasoning_content: None,
                 tool_calls: Vec::new(),
                 finish_reason: FinishReason::Stop,
                 usage: TokenUsage::default(),
             }),
             Ok(ModelResponse {
                 assistant_text: Some(bad_report),
+                reasoning_content: None,
                 tool_calls: Vec::new(),
                 finish_reason: FinishReason::Stop,
                 usage: TokenUsage::default(),
@@ -5155,6 +5347,7 @@ mod tests {
             Ok(tool_call("call-diagnose", "analyze_timeline", json!({}))),
             Ok(ModelResponse {
                 assistant_text: Some("not-json".to_string()),
+                reasoning_content: None,
                 tool_calls: Vec::new(),
                 finish_reason: FinishReason::Stop,
                 usage: TokenUsage::default(),
@@ -5167,6 +5360,7 @@ mod tests {
                     ))
                     .unwrap(),
                 ),
+                reasoning_content: None,
                 tool_calls: Vec::new(),
                 finish_reason: FinishReason::Stop,
                 usage: TokenUsage::default(),
@@ -5201,12 +5395,14 @@ mod tests {
             Ok(tool_call("call-diagnose", "analyze_timeline", json!({}))),
             Ok(ModelResponse {
                 assistant_text: Some("not-json".to_string()),
+                reasoning_content: None,
                 tool_calls: Vec::new(),
                 finish_reason: FinishReason::Stop,
                 usage: TokenUsage::default(),
             }),
             Ok(ModelResponse {
                 assistant_text: Some("still-not-json".to_string()),
+                reasoning_content: None,
                 tool_calls: Vec::new(),
                 finish_reason: FinishReason::Stop,
                 usage: TokenUsage::default(),

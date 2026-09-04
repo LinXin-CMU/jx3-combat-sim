@@ -607,34 +607,67 @@ fn deserialize_compatible_report(mut value: Value) -> Result<AgentReportContentV
             let Some(fields) = finding.as_object_mut() else {
                 continue;
             };
+            let claim = fields.remove("claim");
             if !fields.contains_key("explanation") {
                 if let Some(explanation) = fields
                     .remove("description")
                     .or_else(|| fields.remove("statement"))
                     .or_else(|| fields.remove("finding"))
+                    .or_else(|| claim.clone())
                 {
                     fields.insert("explanation".to_string(), explanation);
                 }
             }
             fields
                 .entry("title".to_string())
-                .or_insert_with(|| Value::String("分析结论".to_string()));
+                .or_insert_with(|| {
+                    let title = claim
+                        .as_ref()
+                        .and_then(Value::as_str)
+                        .map(|value| value.chars().take(48).collect::<String>())
+                        .filter(|value| !value.trim().is_empty())
+                        .unwrap_or_else(|| "分析结论".to_string());
+                    Value::String(title)
+                });
             fields.remove("evidence_pointers");
+            let inherited_evidence_id = fields
+                .get("evidence_ids")
+                .and_then(Value::as_array)
+                .and_then(|ids| ids.first())
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
             if let Some(metrics) = fields.get_mut("metrics").and_then(Value::as_array_mut) {
                 metrics.retain_mut(|metric| {
                     let Some(metric) = metric.as_object_mut() else {
                         return false;
                     };
                     if !metric.contains_key("label") {
-                        if let Some(label) = metric.remove("metric_name") {
+                        if let Some(label) = metric
+                            .remove("metric_name")
+                            .or_else(|| metric.remove("name"))
+                        {
                             metric.insert("label".to_string(), label);
                         }
                     }
                     metric
                         .entry("evidence_id".to_string())
-                        .or_insert_with(|| Value::String(String::new()));
-                    if metric.get("unit").and_then(Value::as_str) == Some("%") {
-                        metric.insert("unit".to_string(), Value::String("percent".to_string()));
+                        .or_insert_with(|| Value::String(inherited_evidence_id.clone()));
+                    let pointer = metric
+                        .get("json_pointer")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    let unit = metric.get("unit").and_then(Value::as_str).unwrap_or_default();
+                    let normalized_unit = match unit {
+                        "%" | "百分比" => Some("percent"),
+                        "秒" => Some("seconds"),
+                        "次" | "个" => Some("count"),
+                        "数值" if pointer.ends_with("/dps") => Some("damage_per_second"),
+                        "数值" if pointer.ends_with("/total_damage") => Some("damage"),
+                        _ => None,
+                    };
+                    if let Some(unit) = normalized_unit {
+                        metric.insert("unit".to_string(), Value::String(unit.to_string()));
                     }
                     metric.get("label").is_some_and(Value::is_string)
                         && metric.get("value").is_some_and(Value::is_number)
@@ -663,6 +696,21 @@ fn deserialize_compatible_report(mut value: Value) -> Result<AgentReportContentV
         .into_iter()
         .map(Value::String)
         .collect::<Vec<_>>();
+
+    if let Some(rationale) = object
+        .get("recommendations")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+    {
+        object.insert(
+            "recommendations".to_string(),
+            Value::Array(vec![serde_json::json!({
+                "title": "建议",
+                "rationale": rationale,
+                "evidence_ids": default_recommendation_evidence.clone(),
+            })]),
+        );
+    }
 
     if let Some(recommendations) = object
         .get_mut("recommendations")
@@ -2525,12 +2573,49 @@ mod tests {
         assert_eq!(parsed.findings[0].explanation, "白刀是未触发援戈血影的苍雪刀。");
         assert_eq!(parsed.findings[0].metrics[0].unit, "percent");
         assert_eq!(parsed.findings[0].metrics.len(), 1);
-        assert!(parsed.findings[0].metrics[0].evidence_id.is_empty());
+        assert_eq!(parsed.findings[0].metrics[0].evidence_id, "a".repeat(64));
         assert_eq!(parsed.recommendations[0].title, "建议");
         assert_eq!(
             parsed.recommendations[0].rationale,
             "在无血怒窗口保留这套斩绝绝。"
         );
+        assert!(parsed.rotation_changes.is_empty());
+    }
+
+    #[test]
+    fn verbose_provider_judgment_is_preserved_across_common_json_dialect() {
+        let raw = json!({
+            "schema_version": "1.0",
+            "summary": "这套循环结构完整，主要问题更可能集中在盾刀转换。",
+            "findings": [{
+                "claim": "盾击三段后的衔接值得优先检查。",
+                "evidence_ids": ["a".repeat(64)],
+                "metrics": [{
+                    "name": "平均 DPS",
+                    "value": 123.0,
+                    "unit": "数值",
+                    "json_pointer": "/result/dps"
+                }]
+            }],
+            "recommendations": "围绕盾刀转换做一次单变量对照。",
+            "rotation_changes": [{
+                "skill_name": "斩刀",
+                "description": "先检查时机，再决定是否调整。",
+                "edit_operation": "optional_adjust_cast_timing",
+                "evidence_ids": ["a".repeat(64)]
+            }],
+            "limitations": [],
+            "refusal_reason": null
+        })
+        .to_string();
+
+        let parsed = parse_report_json(&raw).unwrap();
+        assert!(parsed.findings[0].title.contains("盾击三段"));
+        assert!(parsed.findings[0].explanation.contains("优先检查"));
+        assert_eq!(parsed.findings[0].metrics[0].label, "平均 DPS");
+        assert_eq!(parsed.findings[0].metrics[0].unit, "damage_per_second");
+        assert_eq!(parsed.findings[0].metrics[0].evidence_id, "a".repeat(64));
+        assert!(parsed.recommendations[0].rationale.contains("单变量对照"));
         assert!(parsed.rotation_changes.is_empty());
     }
 

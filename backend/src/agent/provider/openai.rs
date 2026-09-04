@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 use std::time::Duration;
 
 const MAX_PROVIDER_RESPONSE_BYTES: usize = 1024 * 1024;
-const PROVIDER_TIMEOUT_SECS: u64 = 60;
+const PROVIDER_TIMEOUT_SECS: u64 = 120;
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -280,6 +280,7 @@ fn responses_request(model: &str, request: &ModelRequest) -> Result<Value, Provi
             ModelMessage::Assistant {
                 content,
                 tool_calls,
+                reasoning_content: _,
             } => {
                 if let Some(content) = content {
                     input.push(json!({
@@ -361,6 +362,7 @@ fn chat_request_with_compatibility(
             ModelMessage::Assistant {
                 content,
                 tool_calls,
+                reasoning_content,
             } => {
                 let calls: Vec<Value> = tool_calls
                     .iter()
@@ -375,11 +377,16 @@ fn chat_request_with_compatibility(
                         }))
                     })
                     .collect::<Result<_, ProviderError>>()?;
-                messages.push(json!({
+                let mut assistant = json!({
                     "role": "assistant",
                     "content": content,
                     "tool_calls": calls,
-                }));
+                });
+                if compatibility == ChatCompatibility::Deepseek && !tool_calls.is_empty() {
+                    assistant["reasoning_content"] =
+                        json!(reasoning_content.as_deref().unwrap_or_default());
+                }
+                messages.push(assistant);
             }
             ModelMessage::ToolResult { call_id, output } => messages.push(json!({
                 "role": "tool",
@@ -409,14 +416,21 @@ fn chat_request_with_compatibility(
     let mut body = json!({
         "model": model,
         "messages": messages,
-        "tools": tools,
-        "tool_choice": "auto",
         "max_tokens": request.max_output_tokens,
     });
+    if !tools.is_empty() {
+        body["tools"] = json!(tools);
+        body["tool_choice"] = json!("auto");
+    }
     match compatibility {
         ChatCompatibility::Openai => body["parallel_tool_calls"] = json!(false),
         ChatCompatibility::Deepseek => {
-            body["thinking"] = json!({"type": "disabled"});
+            body["thinking"] = json!({"type": "enabled"});
+            body["reasoning_effort"] = json!(if model.contains("flash") {
+                "low"
+            } else {
+                "high"
+            });
         }
     }
     if let Some(format) = &request.response_format {
@@ -556,6 +570,7 @@ fn parse_responses_response(bytes: &[u8]) -> Result<ModelResponse, ProviderError
     };
     Ok(ModelResponse {
         assistant_text: (!text.is_empty()).then(|| text.join("\n")),
+        reasoning_content: None,
         tool_calls,
         finish_reason,
         usage: TokenUsage {
@@ -584,6 +599,8 @@ struct ChatChoice {
 struct ChatMessage {
     #[serde(default)]
     content: Option<String>,
+    #[serde(default)]
+    reasoning_content: Option<String>,
     #[serde(default)]
     refusal: Option<String>,
     #[serde(default)]
@@ -631,6 +648,7 @@ fn parse_chat_response(bytes: &[u8]) -> Result<ModelResponse, ProviderError> {
         )
         .with_usage(usage.clone())
     })?;
+    let reasoning_content = choice.message.reasoning_content;
     let mut text = choice
         .message
         .content
@@ -667,6 +685,7 @@ fn parse_chat_response(bytes: &[u8]) -> Result<ModelResponse, ProviderError> {
     };
     Ok(ModelResponse {
         assistant_text: text,
+        reasoning_content,
         tool_calls,
         finish_reason,
         usage,
@@ -891,7 +910,7 @@ mod tests {
     }
 
     #[test]
-    fn deepseek_chat_mode_disables_thinking_and_uses_supported_json_shape() {
+    fn deepseek_chat_mode_enables_high_effort_thinking_and_uses_supported_json_shape() {
         let mut request = request();
         request.response_format = Some(StructuredOutputDefinition {
             name: "agent_report_v1".to_string(),
@@ -905,7 +924,8 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(body["thinking"]["type"], "disabled");
+        assert_eq!(body["thinking"]["type"], "enabled");
+        assert_eq!(body["reasoning_effort"], "high");
         assert!(body.get("response_format").is_none());
         assert!(body.get("parallel_tool_calls").is_none());
         assert!(body["tools"][0]["function"].get("strict").is_none());
@@ -918,6 +938,46 @@ mod tests {
         )
         .unwrap();
         assert_eq!(repair_body["response_format"]["type"], "json_object");
+        assert!(repair_body.get("tools").is_none());
+        assert!(repair_body.get("tool_choice").is_none());
+
+        let flash_body = chat_request_with_compatibility(
+            "deepseek-v4-flash",
+            &request,
+            ChatCompatibility::Deepseek,
+        )
+        .unwrap();
+        assert_eq!(flash_body["thinking"]["type"], "enabled");
+        assert_eq!(flash_body["reasoning_effort"], "low");
+    }
+
+    #[test]
+    fn deepseek_tool_continuation_echoes_transient_reasoning_context() {
+        let mut request = request();
+        request.messages.push(ModelMessage::Assistant {
+            content: Some("先读取时间轴。".to_string()),
+            tool_calls: vec![ProviderToolCall {
+                call_id: "call-1".to_string(),
+                name: "get_current_scenario".to_string(),
+                arguments: json!({}),
+            }],
+            reasoning_content: Some("private provider reasoning".to_string()),
+        });
+        request.messages.push(ModelMessage::ToolResult {
+            call_id: "call-1".to_string(),
+            output: json!({"ok": true}),
+        });
+
+        let body = chat_request_with_compatibility(
+            "deepseek-v4-pro",
+            &request,
+            ChatCompatibility::Deepseek,
+        )
+        .unwrap();
+
+        assert_eq!(body["messages"][2]["reasoning_content"], "private provider reasoning");
+        let encoded = serde_json::to_string(&request).unwrap();
+        assert!(!encoded.contains("private provider reasoning"));
     }
 
     async fn mock_server(status: u16, body: &'static str) -> (String, oneshot::Receiver<String>) {
