@@ -1,5 +1,5 @@
 //! 公网发布鉴权：首次登入用「用户名 + 主密码」加入白名单；
-//! 白名单内用户名再次登入无需密码；登入后下发持久 cookie，下次自动放行。
+//! 保留既有免密账号；有个人密码的账号校验密码。公网新账号需要设置个人密码。
 //!
 //! 启用条件：环境变量 `JX3_AUTH_PASSWORD` 非空（本地 `cargo run` 不设则完全不鉴权）。
 //! 白名单文件：`userdata/whitelist.json`（gitignored），可手动编辑（预加用户名 / 删除撤权后调 `/api/auth/reload`）。
@@ -29,13 +29,14 @@ pub struct Member {
     pub tokens: Vec<String>,
     #[serde(default)]
     pub created: u64,
-    /// 用户可选的专属密码（salt:sha256 哈希）。Some 时再次登入需提供该密码；None 则免密。
+    /// Argon2 密码哈希；兼容旧 salt:sha256，公网成功登录后升级。None 保留既有免密登录。
     #[serde(default)]
     pub password: Option<String>,
 }
 
 struct AuthState {
     master_pw: String,
+    public_mode: bool,
     path: PathBuf,
     wl: RwLock<Whitelist>,
 }
@@ -46,8 +47,17 @@ static AUTH: OnceLock<AuthState> = OnceLock::new();
 pub fn init(master_pw: String, path: PathBuf) {
     let wl = load(&path);
     let n = wl.members.len();
-    let _ = AUTH.set(AuthState { master_pw, path, wl: RwLock::new(wl) });
-    println!("[auth] 鉴权已启用，白名单成员 {} 人，文件: {}", n, AUTH.get().unwrap().path.display());
+    let _ = AUTH.set(AuthState {
+        master_pw,
+        public_mode: std::env::var("JX3_PUBLIC_DEPLOYMENT").as_deref() == Ok("1"),
+        path,
+        wl: RwLock::new(wl),
+    });
+    println!(
+        "[auth] 鉴权已启用，白名单成员 {} 人，文件: {}",
+        n,
+        AUTH.get().unwrap().path.display()
+    );
 }
 
 fn load(path: &PathBuf) -> Whitelist {
@@ -91,18 +101,19 @@ fn to_hex(bytes: &[u8]) -> String {
     s
 }
 
-/// 把明文密码哈希成 `salt:sha256(salt:pw)`（不存明文）。
+/// 使用带随机盐的 Argon2id 存储密码。
 fn hash_pw(pw: &str) -> String {
-    use sha2::{Digest, Sha256};
-    let salt = gen_hex(12);
-    let mut h = Sha256::new();
-    h.update(salt.as_bytes());
-    h.update(b":");
-    h.update(pw.as_bytes());
-    format!("{}:{}", salt, to_hex(&h.finalize()))
+    use argon2::{Argon2, PasswordHasher, password_hash::SaltString};
+    let salt = SaltString::generate(&mut rand::rngs::OsRng);
+    Argon2::default().hash_password(pw.as_bytes(), &salt)
+        .expect("valid password hashing parameters").to_string()
 }
 
 fn verify_pw(pw: &str, stored: &str) -> bool {
+    if stored.starts_with("$argon2") {
+        use argon2::{Argon2, PasswordHash, PasswordVerifier};
+        return PasswordHash::new(stored).is_ok_and(|hash| Argon2::default().verify_password(pw.as_bytes(), &hash).is_ok());
+    }
     let Some((salt, digest)) = stored.split_once(':') else {
         return false;
     };
@@ -112,6 +123,21 @@ fn verify_pw(pw: &str, stored: &str) -> bool {
     h.update(b":");
     h.update(pw.as_bytes());
     to_hex(&h.finalize()) == digest
+}
+
+fn credentials_valid(member: Option<&Member>, password: &str, master: &str) -> bool {
+    match member {
+        Some(member) => match &member.password {
+            Some(hash) => verify_pw(password, hash),
+            None => true,
+        },
+        None => !master.is_empty() && password == master,
+    }
+}
+
+fn session_cookie(token: &str, public_mode: bool, logout: bool) -> String {
+    format!("jx3_session={token}; Path=/; HttpOnly; Max-Age={}; SameSite=Lax{}",
+        if logout { 0 } else { 31_536_000 }, if public_mode { "; Secure" } else { "" })
 }
 
 fn cookie_token(headers: &HeaderMap) -> Option<String> {
@@ -199,12 +225,15 @@ pub struct LoginReq {
     pub set_password: Option<String>,
 }
 
-/// 登入：白名单内用户名免密；新用户名需主密码，成功后加入白名单。下发持久 cookie。
+/// 登入：校验个人密码；新用户名使用邀请码并设置个人密码。公网 cookie 仅走 HTTPS。
 pub async fn login(Json(req): Json<LoginReq>) -> Response {
     let Some(st) = AUTH.get() else {
         return json_err(StatusCode::SERVICE_UNAVAILABLE, "鉴权未启用");
     };
     let username = req.username.trim().to_string();
+    if req.password.len() > 1024 || req.set_password.as_ref().is_some_and(|p| p.len() > 1024) {
+        return json_err(StatusCode::BAD_REQUEST, "密码过长");
+    }
     if username.is_empty() {
         return json_err(StatusCode::BAD_REQUEST, "请填写用户名");
     }
@@ -224,13 +253,18 @@ pub async fn login(Json(req): Json<LoginReq>) -> Response {
         .map(|s| s.to_string());
     {
         let mut wl = st.wl.write().unwrap();
+        let member = wl.members.iter().find(|m| m.username == username);
+        if !credentials_valid(member, &req.password, &st.master_pw) {
+            return json_err(StatusCode::UNAUTHORIZED, "账号或密码错误");
+        }
+        if st.public_mode && (set_pw.as_ref().is_some_and(|p| p.chars().count() < 12)
+            || (member.is_none() && set_pw.is_none())) {
+            return json_err(StatusCode::BAD_REQUEST, "新账号请设置至少 12 个字符的个人密码");
+        }
         match wl.members.iter_mut().find(|m| m.username == username) {
             Some(m) => {
-                // 已在白名单：有专属密码则校验，否则免密
-                if let Some(hash) = &m.password {
-                    if !verify_pw(&req.password, hash) {
-                        return json_err(StatusCode::UNAUTHORIZED, "密码错误");
-                    }
+                if st.public_mode && m.password.as_ref().is_some_and(|h| !h.starts_with("$argon2")) {
+                    m.password = Some(hash_pw(&req.password));
                 }
                 // 可选设置/修改专属密码
                 if let Some(np) = &set_pw {
@@ -258,10 +292,7 @@ pub async fn login(Json(req): Json<LoginReq>) -> Response {
         }
     }
     persist(st);
-    let cookie = format!(
-        "jx3_session={}; Path=/; HttpOnly; Max-Age=31536000; SameSite=Lax",
-        token
-    );
+    let cookie = session_cookie(&token, st.public_mode, false);
     Response::builder()
         .status(StatusCode::OK)
         .header(header::SET_COOKIE, cookie)
@@ -288,7 +319,7 @@ pub async fn logout(headers: HeaderMap) -> Response {
         .status(StatusCode::OK)
         .header(
             header::SET_COOKIE,
-            "jx3_session=; Path=/; HttpOnly; Max-Age=0; SameSite=Lax",
+            session_cookie("", AUTH.get().is_some_and(|st| st.public_mode), true),
         )
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from("{\"ok\":true}"))
@@ -312,7 +343,10 @@ pub async fn me(headers: HeaderMap) -> Response {
 }
 
 /// 重载白名单文件（手动编辑 whitelist.json 后调用，免重启）。需已登入（受中间件保护）。
-pub async fn reload() -> Response {
+pub async fn reload(headers: HeaderMap) -> Response {
+    if authed_user(&headers).is_none() {
+        return json_err(StatusCode::UNAUTHORIZED, "请先登录");
+    }
     let Some(st) = AUTH.get() else {
         return json_body("{\"ok\":false,\"error\":\"鉴权未启用\"}");
     };
@@ -339,4 +373,28 @@ fn json_err(code: StatusCode, msg: &str) -> Response {
             serde_json::to_string(msg).unwrap()
         )))
         .unwrap()
+}
+
+#[cfg(test)]
+mod public_tests {
+    use super::*;
+    #[test]
+    fn existing_passwordless_accounts_remain_passwordless() {
+        let mut member = Member { username:"fixture".into(), tokens:vec![], created:0, password:None };
+        assert!(credentials_valid(Some(&member), "", "invite"));
+        assert!(credentials_valid(Some(&member), "invite", "invite"));
+        member.password = Some(hash_pw("fixture-personal-password"));
+        assert!(credentials_valid(Some(&member), "fixture-personal-password", "invite"));
+        assert!(!credentials_valid(Some(&member), "", "invite"));
+        assert!(!credentials_valid(Some(&member), "invite", "invite"));
+        assert!(!credentials_valid(None, "", "invite"));
+        assert!(credentials_valid(None, "invite", "invite"));
+    }
+    #[test]
+    fn public_cookie_is_secure_on_login_and_logout() {
+        assert!(session_cookie("fixture",true,false).ends_with("; Secure"));
+        assert!(session_cookie("",true,true).contains("Max-Age=0"));
+        assert!(session_cookie("",true,true).ends_with("; Secure"));
+        assert!(!session_cookie("fixture",false,false).contains("Secure"));
+    }
 }

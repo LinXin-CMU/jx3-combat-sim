@@ -31,7 +31,10 @@ pub fn on_player_hit(player: &mut Player, t: f64) -> Vec<CastEvent> {
 
     // ── 寒甲刷新（奇穴 13134，非期望模式）──
     if parried {
-        let hanjia_exp = player.expectation.as_ref().map_or(false, |e| e.hanjia_expectation);
+        let hanjia_exp = player
+            .expectation
+            .as_ref()
+            .map_or(false, |e| e.hanjia_expectation);
         if player.has_talent(13134) && !hanjia_exp {
             player.add_buff(BUFF_HAN_JIA);
             // Boss 受击模式下寒甲 tick_interval 已被禁用，手动 recalc A/B
@@ -72,6 +75,10 @@ fn recalc_hanjia_stacks(player: &mut Player) {
 
     player.remove_buff(BUFF_HAN_JIA_SMALL);
     player.remove_buff(BUFF_HAN_JIA_LARGE);
-    for _ in 0..big { player.add_buff(BUFF_HAN_JIA_LARGE); }
-    for _ in 0..small { player.add_buff(BUFF_HAN_JIA_SMALL); }
+    for _ in 0..big {
+        player.add_buff(BUFF_HAN_JIA_LARGE);
+    }
+    for _ in 0..small {
+        player.add_buff(BUFF_HAN_JIA_SMALL);
+    }
 }

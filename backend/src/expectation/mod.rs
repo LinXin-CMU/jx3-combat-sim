@@ -7,11 +7,11 @@
 //! - `.claude/jiantie_expectation_simulation.md`
 //! - `.claude/hanjia_expectation_simulation.md`
 
-pub mod jiantie;
 pub mod hanjia;
+pub mod jiantie;
 
+pub use hanjia::{encode_hanjia, HanjiaCarry, HanjiaFrameStats};
 pub use jiantie::{JiantieDist, JiantieFrameStats};
-pub use hanjia::{HanjiaCarry, HanjiaFrameStats, encode_hanjia};
 
 /// 帧率（与主模拟器一致）
 pub const FPS: u32 = 16;
@@ -36,7 +36,7 @@ mod tests {
     fn poisson_h_basic() {
         // Δ = 2s → h ≈ 1/32 ≈ 0.03125
         let h = poisson_h(2.0);
-        assert!((h - (1.0 - (-1.0/32.0_f64).exp())).abs() < 1e-12);
+        assert!((h - (1.0 - (-1.0 / 32.0_f64).exp())).abs() < 1e-12);
         assert!((h - 0.0307_f64).abs() < 1e-3);
     }
 

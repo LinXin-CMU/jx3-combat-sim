@@ -67,7 +67,9 @@ pub fn run_rollout(
 
             let mut skill_map: HashMap<&str, Vec<&SkillSpec>> = HashMap::new();
             for s in skills.iter() {
-                if s.passive { continue; }
+                if s.passive {
+                    continue;
+                }
                 let base = s.name.split('·').next().unwrap_or(&s.name);
                 skill_map.entry(base).or_default().push(s);
             }
@@ -81,11 +83,19 @@ pub fn run_rollout(
             let dmg_ctx = Some((req.attributes.clone(), req.target.clone()));
             let max_slots = (duration / 0.4).ceil() as u32 + 10;
 
-            let (timeline, _) = simulate_macro(
-                &cfg, &mut player, &skill_map,
-                max_slots, duration, delay_sec,
-                &mut prev_time, &mut is_first_main, None,
-                dmg_ctx.as_ref(), &recipes_table, &skill_by_id,
+            let (timeline, _, _) = simulate_macro(
+                &cfg,
+                &mut player,
+                &skill_map,
+                max_slots,
+                duration,
+                delay_sec,
+                &mut prev_time,
+                &mut is_first_main,
+                None,
+                dmg_ctx.as_ref(),
+                &recipes_table,
+                &skill_by_id,
                 &[],
             );
             Ok(summarize(timeline, &player, duration))
@@ -110,14 +120,25 @@ pub fn run_rollout(
             let mut idx = 0usize;
             while !env.done() {
                 env.advance_to_next_decision();
-                if env.done() { break; }
-                let action = actions.get(idx).copied().unwrap_or(super::action::WAIT_ACTION as u32);
+                if env.done() {
+                    break;
+                }
+                let action = actions
+                    .get(idx)
+                    .copied()
+                    .unwrap_or(super::action::WAIT_ACTION as u32);
                 env.step(action);
                 idx += 1;
-                if idx > 100_000 { break; } // 安全阈值
+                if idx > 100_000 {
+                    break;
+                } // 安全阈值
             }
             let duration_real = duration;
-            Ok(summarize(std::mem::take(&mut env.timeline), &env.player, duration_real))
+            Ok(summarize(
+                std::mem::take(&mut env.timeline),
+                &env.player,
+                duration_real,
+            ))
         }
     }
 }

@@ -7,11 +7,11 @@
 //! HTTP 接口在 main.rs 中注册：
 //! - POST /api/optimizer/analyze  — 解析宏文本并返回可调参数列表
 
-pub mod loop_config;
 pub mod analyze;
 pub mod archive;
 pub mod ga;
-pub mod rule_pool;
+pub mod loop_config;
 pub mod render;
-pub mod struct_ga;
+pub mod rule_pool;
 pub mod runtime;
+pub mod struct_ga;

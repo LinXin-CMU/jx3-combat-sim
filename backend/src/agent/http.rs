@@ -117,7 +117,7 @@ pub async fn scenario_handler(
             )
         }
     };
-    match get_current_scenario(&request.trace_id, &scenario, runtime.provenance()) {
+    match get_current_scenario(&request.trace_id, &scenario, &runtime.context(), runtime.provenance()) {
         Ok(evidence) => json_response(ScenarioToolResponse { scenario, evidence }),
         Err(error) => tool_error_response(
             "get_current_scenario",

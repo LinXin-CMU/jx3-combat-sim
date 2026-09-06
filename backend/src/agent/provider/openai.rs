@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 use std::time::Duration;
 
 const MAX_PROVIDER_RESPONSE_BYTES: usize = 1024 * 1024;
-const PROVIDER_TIMEOUT_SECS: u64 = 120;
+const PROVIDER_TIMEOUT_SECS: u64 = 240;
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -426,11 +426,23 @@ fn chat_request_with_compatibility(
         ChatCompatibility::Openai => body["parallel_tool_calls"] = json!(false),
         ChatCompatibility::Deepseek => {
             body["thinking"] = json!({"type": "enabled"});
-            body["reasoning_effort"] = json!(if model.contains("flash") {
+            body["reasoning_effort"] = json!(if model.contains("flash") || request.tools.is_empty() {
                 "low"
             } else {
                 "high"
             });
+            let setting = if request.tools.is_empty() {
+                "JX3_AGENT_REPORT_REASONING_EFFORT"
+            } else if model.contains("flash") {
+                "JX3_AGENT_FLASH_REASONING_EFFORT"
+            } else {
+                "JX3_AGENT_PRO_REASONING_EFFORT"
+            };
+            if let Ok(effort) = std::env::var(setting) {
+                if matches!(effort.as_str(), "low" | "high") {
+                    body["reasoning_effort"] = json!(effort);
+                }
+            }
         }
     }
     if let Some(format) = &request.response_format {
@@ -648,7 +660,10 @@ fn parse_chat_response(bytes: &[u8]) -> Result<ModelResponse, ProviderError> {
         )
         .with_usage(usage.clone())
     })?;
-    let reasoning_content = choice.message.reasoning_content;
+    let reasoning_content = choice
+        .message
+        .reasoning_content
+        .filter(|value| !value.trim().is_empty());
     let mut text = choice
         .message
         .content
@@ -657,17 +672,33 @@ fn parse_chat_response(bytes: &[u8]) -> Result<ModelResponse, ProviderError> {
     if text.is_none() {
         text = choice.message.refusal.filter(|value| !value.is_empty());
     }
-    let tool_calls: Vec<ProviderToolCall> = choice
+    let mut tool_calls: Vec<ProviderToolCall> = choice
         .message
         .tool_calls
         .into_iter()
         .map(|call| parse_tool_call(call.id, call.function.name, &call.function.arguments))
         .collect::<Result<_, _>>()
         .map_err(|error| error.with_usage(usage.clone()))?;
+    // Compatible providers occasionally emit a complete call in `content`
+    // instead of `tool_calls`. Normalize only a standalone call object; the
+    // usual exposed-tool and argument validation still runs before execution.
+    if tool_calls.is_empty()
+        && !refused
+        && !matches!(choice.finish_reason.as_deref(), Some("length" | "content_filter"))
+    {
+        if let Some(call) = text.as_deref().and_then(parse_standalone_text_tool_call) {
+            tool_calls.push(call);
+            text = None;
+        }
+    }
     if text.is_none() && tool_calls.is_empty() {
         return Err(ProviderError::invalid_response_protocol(
-            "provider_response_empty",
-            "provider response contained neither text nor tool calls",
+            if choice.finish_reason.as_deref() == Some("length") {
+                "provider_output_limit"
+            } else { "provider_response_empty" },
+            if choice.finish_reason.as_deref() == Some("length") {
+                "provider exhausted the output allowance before returning an answer"
+            } else { "provider response contained neither text nor tool calls" },
         )
         .with_usage(usage));
     }
@@ -692,6 +723,26 @@ fn parse_chat_response(bytes: &[u8]) -> Result<ModelResponse, ProviderError> {
     })
 }
 
+fn parse_standalone_text_tool_call(text: &str) -> Option<ProviderToolCall> {
+    if text.len() > 64 * 1024 { return None; }
+    let candidate = text.trim();
+    let candidate = candidate.strip_prefix("<tool_call>").unwrap_or(candidate).trim();
+    let candidate = candidate.strip_suffix("</tool_call>").unwrap_or(candidate).trim();
+    let value: Value = serde_json::from_str(candidate).ok()?;
+    let object = value.as_object()?;
+    if object.len() != 2 { return None; }
+    let name = object.get("name")?.as_str()?;
+    let arguments = object.get("arguments")?;
+    if !valid_identifier(name) || !arguments.is_object() { return None; }
+    static NEXT_TEXT_CALL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let id = NEXT_TEXT_CALL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    Some(ProviderToolCall {
+        call_id: format!("text_call_{id}"),
+        name: name.to_string(),
+        arguments: arguments.clone(),
+    })
+}
+
 fn parse_tool_call(
     call_id: String,
     name: String,
@@ -703,12 +754,27 @@ fn parse_tool_call(
             "provider returned an invalid tool call id or name",
         ));
     }
-    let arguments: Value = parse_tool_arguments(arguments)?;
+    let private_argument_excerpt = || {
+        let redacted = crate::agent::session::redact_sensitive_text(arguments);
+        let excerpt = redacted.chars().take(1_024).collect::<String>();
+        format!("tool={name}; arguments={excerpt}")
+    };
+    let mut arguments: Value = parse_tool_arguments(arguments)
+        .map_err(|error| error.with_private_detail(private_argument_excerpt()))?;
+    // A few compatible chat providers occasionally wrap a single function
+    // argument object in an array. Unwrap only the unambiguous one-object
+    // shape; the normal tool schema still validates every field afterwards.
+    if let Value::Array(items) = &arguments {
+        if items.len() == 1 && items[0].is_object() {
+            arguments = items[0].clone();
+        }
+    }
     if !arguments.is_object() {
         return Err(ProviderError::invalid_response_protocol(
             "provider_tool_arguments_invalid",
             "provider tool arguments were not a JSON object",
-        ));
+        )
+        .with_private_detail(private_argument_excerpt()));
     }
     Ok(ProviderToolCall {
         call_id,
@@ -728,7 +794,7 @@ fn parse_tool_arguments(arguments: &str) -> Result<Value, ProviderError> {
     }
     if let Ok(value) = serde_json::from_str(trimmed) {
         if let Value::String(inner) = &value {
-            if let Ok(unwrapped) = serde_json::from_str(inner) {
+            if let Ok(unwrapped) = parse_tool_arguments(inner) {
                 return Ok(unwrapped);
             }
         }
@@ -747,14 +813,161 @@ fn parse_tool_arguments(arguments: &str) -> Result<Value, ProviderError> {
             extract_first_json_object(&repaired)
                 .and_then(|candidate| serde_json::from_str(candidate).ok())
         })
-        .ok_or_else(|| ProviderError::invalid_response_protocol(
-            "provider_tool_arguments_invalid",
-            "provider returned invalid JSON tool arguments",
-        ))
+        .or_else(|| {
+            let pythonish = repair_pythonish_argument_object(&repaired);
+            let bare_scalars = quote_bare_json_scalar_values(&pythonish);
+            serde_json::from_str(&bare_scalars).ok().or_else(|| {
+                extract_first_json_object(&bare_scalars)
+                    .and_then(|candidate| serde_json::from_str(candidate).ok())
+            })
+        })
+        .ok_or_else(|| {
+            ProviderError::invalid_response_protocol(
+                "provider_tool_arguments_invalid",
+                "provider returned invalid JSON tool arguments",
+            )
+        })
+}
+
+/// Recover the common Python-dict spelling emitted by some compatible model
+/// gateways (`'text'`, `None`, `True`, `False`). This runs only after strict
+/// JSON parsing and the ordinary transport repair both fail.
+fn repair_pythonish_argument_object(value: &str) -> String {
+    let mut output = String::with_capacity(value.len());
+    let mut chars = value.chars().peekable();
+    let mut in_double = false;
+    let mut in_single = false;
+    let mut escaped = false;
+    while let Some(character) = chars.next() {
+        if in_double {
+            output.push(character);
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == '"' {
+                in_double = false;
+            }
+            continue;
+        }
+        if in_single {
+            if escaped {
+                if character == '\'' {
+                    output.push('\'');
+                } else {
+                    output.push('\\');
+                    output.push(character);
+                }
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == '\'' {
+                output.push('"');
+                in_single = false;
+            } else if character == '"' {
+                output.push_str("\\\"");
+            } else {
+                output.push(character);
+            }
+            continue;
+        }
+        if character == '"' {
+            in_double = true;
+            output.push(character);
+            continue;
+        }
+        if character == '\'' {
+            in_single = true;
+            output.push('"');
+            continue;
+        }
+        if character.is_ascii_alphabetic() {
+            let mut token = String::from(character);
+            while chars
+                .peek()
+                .is_some_and(|next| next.is_ascii_alphabetic() || *next == '_')
+            {
+                token.push(chars.next().expect("peeked character exists"));
+            }
+            output.push_str(match token.as_str() {
+                "None" => "null",
+                "True" => "true",
+                "False" => "false",
+                _ => &token,
+            });
+            continue;
+        }
+        output.push(character);
+    }
+    output
+}
+
+/// Quote an unquoted textual value after `:` while leaving JSON literals and
+/// numbers untouched. Example: `{"skill_name": 绝刀}`. This recovery is
+/// intentionally limited to value positions and runs only after strict parse
+/// has already failed.
+fn quote_bare_json_scalar_values(value: &str) -> String {
+    let chars = value.chars().collect::<Vec<_>>();
+    let mut output = String::with_capacity(value.len());
+    let mut index = 0;
+    let mut in_string = false;
+    let mut escaped = false;
+    while index < chars.len() {
+        let character = chars[index];
+        output.push(character);
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == '"' {
+                in_string = false;
+            }
+            index += 1;
+            continue;
+        }
+        if character == '"' {
+            in_string = true;
+            index += 1;
+            continue;
+        }
+        if character != ':' {
+            index += 1;
+            continue;
+        }
+        index += 1;
+        while index < chars.len() && chars[index].is_whitespace() {
+            output.push(chars[index]);
+            index += 1;
+        }
+        let Some(next) = chars.get(index).copied() else {
+            break;
+        };
+        let starts_json_value = matches!(next, '"' | '{' | '[' | '-' | '0'..='9')
+            || chars[index..].starts_with(&['t', 'r', 'u', 'e'])
+            || chars[index..].starts_with(&['f', 'a', 'l', 's', 'e'])
+            || chars[index..].starts_with(&['n', 'u', 'l', 'l']);
+        if starts_json_value {
+            continue;
+        }
+        let start = index;
+        while index < chars.len() && !matches!(chars[index], ',' | '}' | ']') {
+            index += 1;
+        }
+        let bare = chars[start..index]
+            .iter()
+            .collect::<String>()
+            .trim()
+            .to_string();
+        output.push_str(&serde_json::to_string(&bare).unwrap_or_else(|_| "\"\"".to_string()));
+    }
+    output
 }
 
 fn extract_first_json_object(value: &str) -> Option<&str> {
-    let start = value.char_indices().find_map(|(index, character)| (character == '{').then_some(index))?;
+    let start = value
+        .char_indices()
+        .find_map(|(index, character)| (character == '{').then_some(index))?;
     let mut depth = 0_u32;
     let mut in_string = false;
     let mut escaped = false;
@@ -940,6 +1153,7 @@ mod tests {
         assert_eq!(repair_body["response_format"]["type"], "json_object");
         assert!(repair_body.get("tools").is_none());
         assert!(repair_body.get("tool_choice").is_none());
+        assert_eq!(repair_body["reasoning_effort"], "low");
 
         let flash_body = chat_request_with_compatibility(
             "deepseek-v4-flash",
@@ -975,7 +1189,10 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(body["messages"][2]["reasoning_content"], "private provider reasoning");
+        assert_eq!(
+            body["messages"][2]["reasoning_content"],
+            "private provider reasoning"
+        );
         let encoded = serde_json::to_string(&request).unwrap();
         assert!(!encoded.contains("private provider reasoning"));
     }
@@ -1113,6 +1330,43 @@ mod tests {
         assert!(!serde_json::to_string(&error)
             .unwrap()
             .contains("total_tokens"));
+    }
+
+    #[test]
+    fn exhausted_output_is_distinct_from_empty_response() {
+        let body = br#"{"choices":[{"message":{"content":""},"finish_reason":"length"}],"usage":{"completion_tokens":16384}}"#;
+        let error = parse_chat_response(body).unwrap_err();
+        assert_eq!(error.code, "provider_output_limit");
+        assert_eq!(error.usage.output_tokens, 16384);
+    }
+
+    #[test]
+    fn standalone_text_call_is_a_tool_action_not_a_report() {
+        let call = r#"{"name":"inspect_timeline_events","arguments":{"selector":"skill","skill_name":"绝刀","buff_names":["血怒·惊涌"],"context_radius":4,"limit":6}}"#;
+        for text in [call.to_string(), format!("<tool_call>{call}</tool_call>"), format!("{call}\n</tool_call>")] {
+            let body = json!({"choices":[{"message":{"content":text},"finish_reason":"stop"}]});
+            let response = parse_chat_response(&serde_json::to_vec(&body).unwrap()).unwrap();
+            assert_eq!(response.finish_reason, FinishReason::ToolCalls);
+            assert!(response.assistant_text.is_none());
+            assert_eq!(response.tool_calls.len(), 1);
+            assert_eq!(response.tool_calls[0].arguments["buff_names"][0], "血怒·惊涌");
+            assert_eq!(response.tool_calls[0].arguments["context_radius"], 4);
+            assert_eq!(response.tool_calls[0].arguments["limit"], 6);
+        }
+    }
+
+    #[test]
+    fn textual_call_normalization_does_not_execute_examples_or_bypass_tool_visibility() {
+        let call = r#"{"name":"shell","arguments":{}}"#;
+        for text in [format!("示例：{call}"), format!("```json\n{call}\n```"),
+            r#"{"summary":"工具示例","name":"shell","arguments":{}}"#.to_string()] {
+            assert!(parse_standalone_text_tool_call(&text).is_none());
+        }
+        let body = json!({"choices":[{"message":{"content":call},"finish_reason":"stop"}]});
+        let response = parse_chat_response(&serde_json::to_vec(&body).unwrap()).unwrap();
+        assert_eq!(response.validate_against(&request()).unwrap_err().code, "unregistered_provider_tool");
+        let body = json!({"choices":[{"message":{"content":call},"finish_reason":"length"}]});
+        assert!(parse_chat_response(&serde_json::to_vec(&body).unwrap()).unwrap().tool_calls.is_empty());
     }
 
     #[tokio::test]
@@ -1276,13 +1530,48 @@ mod tests {
     fn empty_wrapped_and_double_encoded_tool_arguments_are_repaired() {
         assert_eq!(parse_tool_arguments("  ").unwrap(), serde_json::json!({}));
         assert_eq!(
-            parse_tool_arguments("<decision_summary>next</decision_summary>\n{}")
-                .unwrap(),
+            parse_tool_arguments("<decision_summary>next</decision_summary>\n{}").unwrap(),
             serde_json::json!({})
         );
         assert_eq!(
             parse_tool_arguments(r#""{\"candidates\":[]}""#).unwrap(),
             serde_json::json!({"candidates": []})
         );
+        assert_eq!(
+            parse_tool_arguments(r#""{\"candidates\":[],}""#).unwrap(),
+            serde_json::json!({"candidates": []})
+        );
+    }
+
+    #[test]
+    fn one_object_argument_array_is_unwrapped_at_the_transport_boundary() {
+        let call = parse_tool_call(
+            "call-1".to_string(),
+            "inspect_timeline_events".to_string(),
+            r#"[{"selector":"skill","skill_name":"绝刀"}]"#,
+        )
+        .unwrap();
+        assert_eq!(call.arguments, serde_json::json!({"selector": "skill", "skill_name": "绝刀"}));
+    }
+
+    #[test]
+    fn python_dict_style_tool_arguments_are_repaired() {
+        let parsed = parse_tool_arguments(
+            "{'selector': 'skill', 'skill_name': '绝刀', 'buff_names': ['血怒·惊涌'], 'enabled': True}",
+        )
+        .unwrap();
+        assert_eq!(parsed["selector"], "skill");
+        assert_eq!(parsed["skill_name"], "绝刀");
+        assert_eq!(parsed["enabled"], true);
+    }
+
+    #[test]
+    fn unquoted_textual_tool_argument_value_is_repaired() {
+        let parsed = parse_tool_arguments(
+            r#"{"selector":"skill","skill_name":绝刀,"time_seconds":0,"buff_names":["血怒"]}"#,
+        )
+        .unwrap();
+        assert_eq!(parsed["skill_name"], "绝刀");
+        assert_eq!(parsed["time_seconds"], 0);
     }
 }

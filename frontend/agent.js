@@ -61,6 +61,9 @@
   let dockFeedbackTurn = null;
   let sessionSummaries = [];
   let dockMode = 'simulation';
+  let composerBusy = false;
+  let clarificationSerial = 0;
+  const latestRunBySession = new Map();
 
   const traceLabels = {
     planning: '拆解问题',
@@ -113,12 +116,14 @@
   };
 
   const toolLabels = {
+    distill_macro: '蒸馏宏 · 生成规则初稿',
     get_current_scenario: '读取当前场景',
     ask_user_question: '向你确认关键信息',
     search_knowledge_base: '检索版本知识库',
     simulate_scenario: '运行基线模拟',
     compare_scenarios: '对比候选方案',
     analyze_timeline: '分析战斗时间轴',
+    inspect_timeline_events: '定位实际技能事件',
     list_saved_artifacts: '查找已保存资料',
     read_saved_artifact: '读取已保存资料',
     compare_saved_macros: '对比已保存宏',
@@ -167,10 +172,8 @@
     return node;
   }
 
-  function setPromptWithHint(input, question, taskHint) {
+  function setPrompt(input, question) {
     input.value = question || '';
-    if (taskHint) input.dataset.agentTaskHint = taskHint;
-    else delete input.dataset.agentTaskHint;
     input.focus();
   }
 
@@ -261,6 +264,8 @@
   }
 
   function setBusy(busy) {
+    composerBusy = busy;
+    updateClarificationControls();
     els.run.disabled = busy;
     els.run.hidden = busy;
     els.cancel.hidden = !busy;
@@ -606,6 +611,7 @@
       simulate_scenario: '在冻结场景上运行确定性基线，战斗数值只由模拟器产生。',
       compare_scenarios: '仅改变声明过的候选参数，在同一场景口径下对比结果。',
       analyze_timeline: '聚合技能、资源、冷却与增益事件，定位可观察的时间轴现象。',
+      inspect_timeline_events: '按技能、时间或异常信号读取准确释放位置及前后状态。',
       list_saved_artifacts: '只在当前账号的宏、循环、配装、属性与广场方案目录中按名称查找。',
       read_saved_artifact: '用目录返回的不透明标识精确读取一份资料，不接触路径或敏感设置。',
       compare_saved_macros: '固定当前战斗环境，只替换两份已保存宏并分别运行真实模拟。',
@@ -634,6 +640,7 @@
       provider_empty_retry: '供应商返回空正文；保留已有工具证据，并进行一次无工具重试。',
       provider_empty_evidence_preserved: '模型未形成报告，但工具证据仍可复用；系统发布受限结论而非丢弃整轮。',
       knowledge_searches_coalesced: '检测到重复检索意图；复用已有结果并停止无效查询循环。',
+      no_new_evidence_finish: '本轮只复用了已有确定性结果；证据已经收敛，直接进入回答。',
       decision_checkpoint: '记录当前观察、证据缺口、工具选择理由与下一步判定条件。',
       reasoning_state_updated: '逐项显示哪些判断已经有证据、哪些可以开始分析、哪些仍需补证。',
       reasoning_critique_started: '从任务完成度、证据归属、因果强度、范围和干预必要性检查报告。',
@@ -877,14 +884,18 @@
       .replaceAll(hidden, '未核验');
   }
 
-  function parseOperationRanges(spec) {
+  function parseTimelineReferences(spec, kind) {
     const ranges = [];
     String(spec || '').replaceAll('，', ',').replaceAll('、', ',').split(/[,/;]/).forEach(part => {
       const numbers = part.match(/\d+/g)?.map(Number).filter(value => value > 0) || [];
       if (!numbers.length) return;
       const start = numbers[0] - 1;
       const end = (numbers[1] || numbers[0]) - 1;
-      ranges.push({ start: Math.min(start, end), end: Math.max(start, end) });
+      ranges.push({
+        kind: kind === 'ev' ? 'event' : 'operation',
+        start: Math.min(start, end),
+        end: Math.max(start, end),
+      });
     });
     return ranges;
   }
@@ -908,12 +919,14 @@
   function positionRotationReferencePopover(popover, anchor) {
     const rect = anchor.getBoundingClientRect();
     const margin = 10;
-    const width = Math.min(420, window.innerWidth - margin * 2);
+    const width = Math.min(300, window.innerWidth - margin * 2);
     popover.style.width = `${width}px`;
     popover.style.left = `${Math.max(margin, Math.min(window.innerWidth - width - margin, rect.left))}px`;
+    const spaceBelow = window.innerHeight - rect.bottom - margin - 8;
+    const spaceAbove = rect.top - margin - 8;
     const height = popover.offsetHeight;
     const below = rect.bottom + 8;
-    popover.style.top = `${below + height <= window.innerHeight - margin
+    popover.style.top = `${spaceBelow >= height || spaceBelow >= spaceAbove
       ? below
       : Math.max(margin, rect.top - height - 8)}px`;
   }
@@ -929,22 +942,90 @@
     head.appendChild(element('span', '', ranges.length > 1 ? `${ranges.length} 个时间点` : '技能轴摘要'));
     popover.appendChild(head);
     const descriptions = window.Jx3TimelineBridge?.describe?.(ranges) || [];
+    let activeOccurrence = 0;
+    const occurrenceRows = [];
+    if (descriptions.length > 1) {
+      const pager = element('span', 'agent-occurrence-pager');
+      const count = element('span', '', `1 / ${descriptions.length}`);
+      const previous = element('button', '', '‹');
+      const next = element('button', '', '›');
+      previous.type = next.type = 'button';
+      previous.setAttribute('aria-label', '上一处'); next.setAttribute('aria-label', '下一处');
+      const select = delta => {
+        activeOccurrence = (activeOccurrence + delta + descriptions.length) % descriptions.length;
+        occurrenceRows.forEach((row, index) => { row.hidden = index !== activeOccurrence; });
+        count.textContent = `${activeOccurrence + 1} / ${descriptions.length}`;
+        positionRotationReferencePopover(popover, anchor);
+      };
+      previous.addEventListener('click', () => select(-1)); next.addEventListener('click', () => select(1));
+      pager.append(previous, count, next); head.appendChild(pager);
+    }
     if (!descriptions.length) {
       popover.appendChild(element('p', 'agent-rotation-popover-empty', '当前页面没有可对应的模拟技能轴。'));
     } else {
       descriptions.forEach((description, index) => {
         const row = element('div', 'agent-rotation-occurrence');
+        row.hidden = index > 0;
+        occurrenceRows.push(row);
         const meta = element('div', 'agent-rotation-occurrence-meta');
         meta.appendChild(element('b', '', descriptions.length > 1 ? `位置 ${index + 1} · ${description.timeLabel}` : description.timeLabel));
         meta.appendChild(element('span', '', '当前模拟时间'));
         row.appendChild(meta);
         const skills = element('div', 'agent-rotation-skill-strip');
+        const details = element('div', 'agent-rotation-state');
+        const showState = (skill, phase) => {
+          details.replaceChildren();
+          const snapshot = phase === 'before' ? skill.before : skill.after;
+          details.appendChild(element('b', '', `${skill.name} · ${Number.isFinite(skill.time) ? skill.time.toFixed(2) + 's · ' : ''}释放${phase === 'before' ? '前' : '后'}`));
+          if (!snapshot) {
+            details.appendChild(element('p', '', '当前结果没有该状态快照，请运行完整模拟后查看。'));
+            return;
+          }
+          details.appendChild(element('p', '', `怒气 ${snapshot.rage}${skill.rageCost != null ? ` · 本次消耗 ${skill.rageCost}` : ''}${snapshot.block_value != null ? ` · 盾值 ${snapshot.block_value}` : ''}`));
+          const damage = [['命中', skill.damageNormal], ['会心', skill.damageCrit], ['期望', skill.damage]]
+            .filter(([, value]) => value != null).map(([label, value]) => `${label} ${typeof formatDamage === 'function' ? formatDamage(Number(value)) : Number(value).toLocaleString('zh-CN', {maximumFractionDigits: 0})}`);
+          if (damage.length) details.appendChild(element('p', '', `伤害：${damage.join(' / ')}`));
+          const buffGroups = element('div', 'agent-state-groups');
+          [['自身 Buff', snapshot.buffs], ['目标 Buff', snapshot.target_buffs]].forEach(([title, buffs]) => {
+            const group = element('div');
+            group.appendChild(element('div', 'agent-state-label', title));
+            const list = element('div', 'agent-state-buffs');
+            (buffs || []).forEach(buff => {
+              const item = element('span', 'agent-state-buff');
+              item.title = `${buff.name} · ${buff.stacks}层 · ${buff.remaining > 0 ? buff.remaining.toFixed(1) + '秒' : '持续生效'}`;
+              if (buff.iconUrl) { const img = element('img'); img.src = buff.iconUrl; img.alt = buff.name; item.appendChild(img); }
+              else item.appendChild(element('span', '', buff.name || '?'));
+              if (buff.stacks > 1) item.appendChild(element('b', '', String(buff.stacks)));
+              item.appendChild(element('small', '', buff.remaining > 0 ? buff.remaining.toFixed(1) + 's' : '∞'));
+              list.appendChild(item);
+            });
+            if (!buffs?.length) list.appendChild(element('span', '', '无'));
+            group.appendChild(list);
+            buffGroups.appendChild(group);
+          });
+          details.appendChild(buffGroups);
+        };
         description.skills.forEach(skill => {
-          const chip = element('span', skill.selected ? 'is-target' : '', skill.short);
-          chip.title = `${Number.isFinite(skill.time) ? `${skill.time.toFixed(2)}s · ` : ''}${skill.name}`;
+          const gap = element('button', 'agent-skill-gap', '·');
+          gap.type = 'button';
+          gap.setAttribute('aria-label', `${skill.name}释放前`);
+          gap.addEventListener('mouseenter', () => showState(skill, 'before'));
+          gap.addEventListener('focus', () => showState(skill, 'before'));
+          skills.appendChild(gap);
+          const chip = element('button', `agent-skill-chip${skill.selected ? ' is-target' : ''}`);
+          chip.type = 'button';
+          chip.setAttribute('aria-label', `${skill.name}释放后`);
+          if (skill.iconUrl) { const img = element('img'); img.src = skill.iconUrl; img.alt = ''; chip.appendChild(img); }
+          chip.appendChild(element('span', '', skill.name));
+          chip.addEventListener('mouseenter', () => showState(skill, 'after'));
+          chip.addEventListener('focus', () => showState(skill, 'after'));
           skills.appendChild(chip);
         });
         row.appendChild(skills);
+        row.appendChild(element('small', 'agent-state-label', '悬停技能看释放后，悬停间隔看下一技能释放前'));
+        row.appendChild(details);
+        const selected = description.skills.find(skill => skill.selected) || description.skills[0];
+        if (selected) showState(selected, 'after');
         const button = element('button', 'agent-rotation-locate', '在技能轴中标记');
         button.type = 'button';
         button.disabled = !description.valid;
@@ -967,20 +1048,127 @@
 
   /**
    * 渲染模型给出的稳定操作引用。
-   * 新格式 [[显示文字|op:22,23,24]] 可把同名技能的多个具体出现位置
-   * 绑定到同一段文字；旧会话中的“行20”也会兼容成单点引用。
+   * [[显示文字|op:22,23,24]] 绑定输入操作，[[显示文字|ev:42,97]]
+   * 绑定实际释放事件；两者都只向用户显示时间。旧会话中的“行20”
+   * 兼容成手动输入的单点引用。
    */
+  function normalizeTimelineProse(value) {
+    // Keep machine anchors in the link target, including references in old sessions.
+    const grouped = String(value || '').replace(
+      /\[\[([^|\]]+)\|(ev|op):([^\]]+)\]\]((?:\s*\/\s*(?:ev\s*[:：]?\s*)?\d+)+)/gi,
+      (_, label, kind, spec, rest) => `[[${label}|${kind}:${spec}${rest.replace(/ev\s*[:：]?\s*/gi, '')}]]`);
+    return grouped.split(/(\[\[[^\]]+\]\])/g).map(part => {
+      if (part.startsWith('[[')) return part;
+      return part.replace(/(\d+(?:\.\d+)?\s*(?:s|秒))\s*[（(]([^()（）\n]*?)[,，、\s]*\bev\s*[:：]?\s*(\d+)[)）]|\bev\s*[:：]?\s*(\d+(?:\s*\/\s*(?:ev\s*[:：]?\s*)?\d+)*)\b/gi,
+        (_, time, detail, id, bareId) => time
+          ? `[[${time}${detail.replace(/[,，、\s]+$/, '') ? `（${detail.replace(/[,，、\s]+$/, '')}）` : ''}|ev:${id}]]`
+          : `[[对应技能|ev:${bareId.replace(/ev\s*[:：]?\s*/gi, '')}]]`);
+    }).join('');
+  }
+
+  function timelineReferenceLabel(label) {
+    return String(label || '').replace(/\bev\s*[:：]?\s*\d+\b/gi, '').trim() || '对应技能';
+  }
+
   function appendRichProse(parent, tagName, className, value, metrics) {
-    const text = readableProse(value, metrics);
+    const text = normalizeTimelineProse(readableProse(value, metrics));
+    const root = element(tagName === 'p' ? 'div' : tagName, `${className || ''} agent-prose`);
+    parent.appendChild(root);
+    const lines = text.split(/\r?\n/);
+    // Protect anchor pipes before splitting Markdown table cells.
+    const cells = line => {
+      const anchors = [];
+      const masked = line.replace(/\[\[[^\]]+\]\]/g, match => `\u0001${anchors.push(match) - 1}\u0001`);
+      return masked.trim().replace(/^\|/, '').replace(/\|$/, '').split('|')
+        .map(cell => cell.trim().replace(/\u0001(\d+)\u0001/g, (_, index) => anchors[index]));
+    };
+    const lists = [];
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      const marker = /^(\s*)(?:(\d{1,9})([.)])|([-*+]))\s+(.*)$/.exec(lines[i]);
+      if (marker) {
+        const indent = marker[1].replace(/\t/g, '    ').length;
+        const kind = marker[2] ? 'ol' : 'ul';
+        const delimiter = marker[3] || marker[4];
+        while (lists.length && lists.at(-1).indent > indent) lists.pop();
+        if (lists.length && lists.at(-1).indent === indent
+            && (lists.at(-1).kind !== kind || lists.at(-1).delimiter !== delimiter)) lists.pop();
+        let current = lists.at(-1);
+        if (!current || current.indent !== indent) {
+          const list = element(kind);
+          if (kind === 'ol' && Number(marker[2]) !== 1) list.start = Number(marker[2]);
+          (current?.item || root).appendChild(list);
+          current = { list, indent, kind, delimiter, item: null };
+          lists.push(current);
+        }
+        appendInlineProse(current.list, 'li', '', marker[5]);
+        current.item = current.list.lastElementChild;
+        continue;
+      }
+      const indent = /^\s*/.exec(lines[i])[0].replace(/\t/g, '    ').length;
+      while (lists.length && indent <= lists.at(-1).indent) lists.pop();
+      if (lists.length && !/^(?:```|#{1,6}\s)/.test(line)) {
+        appendInlineProse(lists.at(-1).item, 'span', 'agent-prose-line', line);
+        continue;
+      }
+      lists.length = 0;
+      if (/^```/.test(line)) {
+        const code = [];
+        while (++i < lines.length && !/^```/.test(lines[i])) code.push(lines[i]);
+        root.appendChild(element('pre', '', code.join('\n')));
+      } else if (i + 1 < lines.length && lines[i + 1].includes('|') && cells(lines[i + 1]).every(cell => /^:?-{3,}:?$/.test(cell))) {
+        const wrap = element('div', 'agent-prose-table');
+        const table = element('table');
+        const header = element('tr');
+        cells(line).forEach(cell => appendInlineProse(header, 'th', '', cell));
+        table.appendChild(header);
+        i++;
+        while (i + 1 < lines.length && lines[i + 1].includes('|') && lines[i + 1].trim()) {
+          const row = element('tr');
+          cells(lines[++i]).forEach(cell => appendInlineProse(row, 'td', '', cell));
+          table.appendChild(row);
+        }
+        wrap.appendChild(table); root.appendChild(wrap);
+      } else if (/^#{1,6}\s+/.test(line)) {
+        appendInlineProse(root, 'h4', '', line.replace(/^#{1,6}\s+/, ''));
+      } else {
+        appendInlineProse(root, 'span', 'agent-prose-line', line);
+      }
+    }
+    return root;
+  }
+
+  function appendFormattedText(parent, text) {
+    const pattern = /\*\*([^*]+)\*\*|`([^`]+)`/g;
+    let cursor = 0;
+    for (const match of text.matchAll(pattern)) {
+      parent.appendChild(document.createTextNode(text.slice(cursor, match.index)));
+      parent.appendChild(element(match[1] ? 'strong' : 'code', '', match[1] || match[2]));
+      cursor = match.index + match[0].length;
+    }
+    parent.appendChild(document.createTextNode(text.slice(cursor)));
+  }
+
+  function appendInlineProse(parent, tagName, className, value, metrics) {
+    const text = value == null || value === '' ? '' : normalizeTimelineProse(readableProse(value, metrics));
     const node = element(tagName, className);
-    const pattern = /\[\[([^|\]]+)\|op:([^\]]+)\]\]|行(\d+)/g;
+    const emphasis = /\*\*([\s\S]+?)\*\*/.exec(text);
+    if (emphasis) {
+      appendInlineProse(node, 'span', '', text.slice(0, emphasis.index));
+      appendInlineProse(node, 'strong', '', emphasis[1]);
+      appendInlineProse(node, 'span', '', text.slice(emphasis.index + emphasis[0].length));
+      parent.appendChild(node);
+      return node;
+    }
+    const pattern = /\[\[([^|\]]+)\|(op|ev):([^\]]+)\]\]|行(\d+)/g;
     let cursor = 0;
     let match;
     while ((match = pattern.exec(text)) !== null) {
-      if (match.index > cursor) node.appendChild(document.createTextNode(text.slice(cursor, match.index)));
-      const label = match[1] || '对应位置';
-      const ranges = parseOperationRanges(match[2] || match[3]);
-      const legacyMacroLine = !!match[3] && !!window._lastSimBody?.macro_text;
+      if (match.index > cursor) appendFormattedText(node, text.slice(cursor, match.index));
+      const label = timelineReferenceLabel(match[1] || '对应位置');
+      const ranges = parseTimelineReferences(match[3] || match[4], match[2] || 'op');
+      const legacyMacroLine = !!match[4] && !!window._lastSimBody?.macro_text;
       if (!ranges.length || legacyMacroLine) {
         node.appendChild(document.createTextNode(label));
       } else {
@@ -991,7 +1179,7 @@
         const timeLabels = window.Jx3TimelineBridge?.describe?.(ranges)
           ?.map(item => item.timeLabel)
           .filter(value => value && !value.includes('未找到')) || [];
-        if (timeLabels.length) {
+        if (timeLabels.length && !/\d+(?:\.\d+)?\s*(?:s|秒)/i.test(label)) {
           const visibleTimes = timeLabels.length <= 3
             ? timeLabels.join(' · ')
             : `${timeLabels.slice(0, 2).join(' · ')} · 共${timeLabels.length}处`;
@@ -1009,13 +1197,14 @@
       }
       cursor = pattern.lastIndex;
     }
-    if (cursor < text.length) node.appendChild(document.createTextNode(text.slice(cursor)));
+    if (cursor < text.length) appendFormattedText(node, text.slice(cursor));
     parent.appendChild(node);
     return node;
   }
 
   function plainAgentText(value) {
-    return String(value || '').replace(/\[\[([^|\]]+)\|op:([^\]]+)\]\]/g, '$1');
+    return normalizeTimelineProse(value).replace(/\[\[([^|\]]+)\|(op|ev):([^\]]+)\]\]/g,
+      (_, label) => timelineReferenceLabel(label));
   }
 
   function appendMetricGrid(parent, metrics, className) {
@@ -1090,19 +1279,112 @@
     parent.appendChild(block);
   }
 
+  function clarificationOptions(clarification) {
+    if (Array.isArray(clarification.options) && clarification.options.length) {
+      return clarification.options.filter(option => typeof option?.label === 'string' && option.label.trim())
+        .slice(0, 4).map(option => ({ label: option.label.trim(), description: String(option.description || '') }));
+    }
+    // Older runs stored a short slash-separated answer hint. Only split an
+    // explicit spaced separator, so units and ordinary prose stay intact.
+    const parts = String(clarification.answer_hint || '').split(/\s+[\/／|｜]\s+/).map(value => value.trim()).filter(Boolean);
+    return parts.length >= 2 && parts.length <= 4 && parts.every(value => value.length <= 120)
+      ? [...new Set(parts)].map(label => ({ label, description: '' })) : [];
+  }
+
+  function updateClarificationControls() {
+    document.querySelectorAll('.agent-answer-form').forEach(form => {
+      const current = form.dataset.sessionId === currentSessionId
+        && latestRunBySession.get(currentSessionId) === form.dataset.runId;
+      form.querySelector('fieldset').disabled = composerBusy || !current;
+      form.querySelector('.agent-answer-state').textContent = current
+        ? (composerBusy ? '正在处理，请稍候…' : '选择后确认，或自行填写答案')
+        : '历史追问 · 请在最新对话中继续';
+    });
+  }
+
+  function noteRenderedRun(result) {
+    if (currentSessionId && result?.run_id) latestRunBySession.set(currentSessionId, result.run_id);
+    queueMicrotask(updateClarificationControls);
+  }
+
+  function appendClarificationChoices(parent, result, compact) {
+    const clarification = result.clarification;
+    const options = clarificationOptions(clarification);
+    const form = element('form', 'agent-answer-form');
+    form.dataset.sessionId = currentSessionId || '';
+    form.dataset.runId = result.run_id || '';
+    const group = element('fieldset', 'agent-answer-group');
+    group.appendChild(element('legend', 'agent-answer-legend', '请选择你的回答'));
+    const radioName = `agent-answer-${++clarificationSerial}`;
+    const custom = element('textarea', 'agent-answer-custom');
+    custom.placeholder = '输入你的答案或补充条件…';
+    custom.setAttribute('aria-label', '自行填写回答');
+    custom.rows = 2;
+    custom.maxLength = 2000;
+    custom.hidden = options.length > 0;
+    let selection = options.length ? null : 'custom';
+    const submit = element('button', 'sim-btn sim-btn-primary agent-answer-submit', '确认并继续');
+    submit.type = 'submit';
+    submit.disabled = true;
+    const sync = () => { submit.disabled = selection === null || (selection === 'custom' && !custom.value.trim()); };
+    [...options, { label: '自行填写', description: '补充条件，或给出其他答案', custom: true }].forEach((option, index) => {
+      const label = element('label', 'agent-answer-option');
+      const radio = document.createElement('input');
+      radio.type = 'radio';
+      radio.name = radioName;
+      radio.value = option.custom ? 'custom' : String(index);
+      radio.checked = !options.length && option.custom;
+      const text = element('span', 'agent-answer-option-text');
+      text.appendChild(element('b', '', `${index + 1}. ${option.label}`));
+      if (option.description) text.appendChild(element('small', '', option.description));
+      label.append(radio, text);
+      radio.addEventListener('change', () => {
+        selection = option.custom ? 'custom' : index;
+        custom.hidden = !option.custom;
+        sync();
+        if (option.custom) custom.focus();
+      });
+      group.appendChild(label);
+    });
+    if (!options.length && clarification.answer_hint) {
+      group.appendChild(element('p', 'agent-answer-hint', clarification.answer_hint));
+    }
+    custom.addEventListener('input', sync);
+    group.append(custom, submit);
+    form.append(group, element('small', 'agent-answer-state', '选择后确认，或自行填写答案'));
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      if (composerBusy || form.dataset.sessionId !== currentSessionId
+        || latestRunBySession.get(currentSessionId) !== result.run_id) return;
+      const answer = selection === 'custom' ? custom.value.trim() : options[selection]?.label;
+      if (!answer) return;
+      const question = `针对你的问题：${clarification.question}\n我的回答：${answer}`;
+      if (compact) await startDockRun(question);
+      else await startRun(question);
+      updateClarificationControls();
+    });
+    parent.appendChild(form);
+    queueMicrotask(updateClarificationControls);
+  }
+
   function renderReport(result) {
+    noteRenderedRun(result);
     const report = result?.report;
     if (!report) {
       if (result?.clarification) {
         const actions = [cardCopyButton('复制问题', () => result.clarification.question, false)];
         const message = appendMessage('agent', result.clarification.question, actions);
         message.classList.add('agent-clarification');
+        if (result.clarification.analysis_text) {
+          const progress = element('div', 'agent-clarification-analysis');
+          progress.appendChild(element('small', '', '当前分析 · 尚未完成报告校验'));
+          appendRichProse(progress, 'p', '', result.clarification.analysis_text);
+          message.prepend(progress);
+        }
         if (result.clarification.reason) {
           message.appendChild(element('p', 'agent-clarification-reason', result.clarification.reason));
         }
-        if (result.clarification.answer_hint) {
-          message.appendChild(element('p', 'agent-clarification-hint', `可以这样回答：${result.clarification.answer_hint}`));
-        }
+        appendClarificationChoices(message, result, false);
         setTimeout(() => {
           els.question.placeholder = '回答上面的问题，继续当前会话…';
           els.question.focus();
@@ -1151,13 +1433,14 @@
 
     (report.content?.findings || []).forEach(finding => {
       const block = element('section', 'agent-finding');
-      block.appendChild(element('h4', '', finding.title));
+      appendRichProse(block, 'h4', '', finding.title, finding.metrics);
       appendRichProse(block, 'p', '', finding.explanation, finding.metrics);
       appendMetricGrid(block, finding.metrics, 'agent-metrics');
       card.appendChild(block);
     });
 
     appendRotationChanges(card, report.content?.rotation_changes || [], allMetrics, false);
+    appendDraftArtifacts(card, report.content?.artifacts || [], false);
 
     const recommendations = report.content?.recommendations || [];
     if (recommendations.length) {
@@ -1188,6 +1471,74 @@
     card.appendChild(element('div', 'agent-evidence', `scenario ${result.scenario_hash} · prompt ${result.prompt_version} / ${result.prompt_sha256} · evidence ${(report.evidence_ids || []).join(', ') || 'none'}`));
     els.transcript.appendChild(card);
     scrollTranscript();
+  }
+
+  function macroDisplayPages(artifact) {
+    if (artifact.language !== 'jx3_macro') return null;
+    const names = { shield: '盾宏', '擎盾': '盾宏', blade: '刀宏', '擎刀': '刀宏', wall: '盾墙宏', '盾墙': '盾墙宏', '': '通用宏' };
+    const pages = [];
+    let title = names[''];
+    let lines = [];
+    const flush = () => {
+      const content = lines.join('\n').trimEnd();
+      if (content.trim()) pages.push({ title, content });
+      lines = [];
+    };
+    for (const line of (artifact.content || '').replace(/\r\n?/g, '\n').split('\n')) {
+      const marker = line.trim().match(/^#page(?:\s+(.*))?$/);
+      if (marker) {
+        const stance = (marker[1] || '').trim();
+        // Unknown page syntax stays visible verbatim for correction.
+        if (!Object.prototype.hasOwnProperty.call(names, stance)) return null;
+        flush();
+        title = names[stance];
+      } else lines.push(line);
+    }
+    flush();
+    return pages.length ? pages : null;
+  }
+
+  function appendDraftArtifacts(parent, artifacts, compact) {
+    artifacts.forEach(artifact => {
+      const pages = macroDisplayPages(artifact);
+      const block = element('section', compact ? 'sim-ai-result-finding agent-draft-artifact' : 'agent-finding agent-draft-artifact');
+      const head = element('div', 'agent-draft-head');
+      head.appendChild(element('b', '', artifact.title || '候选草稿'));
+      head.appendChild(cardCopyButton(pages ? '复制完整宏' : '复制代码', () => artifact.content || '', compact));
+      block.appendChild(head);
+      const status = artifact.syntax === 'invalid' ? '语法待修正'
+        : artifact.syntax === 'parsed' ? '语法已解析' : '候选代码';
+      block.appendChild(element('small', 'agent-draft-status', pages ? `${pages.length} 页 · ${status}` : status));
+      if (pages) {
+        const group = element('div', 'agent-macro-pages');
+        pages.forEach((page, index) => {
+          const section = element('section', 'agent-macro-page');
+          const pageHead = element('div', 'agent-macro-page-head');
+          const label = element('div', 'agent-macro-page-label');
+          label.appendChild(element('b', '', page.title));
+          const count = element('span', `agent-macro-page-count${page.content.length > 128 ? ' is-over-limit' : ''}`, `${page.content.length} / 128 字`);
+          count.title = '正文含换行；分页标记不计入字数';
+          label.appendChild(count);
+          pageHead.appendChild(label);
+          const copy = cardCopyButton(`复制${page.title}`, () => page.content, compact);
+          copy.title = '复制本页正文，不含模拟器分页标记';
+          pageHead.appendChild(copy);
+          section.appendChild(pageHead);
+          const pre = element('pre', 'agent-draft-code agent-macro-code');
+          pre.tabIndex = 0;
+          pre.setAttribute('aria-label', `${page.title}代码，第 ${index + 1} 页`);
+          pre.appendChild(element('code', '', page.content));
+          section.appendChild(pre);
+          group.appendChild(section);
+        });
+        block.appendChild(group);
+      } else {
+        const pre = element('pre', 'agent-draft-code');
+        pre.appendChild(element('code', '', artifact.content || ''));
+        block.appendChild(pre);
+      }
+      parent.appendChild(block);
+    });
   }
 
   function appendRotationChanges(parent, changes, allMetrics, compact) {
@@ -1390,6 +1741,7 @@
 
   function renderDockReport(result) {
     if (!result) return;
+    noteRenderedRun(result);
     prepareDockChat();
     const report = result.report;
     const allMetrics = (report?.content?.findings || []).flatMap(finding => finding.metrics || []);
@@ -1407,14 +1759,18 @@
     card.appendChild(head);
 
     if (result.clarification) {
+      if (result.clarification.analysis_text) {
+        const progress = element('div', 'agent-clarification-analysis');
+        progress.appendChild(element('small', '', '当前分析 · 尚未完成报告校验'));
+        appendRichProse(progress, 'p', '', result.clarification.analysis_text);
+        card.appendChild(progress);
+      }
       const question = element('div', 'sim-ai-result-summary', result.clarification.question);
       card.appendChild(question);
       if (result.clarification.reason) {
         card.appendChild(element('p', 'sim-ai-clarification-reason', result.clarification.reason));
       }
-      if (result.clarification.answer_hint) {
-        card.appendChild(element('p', 'sim-ai-clarification-hint', `可以这样回答：${result.clarification.answer_hint}`));
-      }
+      appendClarificationChoices(card, result, true);
       appendDiagnostics(card, result, true);
       els.dockChat.appendChild(card);
       scrollDock();
@@ -1448,12 +1804,13 @@
     appendEquipmentComparisons(card, report?.equipment_comparisons || [], true);
     (report?.content?.findings || []).slice(0, 4).forEach(finding => {
       const block = element('div', 'sim-ai-result-finding');
-      block.appendChild(element('b', '', finding.title));
+      appendRichProse(block, 'b', '', finding.title, finding.metrics);
       appendRichProse(block, 'p', '', finding.explanation, finding.metrics);
       appendMetricGrid(block, (finding.metrics || []).slice(0, 4), 'sim-ai-result-metrics');
       card.appendChild(block);
     });
     appendRotationChanges(card, report?.content?.rotation_changes || [], allMetrics, true);
+    appendDraftArtifacts(card, report?.content?.artifacts || [], true);
     appendKnowledgeSources(card, report?.sources || [], true);
     const limitations = report?.content?.limitations || [];
     if (limitations.length) {
@@ -1471,6 +1828,22 @@
     scrollDock();
   }
 
+  const simulationQuestions = [
+    ['循环诊断', '这套循环做得好的地方和最主要的问题是什么？'],
+    ['攻略解读', '结合当前版本攻略，解释这套循环的核心思路。'],
+    ['蒸馏成宏', '把当前循环蒸馏成宏，调优并实测，给我最终版本和与原循环的差异。'],
+    ['对比已存宏', '我想对比已保存的宏，先列出可选方案。'],
+  ];
+
+  function appendSimulationStarters(container) {
+    simulationQuestions.forEach(([label, question]) => {
+      const button = element('button', 'sim-btn', label);
+      button.type = 'button';
+      button.addEventListener('click', () => setPrompt(els.question, question));
+      container.appendChild(button);
+    });
+  }
+
   function renderWelcome() {
     clear(els.transcript);
     const welcome = element('div', 'agent-welcome');
@@ -1478,21 +1851,7 @@
     welcome.appendChild(element('h3', '', '从一个可验证的问题开始'));
     welcome.appendChild(element('p', '', '先在“循环模拟”准备场景，再问 Agent 当前攻略、输出基线、候选改动或时间轴异常。引用资料会标明赛季与原始来源。'));
     const starters = element('div', 'agent-starter-grid');
-    [
-      ['分析当前基线', '这套循环的整体输出和伤害结构怎么样？', 'baseline_analysis'],
-      ['诊断时间轴', '这套循环哪里顺，哪里可能在空转或浪费资源？', 'rotation_stall_diagnosis'],
-      ['查询版本攻略', '结合当前版本攻略，解释这套循环的核心思路。', 'general_analysis'],
-      ['下一步分析', '为了更准确地判断这套循环，下一步最值得检查什么？', 'general_analysis'],
-      ['分析循环优缺点', '这套循环做得好的地方和最主要的问题是什么？', 'baseline_analysis'],
-      ['识别输入模式', '这是宏循环还是手动循环？它的执行特点是什么？', 'macro_analysis'],
-      ['选择保存方案', '我保存了哪些可以互相比较的宏或循环？', 'saved_artifact_analysis'],
-      ['分析实战适配', '这套循环在移动、转火、停手和网络延迟变化时表现怎么样？', 'practical_adaptation'],
-    ].forEach(([label, question, taskHint]) => {
-      const button = element('button', 'sim-btn', label);
-      button.type = 'button';
-      button.addEventListener('click', () => setPromptWithHint(els.question, question, taskHint));
-      starters.appendChild(button);
-    });
+    appendSimulationStarters(starters);
     welcome.appendChild(starters);
     els.transcript.appendChild(welcome);
   }
@@ -1650,9 +2009,9 @@
     }
   }
 
-  async function startDockRun() {
-    if (activeRun) return;
-    const question = els.dockQuestion.value.trim();
+  async function startDockRun(answerOverride) {
+    if (activeRun || composerBusy) return;
+    const question = typeof answerOverride === 'string' ? answerOverride : els.dockQuestion.value.trim();
     if (!question) {
       activeSurface = 'dock';
       setStatus('请先输入一个策划问题', true);
@@ -1672,7 +2031,6 @@
       const payload = {
         question,
         provider_profile: els.dockProvider.value,
-        task_hint: els.dockQuestion.dataset.agentTaskHint || undefined,
         analysis_surface: dockMode,
         simulation: captured.simulation,
         equipment_workspace: captured.equipment_workspace || undefined,
@@ -1689,8 +2047,9 @@
       currentSessionId = body.session_id;
       els.dockSession.textContent = `会话 · ${body.session_id.slice(0, 18)}…`;
       dockTrace.wrap.querySelector('.sim-ai-progress-run-id').textContent = body.run_id;
-      els.dockQuestion.value = '';
-      delete els.dockQuestion.dataset.agentTaskHint;
+      latestRunBySession.set(currentSessionId, body.run_id);
+      updateClarificationControls();
+      if (typeof answerOverride !== 'string') els.dockQuestion.value = '';
       setStatus(`运行中 · 场景 ${body.scenario_hash.slice(0, 12)}…`);
       connectDockStream(body.stream_url);
       await loadSessions();
@@ -1776,10 +2135,10 @@
     }
   }
 
-  async function startRun() {
-    if (activeRun) return;
+  async function startRun(answerOverride) {
+    if (activeRun || composerBusy) return;
     activeSurface = 'full';
-    const question = els.question.value.trim();
+    const question = typeof answerOverride === 'string' ? answerOverride : els.question.value.trim();
     if (!question) { setStatus('请先输入一个策划问题', true); els.question.focus(); return; }
     setBusy(true);
     setStatus('正在冻结当前场景…');
@@ -1793,7 +2152,6 @@
       const payload = {
         question,
         provider_profile: els.provider.value,
-        task_hint: els.question.dataset.agentTaskHint || undefined,
         analysis_surface: 'agent',
         simulation: captured.simulation,
       };
@@ -1808,8 +2166,9 @@
       activeRun = body;
       currentSessionId = body.session_id;
       activeTrace.wrap.querySelector('.agent-trace-run-id').textContent = body.run_id;
-      els.question.value = '';
-      delete els.question.dataset.agentTaskHint;
+      latestRunBySession.set(currentSessionId, body.run_id);
+      updateClarificationControls();
+      if (typeof answerOverride !== 'string') els.question.value = '';
       setStatus(`运行中 · ${body.run_id} · 场景 ${body.scenario_hash.slice(0, 12)}…`);
       connectStream(body.stream_url);
       await loadSessions();
@@ -1926,6 +2285,8 @@
     ];
     if (result.clarification) {
       lines.push('', '## 需要用户补充', result.clarification.reason || '');
+      if (result.clarification.analysis_text) lines.push('', '## 当前分析（尚未完成报告校验）', plainAgentText(result.clarification.analysis_text));
+      clarificationOptions(result.clarification).forEach((option, index) => lines.push(`${index + 1}. ${option.label}${option.description ? `：${option.description}` : ''}`));
       if (result.clarification.answer_hint) lines.push(`- 回答提示：${result.clarification.answer_hint}`);
     }
     if (report?.content?.findings?.length) {
@@ -1951,6 +2312,12 @@
         lines.push(`- 当前：\`${change.current || '—'}\``);
         lines.push(`- 修改：\`${change.proposed || '—'}\``);
         lines.push(`- 依据：${plainAgentText(change.rationale || '')}`);
+      });
+    }
+    if (report?.content?.artifacts?.length) {
+      report.content.artifacts.forEach(artifact => {
+        const fence = '`'.repeat(Math.max(3, ...Array.from((artifact.content || '').matchAll(/`+/g), match => match[0].length + 1)));
+        lines.push('', `## ${artifact.title || '候选草稿'}`, '候选草稿；复刻程度与实测结果见本轮说明。', '', fence, artifact.content || '', fence);
       });
     }
     if (report?.content?.limitations?.length) {
@@ -2001,6 +2368,7 @@
       tool_calls: debug.tool_calls || null,
       evidence_pack: debug.evidence_pack || null,
       evidence_projection: debug.evidence_projection || null,
+      diagnostic_state: debug.diagnostic_state || null,
       accounting: result?.accounting || null,
       terminal_diagnostic: {
         stage: diagnosticStage(result),
@@ -2052,16 +2420,7 @@
   }
 
   const dockQuestions = {
-    simulation: [
-      ['基线分析', '这套循环的整体输出和伤害结构怎么样？', 'baseline_analysis'],
-      ['时间轴诊断', '这套循环哪里顺，哪里可能在空转或浪费资源？', 'rotation_stall_diagnosis'],
-      ['版本攻略', '结合当前版本攻略，解释这套循环的核心思路。', 'general_analysis'],
-      ['下一步分析', '为了更准确地判断这套循环，下一步最值得检查什么？', 'general_analysis'],
-      ['循环优缺点', '这套循环做得好的地方和最主要的问题是什么？', 'baseline_analysis'],
-      ['识别输入模式', '这是宏循环还是手动循环？它的执行特点是什么？', 'macro_analysis'],
-      ['保存方案', '我保存了哪些可以互相比较的宏或循环？', 'saved_artifact_analysis'],
-      ['实战适配', '这套循环在移动、转火、停手和网络延迟变化时表现怎么样？', 'practical_adaptation'],
-    ],
+    simulation: simulationQuestions,
     equipment: [
       ['当前配装', '我当前配装怎么样？哪些属性、套装和特效最影响这套循环？', 'equipment_analysis'],
       ['单件替换', '把我标记的候选装备换上会怎样？对比面板和当前循环表现。', 'equipment_analysis'],
@@ -2091,8 +2450,8 @@
       ? '问装备替换、套装取舍、属性和当前循环 DPS…'
       : '问当前攻略、循环基线、时间轴或候选改动…';
     if (els.dockQuick) {
-      els.dockQuick.innerHTML = dockQuestions[next].map(([label, question, taskHint]) =>
-        `<button type="button" class="sim-btn" data-agent-dock-question="${question.replaceAll('&', '&amp;').replaceAll('"', '&quot;')}" data-agent-task-hint="${taskHint}">${label}</button>`
+      els.dockQuick.innerHTML = dockQuestions[next].map(([label, question]) =>
+        `<button type="button" class="sim-btn" data-agent-dock-question="${question.replaceAll('&', '&amp;').replaceAll('"', '&quot;')}">${label}</button>`
       ).join('');
     }
     updateScenarioState();
@@ -2143,20 +2502,18 @@
     const button = event.target.closest('[data-agent-dock-question], [data-sim-ai-question]');
     if (!button) return;
     setDockOpen(true);
-    setPromptWithHint(
+    setPrompt(
       els.dockQuestion,
-      button.dataset.agentDockQuestion || button.dataset.simAiQuestion || '',
-      button.dataset.agentTaskHint || ''
+      button.dataset.agentDockQuestion || button.dataset.simAiQuestion || ''
     );
   });
   window.addEventListener('jx3-equip-ai-focus', event => {
     syncDockMode();
     const focus = event.detail || {};
     setDockOpen(true);
-    setPromptWithHint(
+    setPrompt(
       els.dockQuestion,
-      `把当前${focus.position || '部位'}的“${focus.current_name || '当前装备'}”换成“${focus.candidate_name || '候选装备'}”怎么样？展示换前换后面板，并用当前循环实测 DPS 和伤害构成。`,
-      'equipment_analysis'
+      `把当前${focus.position || '部位'}的“${focus.current_name || '当前装备'}”换成“${focus.candidate_name || '候选装备'}”怎么样？展示换前换后面板，并用当前循环实测 DPS 和伤害构成。`
     );
   });
   document.addEventListener('keydown', event => {
@@ -2170,15 +2527,8 @@
       startRun();
     }
   });
-  document.querySelectorAll('[data-agent-question]').forEach(button => {
-    button.addEventListener('click', () => setPromptWithHint(
-      els.question,
-      button.dataset.agentQuestion,
-      button.dataset.agentTaskHint || ''
-    ));
-  });
-  els.question.addEventListener('input', () => { delete els.question.dataset.agentTaskHint; });
-  els.dockQuestion?.addEventListener('input', () => { delete els.dockQuestion.dataset.agentTaskHint; });
+  const initialStarters = els.transcript.querySelector('.agent-starter-grid');
+  if (initialStarters) appendSimulationStarters(initialStarters);
   window.addEventListener('jx3-sim-complete', updateScenarioState);
   function syncAgentPageLayout() {
     document.body.classList.toggle('agent-fullheight', page.classList.contains('active'));

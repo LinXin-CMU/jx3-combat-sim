@@ -1,38 +1,38 @@
 //! 暗影千机（2026.04）- 技能脚本
 
-pub mod yuan_ge;
-pub mod ji_po_yuan_ge;
-pub mod dun_ji;
-pub mod jie_dao;
-pub mod zhan_dao;
-pub mod jue_dao;
-pub mod shan_dao;
+pub mod dun_bi;
+pub mod dun_dang;
+pub mod dun_dao;
 pub mod dun_fei;
 pub mod dun_hui;
-pub mod xue_nu;
-pub mod dun_dao;
+pub mod dun_ji;
+pub mod dun_meng;
 pub mod dun_wu;
 pub mod dun_ya;
-pub mod tian_xia_hong_yuan;
-pub mod ye_huo_lin_guang;
-pub mod lin_guang;
-pub mod xue_shi;
-pub mod yue_zhao;
-pub mod yan_men;
+pub mod han_xiao;
+pub mod ji_po_yuan_ge;
+pub mod jie_dao;
 pub mod juan_xue;
-pub mod zhen_yun;
-pub mod zhen_yun_whl;
-pub mod yue_zhao_whl;
+pub mod jue_dao;
+pub mod lin_guang;
+pub mod shan_dao;
+pub mod tian_xia_hong_yuan;
+pub mod wu_ju;
+pub mod xue_nu;
+pub mod xue_shi;
+pub mod yan_men;
 pub mod yan_men_whl;
 pub mod yan_shou_gu_jing;
-pub mod dun_dang;
-pub mod dun_bi;
-pub mod wu_ju;
-pub mod han_xiao;
-pub mod dun_meng;
+pub mod ye_huo_lin_guang;
+pub mod yuan_ge;
+pub mod yue_zhao;
+pub mod yue_zhao_whl;
+pub mod zhan_dao;
+pub mod zhen_yun;
+pub mod zhen_yun_whl;
 
-use crate::{Player, ScriptEmitter};
 use super::super::SkillScriptFn;
+use crate::{Player, ScriptEmitter};
 
 /// 按 skill_id 查找本版本的技能脚本（脚本内部用 player.mount 分支心法差异）
 pub fn get_skill_script(skill_id: u32) -> Option<SkillScriptFn> {

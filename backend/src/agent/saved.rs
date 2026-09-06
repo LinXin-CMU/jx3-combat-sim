@@ -15,7 +15,7 @@ use crate::{
     TargetConfig, TeamBuffSelection,
 };
 
-use super::compare::{CandidatePatchV1, PatchValueV1, ScenarioPatchV1};
+use super::compare::{configure_macro_rotation, CandidatePatchV1, PatchValueV1, ScenarioPatchV1};
 use super::hash::canonical_sha256;
 use super::schema::ScenarioSnapshotV1;
 
@@ -787,20 +787,6 @@ fn macro_object_to_text(value: &Value) -> Option<String> {
             .filter(|text| !text.is_empty())
             .map(str::to_string)
     }
-}
-
-fn configure_macro_rotation(simulation: &mut SimulateRequest, macro_text: String) {
-    let duration = simulation
-        .macro_duration
-        .unwrap_or(300.0)
-        .clamp(1.0, 3_600.0);
-    let slots = (duration / 0.25).ceil() as usize + 20;
-    simulation.sequence = vec!["__macro__".to_string(); slots];
-    simulation.macro_text = Some(macro_text);
-    simulation.macro_duration = Some(duration);
-    simulation.channel_ticks.clear();
-    simulation.timing_offsets.clear();
-    simulation.qijin_buffs.clear();
 }
 
 fn merge_saved_scenario(

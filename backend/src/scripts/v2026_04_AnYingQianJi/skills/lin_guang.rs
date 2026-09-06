@@ -8,7 +8,9 @@
 use crate::*;
 
 pub fn try_trigger(player: &mut Player, em: &mut ScriptEmitter, t: f64) {
-    if !player.has_buff(BUFF_LIN_GUANG) { return; }
+    if !player.has_buff(BUFF_LIN_GUANG) {
+        return;
+    }
 
     // 消耗一层麟光玄甲
     player.remove_buff_stack(BUFF_LIN_GUANG);
@@ -26,7 +28,9 @@ pub fn try_trigger(player: &mut Player, em: &mut ScriptEmitter, t: f64) {
     player.add_buff(BUFF_LIN_GUANG_COUNT);
 
     // 满3次：重置CD + 回怒 + 业火焚城
-    let count = player.active_buffs.iter()
+    let count = player
+        .active_buffs
+        .iter()
         .find(|b| b.buff_id == BUFF_LIN_GUANG_COUNT)
         .map(|b| b.stacks)
         .unwrap_or(0);
@@ -36,7 +40,7 @@ pub fn try_trigger(player: &mut Player, em: &mut ScriptEmitter, t: f64) {
         player.reset_cd("cd_绝刀");
         player.reset_cd("cd_劫刀");
         player.reset_cd("cd_闪刀");
-        player.add_rage(65);
+        player.add_rage_from(65, "麟光甲三层结算回怒");
         // 业火焚城伤害
         em.emit("业火焚城", 34714, t);
         player.remove_buff(BUFF_LIN_GUANG_COUNT);

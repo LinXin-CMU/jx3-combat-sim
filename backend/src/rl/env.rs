@@ -12,8 +12,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::macro_eval::{execute_cast, evaluate_phase1, evaluate_phase2, CastCtx};
 use crate::macro_engine::MacroConfig;
+use crate::macro_eval::{evaluate_phase1, evaluate_phase2, execute_cast, CastCtx};
 use crate::{
     frames_to_sec, resolve_combo_follow, Attributes, CastEvent, Player, RecipeEntry, SkillSpec,
     TargetConfig,
@@ -109,8 +109,12 @@ impl CombatEnv {
         (self.observe(), self.legal_mask())
     }
 
-    pub fn elapsed(&self) -> f64 { self.player.current_time }
-    pub fn done(&self) -> bool { self.player.current_time >= self.cfg.duration }
+    pub fn elapsed(&self) -> f64 {
+        self.player.current_time
+    }
+    pub fn done(&self) -> bool {
+        self.player.current_time >= self.cfg.duration
+    }
 
     pub fn observe(&self) -> Vec<f32> {
         let (skill_map, _) = self.build_maps();
@@ -128,7 +132,9 @@ impl CombatEnv {
         let mut mask = legal_mask(&self.player, &skill_map);
         if let Some(allow) = &self.cfg.allowed_actions {
             for i in 0..ACTION_COUNT {
-                if !allow[i] { mask[i] = false; }
+                if !allow[i] {
+                    mask[i] = false;
+                }
             }
             mask[WAIT_ACTION] = true;
         }
@@ -147,7 +153,14 @@ impl CombatEnv {
                 Some(s) => s == self.player.stance(),
             })
             .unwrap_or(0);
-        let (pool, _, _) = evaluate_phase1(&cfg.pages[page_idx], &self.player, &skill_map, &skill_by_id, last_skill, false);
+        let (pool, _, _) = evaluate_phase1(
+            &cfg.pages[page_idx],
+            &self.player,
+            &skill_map,
+            &skill_by_id,
+            last_skill,
+            false,
+        );
         let (result, _) = evaluate_phase2(&pool, &self.player, &skill_map, &skill_by_id, false);
         match result {
             Some(r) => {
@@ -162,11 +175,17 @@ impl CombatEnv {
     pub fn advance_to_next_decision(&mut self) {
         let min_adv = frames_to_sec(1);
         loop {
-            if self.done() { return; }
+            if self.done() {
+                return;
+            }
             let mask = self.legal_mask();
             let legal_count = mask.iter().filter(|&&x| x).count();
-            if legal_count > 1 { return; }
-            if legal_count == 1 && !mask[WAIT_ACTION] { return; }
+            if legal_count > 1 {
+                return;
+            }
+            if legal_count == 1 && !mask[WAIT_ACTION] {
+                return;
+            }
             self.tick_one_frame(min_adv);
         }
     }
@@ -185,7 +204,9 @@ impl CombatEnv {
             &self.player,
         );
         for ev in &tick_events {
-            if let Some(d) = ev.damage_total { self.total_damage += d; }
+            if let Some(d) = ev.damage_total {
+                self.total_damage += d;
+            }
         }
         if self.cfg.collect_timeline {
             self.timeline.extend(tick_events);
@@ -218,7 +239,8 @@ impl CombatEnv {
                 Some(s) => s,
                 None => return self.finalize(before_damage, info),
             };
-            let actual_skill = resolve_combo_follow(spec, &self.player, &skill_by_id).unwrap_or(spec);
+            let actual_skill =
+                resolve_combo_follow(spec, &self.player, &skill_by_id).unwrap_or(spec);
 
             let dmg_ctx = (self.cfg.attrs.clone(), self.cfg.target.clone());
             let recipes_slice: &[RecipeEntry] = &self.recipes_table;
@@ -238,7 +260,9 @@ impl CombatEnv {
                 &ctx,
             );
             for ev in &outcome.events {
-                if let Some(d) = ev.damage_total { self.total_damage += d; }
+                if let Some(d) = ev.damage_total {
+                    self.total_damage += d;
+                }
             }
             if self.cfg.collect_timeline {
                 self.timeline.extend(outcome.events);
@@ -267,7 +291,12 @@ impl CombatEnv {
     }
 
     /// 构建 (name → ranks) 和 (id → spec) 两个 map（只借 skills 切片，不借整个 self）
-    fn build_maps<'a>(&'a self) -> (HashMap<&'a str, Vec<&'a SkillSpec>>, HashMap<u32, &'a SkillSpec>) {
+    fn build_maps<'a>(
+        &'a self,
+    ) -> (
+        HashMap<&'a str, Vec<&'a SkillSpec>>,
+        HashMap<u32, &'a SkillSpec>,
+    ) {
         let (by_id, by_name) = build_maps_from_slice(&self.skills);
         (by_name, by_id)
     }
@@ -290,12 +319,17 @@ pub const OBS_SIZE: usize = OBS_DIM;
 /// 从技能切片构建 (id→spec, name→ranks) 两个 map（借用切片；不借 env/self）
 fn build_maps_from_slice<'a>(
     skills: &'a [SkillSpec],
-) -> (HashMap<u32, &'a SkillSpec>, HashMap<&'a str, Vec<&'a SkillSpec>>) {
+) -> (
+    HashMap<u32, &'a SkillSpec>,
+    HashMap<&'a str, Vec<&'a SkillSpec>>,
+) {
     let mut skill_by_id: HashMap<u32, &SkillSpec> = HashMap::new();
     let mut skill_map: HashMap<&str, Vec<&SkillSpec>> = HashMap::new();
     for s in skills.iter() {
         skill_by_id.insert(s.skill_id, s);
-        if s.passive { continue; }
+        if s.passive {
+            continue;
+        }
         let base = s.name.split('·').next().unwrap_or(&s.name);
         skill_map.entry(base).or_default().push(s);
     }
@@ -305,6 +339,8 @@ fn build_maps_from_slice<'a>(
 /// 仅构建 id→spec（tick_one_frame 用）
 fn build_skill_by_id<'a>(skills: &'a [SkillSpec]) -> HashMap<u32, &'a SkillSpec> {
     let mut m: HashMap<u32, &SkillSpec> = HashMap::new();
-    for s in skills.iter() { m.insert(s.skill_id, s); }
+    for s in skills.iter() {
+        m.insert(s.skill_id, s);
+    }
     m
 }

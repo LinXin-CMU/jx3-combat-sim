@@ -7,7 +7,9 @@
 use crate::*;
 
 pub fn try_trigger(player: &mut Player, em: &mut ScriptEmitter, t: f64) {
-    if !player.has_buff(BUFF_LIN_GUANG) { return; }
+    if !player.has_buff(BUFF_LIN_GUANG) {
+        return;
+    }
 
     // emit 麟光甲寒伤害 + 独立的破招段
     em.emit("麟光甲寒", 34674, t);
@@ -19,7 +21,9 @@ pub fn try_trigger(player: &mut Player, em: &mut ScriptEmitter, t: f64) {
         player.add_buff(BUFF_LIN_GUANG_COUNT);
 
         // 满3次：重置CD + 回怒 + 虚弱 + 麟黯
-        let count = player.active_buffs.iter()
+        let count = player
+            .active_buffs
+            .iter()
             .find(|b| b.buff_id == BUFF_LIN_GUANG_COUNT)
             .map(|b| b.stacks)
             .unwrap_or(0);
@@ -29,7 +33,7 @@ pub fn try_trigger(player: &mut Player, em: &mut ScriptEmitter, t: f64) {
             player.reset_cd("cd_绝刀");
             player.reset_cd("cd_劫刀");
             player.reset_cd("cd_闪刀");
-            player.add_rage(65);
+            player.add_rage_from(65, "麟光甲三层结算回怒");
             player.add_target_buff(BUFF_XU_RUO);
             player.add_buff(BUFF_LIN_AN);
             player.remove_buff(BUFF_LIN_GUANG_COUNT);

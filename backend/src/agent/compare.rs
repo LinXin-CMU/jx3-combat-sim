@@ -14,6 +14,7 @@ use super::tools::{
     elapsed_ms, run_simulation, summarize_simulation, verify_runtime, SimulatorContext,
     SkillDamageSummary, ToolBudget, ToolError,
 };
+use super::{comparison_timeline_diagnostics, ComparisonTimelineDiagnosticsV1};
 
 pub const COMPARE_SCENARIOS: &str = "compare_scenarios";
 pub const MAX_COMPARISON_CANDIDATES: usize = 3;
@@ -79,6 +80,9 @@ pub struct ComparisonMetrics {
     pub skill_count: usize,
     pub fingerprint: u64,
     pub fingerprint_hex: String,
+    pub diagnostics: ComparisonTimelineDiagnosticsV1,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub macro_line_stats: Vec<crate::macro_eval::MacroLineExecutionStats>,
     /// Complete simulator-derived damage composition for the baseline. Candidate
     /// metrics omit this redundant list and expose actual changes in `skill_deltas`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -89,13 +93,64 @@ pub struct ComparisonMetrics {
 #[serde(deny_unknown_fields)]
 pub struct ComparisonCandidate {
     pub label: String,
+    #[serde(default)]
+    pub macro_pages: serde_json::Value,
     pub changes: Vec<FieldChange>,
+    /// Deterministic meaning of edited conditions. This keeps the model from
+    /// reversing countdown predicates such as `bufftime:x<5.3` -> `<5.0`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub condition_semantics: Vec<ConditionChangeSemanticV1>,
     pub metrics: ComparisonMetrics,
     pub delta_dps: f64,
     pub delta_percent: Option<f64>,
+    pub observed_outcome: ComparisonOutcomeSummaryV1,
     /// True means the candidate produced the exact same deterministic combat trace.
     pub same_fingerprint: bool,
+    pub diagnostic_delta: ComparisonDiagnosticDeltaV1,
     pub skill_deltas: Vec<SkillDamageDelta>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ConditionChangeSemanticV1 {
+    pub line_number: usize,
+    pub controlled_skill: String,
+    pub condition: String,
+    pub operator: String,
+    pub before_threshold: f64,
+    pub after_threshold: f64,
+    pub truth_set_change: String,
+    pub countdown_timing: String,
+    pub interpretation_boundary: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ComparisonDiagnosticDeltaV1 {
+    pub gcd_gap_count: i64,
+    pub gcd_gap_seconds: f64,
+    pub recorded_wait_count: i64,
+    pub recorded_wait_seconds: f64,
+    pub rage_overflow_total: i64,
+    pub completed_cycle_count: i64,
+    pub buffs: Vec<ComparisonBuffDeltaV1>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ComparisonBuffDeltaV1 {
+    pub name: String,
+    pub coverage_percentage_points: f64,
+    pub average_stacks_while_active: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ComparisonOutcomeSummaryV1 {
+    pub dps_relation_to_baseline: String,
+    pub signed_dps_delta: f64,
+    pub signed_percent_delta: Option<f64>,
+    pub plain_language: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -142,6 +197,20 @@ pub fn compare_scenarios(
     provenance: &ToolProvenance,
     budget: &mut ToolBudget,
 ) -> Result<ComparisonExecution, ToolError> {
+    compare_scenarios_with_baseline(
+        trace_id, baseline, candidates, context, provenance, budget, None,
+    )
+}
+
+pub fn compare_scenarios_with_baseline(
+    trace_id: &str,
+    baseline: &ScenarioSnapshotV1,
+    candidates: &[CandidatePatchV1],
+    context: &SimulatorContext<'_>,
+    provenance: &ToolProvenance,
+    budget: &mut ToolBudget,
+    cached_baseline: Option<&SimulateResponse>,
+) -> Result<ComparisonExecution, ToolError> {
     let started = Instant::now();
     validate_trace_id(trace_id)?;
     baseline.verify_hash()?;
@@ -163,18 +232,38 @@ pub fn compare_scenarios(
                 label: candidate.label.clone(),
             });
         }
-        prepared.push((candidate.label.clone(), snapshot, changes));
+        let align_macro_duration = is_new_macro_program(baseline, &candidate.patch)
+            && baseline.simulation.macro_duration.is_none() && candidate.patch.macro_duration.is_none();
+        prepared.push((candidate.label.clone(), snapshot, changes, align_macro_duration));
     }
 
-    let simulation_count = u32::try_from(prepared.len() + 1).unwrap_or(u32::MAX);
+    let simulation_count =
+        u32::try_from(prepared.len() + usize::from(cached_baseline.is_none())).unwrap_or(u32::MAX);
     budget.reserve_simulations(simulation_count)?;
 
-    let baseline_response = run_simulation(baseline, context);
+    let baseline_response = cached_baseline
+        .cloned()
+        .unwrap_or_else(|| run_simulation(baseline, context));
     let baseline_metrics = metrics(baseline, &baseline_response);
     let mut result_candidates = Vec::with_capacity(prepared.len());
     let mut executions = Vec::with_capacity(prepared.len());
 
-    for (label, snapshot, changes) in prepared {
+    for (label, mut snapshot, mut changes, align_macro_duration) in prepared {
+        if align_macro_duration {
+            let duration = baseline_response.fight_time.clamp(1.0, 3600.0);
+            let duration_patch = ScenarioPatchV1 {
+                macro_duration: Some(PatchValueV1::Set(duration)),
+                sequence: Some(vec!["__macro__".to_string(); (duration / 0.25).ceil() as usize + 20]),
+                ..ScenarioPatchV1::default()
+            };
+            let (aligned, alignment_changes) = apply_patch(&snapshot, &duration_patch, context)?;
+            snapshot = aligned;
+            for change in alignment_changes {
+                if let Some(original) = changes.iter_mut().find(|old| old.field == change.field) {
+                    original.after = change.after;
+                } else { changes.push(change); }
+            }
+        }
         let response = run_simulation(&snapshot, context);
         let mut candidate_metrics = metrics(&snapshot, &response);
         let delta_dps = candidate_metrics.dps - baseline_metrics.dps;
@@ -184,17 +273,29 @@ pub fn compare_scenarios(
             None
         };
         let same_fingerprint = candidate_metrics.fingerprint == baseline_metrics.fingerprint;
-        let skill_deltas = compare_skill_damage(&baseline_metrics.skills, &candidate_metrics.skills);
+        let observed_outcome = comparison_outcome_summary(delta_dps, delta_percent);
+        let diagnostic_delta = compare_diagnostics(
+            &baseline_metrics.diagnostics,
+            &candidate_metrics.diagnostics,
+        );
+        let skill_deltas =
+            compare_skill_damage(&baseline_metrics.skills, &candidate_metrics.skills);
+        let condition_semantics = condition_change_semantics(&changes);
         // Baseline composition plus the candidate's changed rows is lossless for
         // analysis and avoids repeating every unchanged skill on every model turn.
         candidate_metrics.skills.clear();
         result_candidates.push(ComparisonCandidate {
             label: label.clone(),
+            macro_pages: snapshot.simulation.macro_text.as_deref()
+                .map(super::distillation::page_lengths).unwrap_or(serde_json::Value::Null),
             changes,
+            condition_semantics,
             metrics: candidate_metrics,
             delta_dps,
             delta_percent,
+            observed_outcome,
             same_fingerprint,
+            diagnostic_delta,
             skill_deltas,
         });
         executions.push(CandidateExecution {
@@ -227,6 +328,175 @@ pub fn compare_scenarios(
     })
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct BufftimeThreshold {
+    line_number: usize,
+    controlled_skill: String,
+    condition: String,
+    operator: char,
+    threshold: f64,
+}
+
+fn condition_change_semantics(changes: &[FieldChange]) -> Vec<ConditionChangeSemanticV1> {
+    let Some(change) = changes
+        .iter()
+        .find(|change| change.field == "simulation.macro_text")
+    else {
+        return Vec::new();
+    };
+    let Some(before) = change.before.as_str() else {
+        return Vec::new();
+    };
+    let Some(after) = change.after.as_str() else {
+        return Vec::new();
+    };
+    let before = bufftime_thresholds(before);
+    let after = bufftime_thresholds(after);
+    before
+        .iter()
+        .zip(after.iter())
+        .filter(|(left, right)| {
+            left.condition == right.condition
+                && left.operator == right.operator
+                && (left.threshold - right.threshold).abs() > f64::EPSILON
+        })
+        .map(|(left, right)| {
+            let (truth_set_change, countdown_timing) = match (
+                left.operator,
+                right.threshold.total_cmp(&left.threshold),
+            ) {
+                ('<', std::cmp::Ordering::Less) => (
+                    "满足区间缩小".to_string(),
+                    "Buff 剩余时间递减时更晚满足；若此条件决定施放，候选倾向于更晚施放该技能。".to_string(),
+                ),
+                ('<', std::cmp::Ordering::Greater) => (
+                    "满足区间扩大".to_string(),
+                    "Buff 剩余时间递减时更早满足；若此条件决定施放，候选倾向于更早施放该技能。".to_string(),
+                ),
+                ('>', std::cmp::Ordering::Less) => (
+                    "满足区间扩大".to_string(),
+                    "Buff 剩余时间递减时会更晚失效，因此该条件保持满足的时间更长。".to_string(),
+                ),
+                ('>', std::cmp::Ordering::Greater) => (
+                    "满足区间缩小".to_string(),
+                    "Buff 剩余时间递减时会更早失效，因此该条件保持满足的时间更短。".to_string(),
+                ),
+                _ => ("阈值已变化".to_string(), "按条件真值区间解释。".to_string()),
+            };
+            ConditionChangeSemanticV1 {
+                line_number: left.line_number,
+                controlled_skill: left.controlled_skill.clone(),
+                condition: format!("bufftime:{}", left.condition),
+                operator: left.operator.to_string(),
+                before_threshold: left.threshold,
+                after_threshold: right.threshold,
+                truth_set_change,
+                countdown_timing,
+                interpretation_boundary: "这是条件方向的确定性解释；DPS 与技能次数变化由同场景对照证明，具体连锁机制仍需结合时间轴判断。".to_string(),
+            }
+        })
+        .collect()
+}
+
+fn bufftime_thresholds(macro_text: &str) -> Vec<BufftimeThreshold> {
+    let mut result = Vec::new();
+    for (line_index, line) in macro_text.lines().enumerate() {
+        let controlled_skill = line
+            .split_once(']')
+            .map(|(_, skill)| skill.trim().to_string())
+            .unwrap_or_default();
+        let mut remainder = line;
+        while let Some(start) = remainder.find("bufftime:") {
+            let token = &remainder[start + "bufftime:".len()..];
+            let Some(operator_index) = token.find(|character| character == '<' || character == '>') else {
+                break;
+            };
+            let condition = token[..operator_index].trim();
+            let operator = token.as_bytes()[operator_index] as char;
+            let number = &token[operator_index + 1..];
+            let number_len = number
+                .chars()
+                .take_while(|character| character.is_ascii_digit() || *character == '.')
+                .count();
+            if !condition.is_empty() && number_len > 0 {
+                if let Ok(threshold) = number[..number_len].parse::<f64>() {
+                    result.push(BufftimeThreshold {
+                        line_number: line_index + 1,
+                        controlled_skill: controlled_skill.clone(),
+                        condition: condition.to_string(),
+                        operator,
+                        threshold,
+                    });
+                }
+            }
+            remainder = &token[operator_index + 1 + number_len..];
+        }
+    }
+    result
+}
+
+fn compare_diagnostics(
+    baseline: &ComparisonTimelineDiagnosticsV1,
+    candidate: &ComparisonTimelineDiagnosticsV1,
+) -> ComparisonDiagnosticDeltaV1 {
+    let baseline_buffs = baseline
+        .buffs
+        .iter()
+        .map(|buff| (buff.name.as_str(), buff))
+        .collect::<HashMap<_, _>>();
+    let mut buffs = candidate
+        .buffs
+        .iter()
+        .filter_map(|candidate_buff| {
+            let baseline_buff = baseline_buffs.get(candidate_buff.name.as_str())?;
+            Some(ComparisonBuffDeltaV1 {
+                name: candidate_buff.name.clone(),
+                coverage_percentage_points: candidate_buff.coverage_percent
+                    - baseline_buff.coverage_percent,
+                average_stacks_while_active: candidate_buff.average_stacks_while_active
+                    - baseline_buff.average_stacks_while_active,
+            })
+        })
+        .collect::<Vec<_>>();
+    buffs.sort_by(|left, right| left.name.cmp(&right.name));
+    ComparisonDiagnosticDeltaV1 {
+        gcd_gap_count: candidate.gcd_gap_count as i64 - baseline.gcd_gap_count as i64,
+        gcd_gap_seconds: candidate.gcd_gap_seconds - baseline.gcd_gap_seconds,
+        recorded_wait_count: candidate.recorded_wait_count as i64
+            - baseline.recorded_wait_count as i64,
+        recorded_wait_seconds: candidate.recorded_wait_seconds - baseline.recorded_wait_seconds,
+        rage_overflow_total: candidate.rage_overflow_total as i64
+            - baseline.rage_overflow_total as i64,
+        completed_cycle_count: candidate.completed_cycle_count as i64
+            - baseline.completed_cycle_count as i64,
+        buffs,
+    }
+}
+
+fn comparison_outcome_summary(
+    delta_dps: f64,
+    delta_percent: Option<f64>,
+) -> ComparisonOutcomeSummaryV1 {
+    let relation = if delta_dps > f64::EPSILON {
+        "higher"
+    } else if delta_dps < -f64::EPSILON {
+        "lower"
+    } else {
+        "unchanged"
+    };
+    let plain_language = match relation {
+        "higher" => format!("候选 DPS 比基线高 {:.2}。", delta_dps.abs()),
+        "lower" => format!("候选 DPS 比基线低 {:.2}。", delta_dps.abs()),
+        _ => "候选 DPS 与基线相同。".to_string(),
+    };
+    ComparisonOutcomeSummaryV1 {
+        dps_relation_to_baseline: relation.to_string(),
+        signed_dps_delta: delta_dps,
+        signed_percent_delta: delta_percent,
+        plain_language,
+    }
+}
+
 fn compare_skill_damage(
     baseline: &[SkillDamageSummary],
     candidate: &[SkillDamageSummary],
@@ -234,21 +504,11 @@ fn compare_skill_damage(
     type Key = (u32, String, bool);
     let baseline_by_key = baseline
         .iter()
-        .map(|skill| {
-            (
-                (skill.skill_id, skill.name.clone(), skill.triggered),
-                skill,
-            )
-        })
+        .map(|skill| ((skill.skill_id, skill.name.clone(), skill.triggered), skill))
         .collect::<BTreeMap<Key, _>>();
     let candidate_by_key = candidate
         .iter()
-        .map(|skill| {
-            (
-                (skill.skill_id, skill.name.clone(), skill.triggered),
-                skill,
-            )
-        })
+        .map(|skill| ((skill.skill_id, skill.name.clone(), skill.triggered), skill))
         .collect::<BTreeMap<Key, _>>();
     let mut keys = baseline_by_key
         .keys()
@@ -322,6 +582,21 @@ fn validate_label(label: &str) -> Result<(), ToolError> {
     } else {
         Err(ToolError::InvalidCandidateLabel)
     }
+}
+
+pub(super) fn configure_macro_rotation(simulation: &mut crate::SimulateRequest, macro_text: String) {
+    let duration = simulation.macro_duration.unwrap_or(300.0).clamp(1.0, 3600.0);
+    simulation.sequence = vec!["__macro__".to_string(); (duration / 0.25).ceil() as usize + 20];
+    simulation.macro_text = Some(macro_text);
+    simulation.macro_duration = Some(duration);
+    simulation.channel_ticks.clear();
+    simulation.timing_offsets.clear();
+    simulation.qijin_buffs.clear();
+}
+
+fn is_new_macro_program(baseline: &ScenarioSnapshotV1, patch: &ScenarioPatchV1) -> bool {
+    matches!(patch.macro_text, Some(PatchValueV1::Set(_))) && patch.sequence.is_none()
+        && !baseline.simulation.sequence.iter().any(|entry| entry == "__macro__")
 }
 
 fn apply_patch(
@@ -465,6 +740,15 @@ fn apply_patch(
         &mut changes,
     )?;
 
+    if is_new_macro_program(baseline, patch) {
+        let mut macro_simulation = simulation.clone();
+        configure_macro_rotation(&mut macro_simulation, simulation.macro_text.clone().unwrap());
+        apply_value("simulation.sequence", &mut simulation.sequence, &Some(macro_simulation.sequence), &mut changes)?;
+        apply_value("simulation.macro_duration", &mut simulation.macro_duration, &Some(macro_simulation.macro_duration), &mut changes)?;
+        apply_value("simulation.channel_ticks", &mut simulation.channel_ticks, &Some(macro_simulation.channel_ticks), &mut changes)?;
+        apply_value("simulation.timing_offsets", &mut simulation.timing_offsets, &Some(macro_simulation.timing_offsets), &mut changes)?;
+        apply_value("simulation.qijin_buffs", &mut simulation.qijin_buffs, &Some(macro_simulation.qijin_buffs), &mut changes)?;
+    }
     let snapshot = ScenarioSnapshotV1::capture(context.game_version, context.mount, simulation)?;
     verify_runtime(&snapshot, context)?;
     Ok((snapshot, changes))
@@ -533,6 +817,8 @@ fn metrics(snapshot: &ScenarioSnapshotV1, response: &SimulateResponse) -> Compar
         skill_count: summary.skill_count,
         fingerprint: summary.fingerprint,
         fingerprint_hex: summary.fingerprint_hex,
+        diagnostics: comparison_timeline_diagnostics(response, &snapshot.simulation.pauses),
+        macro_line_stats: response.macro_line_stats.clone(),
         skills: summary.skills,
     }
 }
@@ -579,6 +865,7 @@ mod tests {
                 mount: self.mount,
                 constants: self.constants,
                 skills: &self.skills,
+                talents: &[],
                 recipes: &self.recipes,
                 team_buffs: &self.team_buffs,
                 formations: &self.formations,
@@ -678,6 +965,32 @@ mod tests {
     }
 
     #[test]
+    fn bufftime_less_than_threshold_reports_countdown_direction() {
+        let changes = vec![FieldChange {
+            field: "simulation.macro_text".to_string(),
+            before: serde_json::json!("/cast [rage>64&bufftime:嗜血<5.3|nobuff:嗜血] 盾飞"),
+            after: serde_json::json!("/cast [rage>64&bufftime:嗜血<5.0|nobuff:嗜血] 盾飞"),
+        }];
+
+        let semantics = condition_change_semantics(&changes);
+
+        assert_eq!(semantics.len(), 1);
+        assert_eq!(semantics[0].controlled_skill, "盾飞");
+        assert_eq!(semantics[0].truth_set_change, "满足区间缩小");
+        assert!(semantics[0].countdown_timing.contains("更晚满足"));
+    }
+
+    #[test]
+    fn outcome_summary_preserves_the_sign_of_a_negative_delta() {
+        let summary = comparison_outcome_summary(-12_805.86, Some(-0.42));
+
+        assert_eq!(summary.dps_relation_to_baseline, "lower");
+        assert_eq!(summary.signed_dps_delta, -12_805.86);
+        assert_eq!(summary.signed_percent_delta, Some(-0.42));
+        assert!(summary.plain_language.contains("低"));
+    }
+
+    #[test]
     fn compare_runs_baseline_and_candidate_with_atomic_budget() {
         let fixture = Fixture::load();
         let baseline = fixture.snapshot();
@@ -702,6 +1015,11 @@ mod tests {
             result.metrics.dps - execution.evidence.result.baseline.dps
         );
         assert_eq!(
+            result.diagnostic_delta.gcd_gap_count,
+            result.metrics.diagnostics.gcd_gap_count as i64
+                - execution.evidence.result.baseline.diagnostics.gcd_gap_count as i64
+        );
+        assert_eq!(
             execution.baseline_response.fingerprint,
             execution.evidence.result.baseline.fingerprint
         );
@@ -709,6 +1027,27 @@ mod tests {
             execution.candidates[0].response.fingerprint,
             result.metrics.fingerprint
         );
+    }
+
+    #[test]
+    fn full_macro_candidate_runs_macro_engine_instead_of_original_manual_inputs() {
+        let fixture = Fixture::load();
+        let baseline = fixture.snapshot();
+        let original = serde_json::to_value(&baseline).unwrap();
+        let execution = compare_scenarios("trace-new-macro", &baseline, &[CandidatePatchV1 {
+            label:"只打盾击反例".into(), patch:ScenarioPatchV1 {
+                macro_text:Some(PatchValueV1::Set("/cast 盾击".into())), ..ScenarioPatchV1::default()
+            }
+        }], &fixture.context(), &ToolProvenance::fixture(), &mut ToolBudget::new(2)).unwrap();
+        let candidate = &execution.candidates[0];
+        assert!(candidate.snapshot.simulation.sequence.iter().all(|name| name == "__macro__"));
+        assert!(!candidate.response.macro_line_stats.is_empty());
+        assert_eq!(candidate.snapshot.simulation.macro_duration, Some(execution.baseline_response.fight_time.clamp(1.0,3600.0)));
+        assert_ne!(candidate.response.fingerprint, execution.baseline_response.fingerprint);
+        assert_eq!(serde_json::to_value(&baseline).unwrap(),original);
+        assert_eq!(serde_json::to_value(&candidate.snapshot.simulation.attributes).unwrap(),serde_json::to_value(&baseline.simulation.attributes).unwrap());
+        assert_eq!(candidate.snapshot.simulation.talents,baseline.simulation.talents);
+        assert_eq!(candidate.snapshot.simulation.recipes,baseline.simulation.recipes);
     }
 
     #[test]

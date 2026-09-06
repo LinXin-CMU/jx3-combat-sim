@@ -38,10 +38,11 @@ impl LlmProvider for FakeProvider {
             .iter()
             .rev()
             .find_map(|message| match message {
-                ModelMessage::ToolResult { output, .. } => Some(output),
+                ModelMessage::ToolResult { output, .. } => Some(output.clone()),
                 _ => None,
-            });
-        if let Some(output) = last_tool_result {
+            })
+            .or_else(|| latest_handoff_tool_result(request));
+        if let Some(output) = last_tool_result.as_ref() {
             if output.get("tool_name").and_then(Value::as_str) == Some("get_current_scenario") {
                 if request
                     .tools
@@ -193,6 +194,40 @@ impl LlmProvider for FakeProvider {
     }
 }
 
+fn latest_handoff_tool_result(request: &ModelRequest) -> Option<Value> {
+    request.messages.iter().rev().find_map(|message| {
+        let ModelMessage::User { content } = message else {
+            return None;
+        };
+        let body = content
+            .strip_prefix(
+                "<model_evidence server_generated=\"true\" schema=\"agent-model-evidence/v1\">\n",
+            )?
+            .strip_suffix("\n</model_evidence>")?;
+        let payload: Value = serde_json::from_str(body).ok()?;
+        let items = payload.get("items")?.as_array()?.clone();
+        // Handoff items are ordered by relevance and capability coverage, not
+        // execution chronology. Determine the fixture stage from completed
+        // evidence so a trailing scenario or event page cannot restart it.
+        let tool_name = if items.iter().any(|item| {
+            item.get("tool_name").and_then(Value::as_str) == Some("simulate_scenario")
+                && item.pointer("/result/dps").and_then(Value::as_f64).is_some()
+        }) {
+            "simulate_scenario"
+        } else if items.iter().any(|item| item.get("tool_name").and_then(Value::as_str) == Some("search_knowledge_base")) {
+            "search_knowledge_base"
+        } else if items.iter().any(|item| item.get("tool_name").and_then(Value::as_str) == Some("get_current_scenario")) {
+            "get_current_scenario"
+        } else {
+            items.first()?.get("tool_name")?.as_str()?
+        };
+        Some(json!({
+            "tool_name": tool_name,
+            "evidence": items,
+        }))
+    })
+}
+
 fn baseline_tool_name(request: &ModelRequest) -> Option<&str> {
     request
         .tools
@@ -219,7 +254,7 @@ fn bounded_user_question(request: &ModelRequest) -> String {
         .messages
         .iter()
         .find_map(|message| match message {
-            ModelMessage::User { content } if !content.starts_with("<session_context") => {
+            ModelMessage::User { content } if !content.starts_with('<') => {
                 Some(content.chars().take(160).collect())
             }
             _ => None,
@@ -282,17 +317,20 @@ fn validated(
 }
 
 fn simulation_report(request: &ModelRequest, output: &Value) -> Option<String> {
-    let simulation =
-        output.get("evidence")?.as_array()?.iter().find(|item| {
-            item.get("tool_name").and_then(Value::as_str) == Some("simulate_scenario")
-        })?;
+    let evidence = output.get("evidence")?.as_array()?;
+    // A timeline dispatch registers both its diagnostic evidence and the
+    // underlying simulation evidence.  Select by capability instead of list
+    // order: only the simulation projection owns the top-level DPS field.
+    let simulation = evidence.iter().find(|item| {
+        item.get("tool_name").and_then(Value::as_str) == Some("simulate_scenario")
+            && item.pointer("/result/dps").and_then(Value::as_f64).is_some()
+    })?;
     let simulation_id = simulation.get("evidence_id")?.as_str()?;
     let dps = simulation.pointer("/result/dps")?.as_f64()?;
-    let timeline = output
-        .get("evidence")?
-        .as_array()?
+    let timeline = evidence
         .iter()
         .find(|item| item.get("tool_name").and_then(Value::as_str) == Some("analyze_timeline"));
+    let handoff = latest_handoff_tool_result(request);
     let knowledge = request
         .messages
         .iter()
@@ -307,6 +345,22 @@ fn simulation_report(request: &ModelRequest, output: &Value) -> Option<String> {
                     .pointer("/result/results/0/fact_eligible")
                     .and_then(Value::as_bool)
                     == Some(true)
+        })
+        .or_else(|| {
+            handoff
+                .as_ref()
+                .and_then(|value| value.get("evidence"))
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .find(|item| {
+                    item.get("tool_name").and_then(Value::as_str)
+                        == Some("search_knowledge_base")
+                        && item
+                            .pointer("/result/results/0/fact_eligible")
+                            .and_then(Value::as_bool)
+                            == Some(true)
+                })
         });
     let mut findings = vec![json!({
         "title": "当前输出基线",
@@ -539,5 +593,72 @@ mod tests {
         assert_eq!(response.finish_reason, FinishReason::ToolCalls);
         assert_eq!(response.tool_calls.len(), 1);
         assert_eq!(response.tool_calls[0].name, "simulate_scenario");
+    }
+
+    #[test]
+    fn compact_handoff_uses_simulation_evidence_even_when_timeline_precedes_it() {
+        let simulation_id = "b".repeat(64);
+        let timeline_id = "c".repeat(64);
+        let payload = json!({
+            "items": [
+                {
+                    "tool_name": "analyze_timeline",
+                    "evidence_id": timeline_id,
+                    "result": {"diagnostic_profile": {}}
+                },
+                {
+                    "tool_name": "simulate_scenario",
+                    "evidence_id": simulation_id,
+                    "result": {"dps": 1234.5}
+                }
+            ]
+        });
+        let request = ModelRequest {
+            instructions: "Use evidence.".to_string(),
+            messages: vec![ModelMessage::User {
+                content: format!(
+                    "<model_evidence server_generated=\"true\" schema=\"agent-model-evidence/v1\">\n{}\n</model_evidence>",
+                    serde_json::to_string(&payload).unwrap()
+                ),
+            }],
+            tools: Vec::new(),
+            response_format: None,
+            max_output_tokens: 512,
+        };
+
+        let handoff = latest_handoff_tool_result(&request).expect("compacted evidence");
+        let report = simulation_report(&request, &handoff).expect("simulation report");
+        let report: Value = serde_json::from_str(&report).unwrap();
+        assert_eq!(report["findings"][0]["evidence_ids"][0], "b".repeat(64));
+        assert_eq!(report["findings"][0]["metrics"][0]["value"], 1234.5);
+        assert_eq!(report["findings"][1]["evidence_ids"][0], "c".repeat(64));
+    }
+
+    #[tokio::test]
+    async fn compact_handoff_completes_regardless_of_evidence_order_or_event_table() {
+        let provider = FakeProvider::new("offline".to_string(), "fixture-v1".to_string());
+        let mut items = vec![
+            json!({"tool_name":"simulate_scenario", "evidence_id":"a".repeat(64), "result":{"dps":1234.5}}),
+            json!({"tool_name":"analyze_timeline", "evidence_id":"b".repeat(64), "result":{"diagnostic_profile":{}}}),
+            json!({"tool_name":"inspect_timeline_events", "evidence_id":"c".repeat(64), "result":{"match_index_table":{"source_pointer":"/result/match_index", "columns":["/event_number"], "constants":{}, "source_indices":[0], "rows":[[12]]}}}),
+            json!({"tool_name":"get_current_scenario", "evidence_id":"d".repeat(64), "result":{"rotation_input":{"mode":"manual"}}}),
+        ];
+        for _ in 0..items.len() {
+            let mut request = request(vec![
+                ModelMessage::User { content:"分析当前循环。".to_string() },
+                ModelMessage::User { content:format!("<model_evidence server_generated=\"true\" schema=\"agent-model-evidence/v1\">\n{}\n</model_evidence>", json!({"items":items})) },
+            ]);
+            request.tools.push(ToolDefinition {
+                name:"analyze_timeline".to_string(), description:"Run a baseline diagnosis.".to_string(), parameters:json!({"type":"object"}),
+            });
+            let response = provider.complete(&request).await.unwrap();
+            assert!(response.tool_calls.is_empty());
+            assert_eq!(response.finish_reason, FinishReason::Stop);
+            let report: Value = serde_json::from_str(response.assistant_text.as_deref().unwrap()).unwrap();
+            assert!(report["refusal_reason"].is_null());
+            assert_eq!(report["findings"][0]["metrics"][0]["value"], 1234.5);
+            assert_eq!(report["findings"][1]["evidence_ids"][0], "b".repeat(64));
+            items.rotate_left(1);
+        }
     }
 }

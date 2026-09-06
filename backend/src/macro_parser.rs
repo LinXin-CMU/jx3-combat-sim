@@ -27,7 +27,10 @@ pub fn parse_macro_text(text: &str) -> Result<MacroConfig, MacroParseError> {
         if trimmed.starts_with("#page") {
             // 保存当前页
             if !current_lines.is_empty() {
-                pages.push(MacroPage { stance_filter: current_stance, lines: current_lines });
+                pages.push(MacroPage {
+                    stance_filter: current_stance,
+                    lines: current_lines,
+                });
                 current_lines = Vec::new();
             }
             // 解析新页体态
@@ -37,7 +40,12 @@ pub fn parse_macro_text(text: &str) -> Result<MacroConfig, MacroParseError> {
                 "blade" | "擎刀" => Some(Stance::Blade),
                 "wall" | "盾墙" => Some(Stance::Wall),
                 "" => None,
-                _ => return Err(MacroParseError { line: global_line, message: format!("未知体态: {}", rest) }),
+                _ => {
+                    return Err(MacroParseError {
+                        line: global_line,
+                        message: format!("未知体态: {}", rest),
+                    })
+                }
             };
             global_line += 1;
             continue;
@@ -52,11 +60,17 @@ pub fn parse_macro_text(text: &str) -> Result<MacroConfig, MacroParseError> {
 
     // 最后一页
     if !current_lines.is_empty() {
-        pages.push(MacroPage { stance_filter: current_stance, lines: current_lines });
+        pages.push(MacroPage {
+            stance_filter: current_stance,
+            lines: current_lines,
+        });
     }
 
     if pages.is_empty() {
-        return Err(MacroParseError { line: 0, message: "宏文本为空".into() });
+        return Err(MacroParseError {
+            line: 0,
+            message: "宏文本为空".into(),
+        });
     }
 
     Ok(MacroConfig { pages })
@@ -64,7 +78,10 @@ pub fn parse_macro_text(text: &str) -> Result<MacroConfig, MacroParseError> {
 
 /// 解析单行宏命令
 fn parse_line(line: &str, line_num: usize) -> Result<Option<MacroLine>, MacroParseError> {
-    let err = |msg: &str| MacroParseError { line: line_num, message: msg.to_string() };
+    let err = |msg: &str| MacroParseError {
+        line: line_num,
+        message: msg.to_string(),
+    };
 
     // 匹配 /cast 或 /fcast
     let (is_fcast, rest) = if line.starts_with("/fcast") {
@@ -113,7 +130,9 @@ fn parse_line(line: &str, line_num: usize) -> Result<Option<MacroLine>, MacroPar
 
         if has_condition {
             // 最后一个空格分隔条件和技能名
-            let last_space = rest.rfind(' ').ok_or_else(|| err("条件和技能名之间需要空格"))?;
+            let last_space = rest
+                .rfind(' ')
+                .ok_or_else(|| err("条件和技能名之间需要空格"))?;
             let cond_str = &rest[..last_space];
             let name = rest[last_space + 1..].trim();
             if name.is_empty() {
@@ -155,13 +174,17 @@ fn tokenize_condition(input: &str) -> Vec<CondToken> {
         match ch {
             '&' => {
                 let s = current.trim().to_string();
-                if !s.is_empty() { tokens.push(CondToken::Atom(s)); }
+                if !s.is_empty() {
+                    tokens.push(CondToken::Atom(s));
+                }
                 current.clear();
                 tokens.push(CondToken::And);
             }
             '|' => {
                 let s = current.trim().to_string();
-                if !s.is_empty() { tokens.push(CondToken::Atom(s)); }
+                if !s.is_empty() {
+                    tokens.push(CondToken::Atom(s));
+                }
                 current.clear();
                 tokens.push(CondToken::Or);
             }
@@ -169,7 +192,9 @@ fn tokenize_condition(input: &str) -> Vec<CondToken> {
         }
     }
     let s = current.trim().to_string();
-    if !s.is_empty() { tokens.push(CondToken::Atom(s)); }
+    if !s.is_empty() {
+        tokens.push(CondToken::Atom(s));
+    }
     tokens
 }
 
@@ -177,17 +202,26 @@ fn tokenize_condition(input: &str) -> Vec<CondToken> {
 fn parse_condition(input: &str, line_num: usize) -> Result<MacroCondition, MacroParseError> {
     let tokens = tokenize_condition(input);
     if tokens.is_empty() {
-        return Err(MacroParseError { line: line_num, message: "空条件".into() });
+        return Err(MacroParseError {
+            line: line_num,
+            message: "空条件".into(),
+        });
     }
     let (cond, rest) = parse_expr(&tokens, line_num)?;
     if !rest.is_empty() {
-        return Err(MacroParseError { line: line_num, message: "条件解析未完成".into() });
+        return Err(MacroParseError {
+            line: line_num,
+            message: "条件解析未完成".into(),
+        });
     }
     Ok(cond)
 }
 
 /// 递归下降：expr = primary ( ('&'|'|') expr )?
-fn parse_expr<'a>(tokens: &'a [CondToken], line_num: usize) -> Result<(MacroCondition, &'a [CondToken]), MacroParseError> {
+fn parse_expr<'a>(
+    tokens: &'a [CondToken],
+    line_num: usize,
+) -> Result<(MacroCondition, &'a [CondToken]), MacroParseError> {
     let (left, rest) = parse_primary(tokens, line_num)?;
     match rest.first() {
         Some(CondToken::And) => {
@@ -203,8 +237,14 @@ fn parse_expr<'a>(tokens: &'a [CondToken], line_num: usize) -> Result<(MacroCond
 }
 
 /// 解析原子条件
-fn parse_primary<'a>(tokens: &'a [CondToken], line_num: usize) -> Result<(MacroCondition, &'a [CondToken]), MacroParseError> {
-    let err = |msg: &str| MacroParseError { line: line_num, message: msg.to_string() };
+fn parse_primary<'a>(
+    tokens: &'a [CondToken],
+    line_num: usize,
+) -> Result<(MacroCondition, &'a [CondToken]), MacroParseError> {
+    let err = |msg: &str| MacroParseError {
+        line: line_num,
+        message: msg.to_string(),
+    };
 
     match tokens.first() {
         Some(CondToken::Atom(s)) => {
@@ -217,7 +257,10 @@ fn parse_primary<'a>(tokens: &'a [CondToken], line_num: usize) -> Result<(MacroC
 
 /// 解析单个原子条件字符串
 fn parse_atom(s: &str, line_num: usize) -> Result<MacroCondition, MacroParseError> {
-    let err = |msg: String| MacroParseError { line: line_num, message: msg };
+    let err = |msg: String| MacroParseError {
+        line: line_num,
+        message: msg,
+    };
 
     // rage>N / rage<N / rage=N / rage>=N / rage<=N
     if s.starts_with("rage") {
@@ -291,14 +334,18 @@ fn parse_atom(s: &str, line_num: usize) -> Result<MacroCondition, MacroParseErro
 
     // noskill:数字ID
     if s.starts_with("noskill:") {
-        let id: u32 = s[8..].trim().parse()
+        let id: u32 = s[8..]
+            .trim()
+            .parse()
             .map_err(|_| err(format!("noskill ID 不是数字: {}", &s[8..])))?;
         return Ok(MacroCondition::SkillNotExists(id));
     }
 
     // skill:数字ID
     if s.starts_with("skill:") {
-        let id: u32 = s[6..].trim().parse()
+        let id: u32 = s[6..]
+            .trim()
+            .parse()
             .map_err(|_| err(format!("skill ID 不是数字: {}", &s[6..])))?;
         return Ok(MacroCondition::SkillExists(id));
     }
@@ -318,44 +365,75 @@ fn parse_atom(s: &str, line_num: usize) -> Result<MacroCondition, MacroParseErro
 
 /// 解析比较运算符 + 整数值，如 ">49"
 fn parse_cmp_i32(s: &str, line_num: usize) -> Result<(CmpOp, i32), MacroParseError> {
-    let err = |msg: String| MacroParseError { line: line_num, message: msg };
+    let err = |msg: String| MacroParseError {
+        line: line_num,
+        message: msg,
+    };
     let (op, rest) = parse_cmp_op(s, line_num)?;
-    let val: i32 = rest.trim().parse()
+    let val: i32 = rest
+        .trim()
+        .parse()
         .map_err(|_| err(format!("无法解析数值: {}", rest)))?;
     Ok((op, val))
 }
 
 /// 解析比较运算符 + 浮点值
 fn parse_cmp_f64(s: &str, line_num: usize) -> Result<(CmpOp, f64), MacroParseError> {
-    let err = |msg: String| MacroParseError { line: line_num, message: msg };
+    let err = |msg: String| MacroParseError {
+        line: line_num,
+        message: msg,
+    };
     let (op, rest) = parse_cmp_op(s, line_num)?;
-    let val: f64 = rest.trim().parse()
+    let val: f64 = rest
+        .trim()
+        .parse()
         .map_err(|_| err(format!("无法解析数值: {}", rest)))?;
     Ok((op, val))
 }
 
 /// 解析 "名字>数值" 格式
 fn parse_name_cmp_f64(s: &str, line_num: usize) -> Result<(String, CmpOp, f64), MacroParseError> {
-    let err = |msg: String| MacroParseError { line: line_num, message: msg };
+    let err = |msg: String| MacroParseError {
+        line: line_num,
+        message: msg,
+    };
     // 找第一个比较运算符位置
-    let pos = s.find(|c: char| c == '>' || c == '<' || c == '=')
+    let pos = s
+        .find(|c: char| c == '>' || c == '<' || c == '=')
         .ok_or_else(|| err("缺少比较运算符".into()))?;
     let name = s[..pos].trim().to_string();
     let (op, rest) = parse_cmp_op(&s[pos..], line_num)?;
-    let val: f64 = rest.trim().parse()
+    let val: f64 = rest
+        .trim()
+        .parse()
         .map_err(|_| err(format!("无法解析数值: {}", rest)))?;
     Ok((name, op, val))
 }
 
 /// 解析比较运算符，返回 (运算符, 剩余字符串)
 fn parse_cmp_op(s: &str, line_num: usize) -> Result<(CmpOp, &str), MacroParseError> {
-    let err = || MacroParseError { line: line_num, message: "无法解析比较运算符".into() };
-    if s.starts_with(">=") { return Ok((CmpOp::GtEq, &s[2..])); }
-    if s.starts_with("<=") { return Ok((CmpOp::LtEq, &s[2..])); }
-    if s.starts_with("~=") { return Ok((CmpOp::Neq, &s[2..])); }
-    if s.starts_with('>') { return Ok((CmpOp::Gt, &s[1..])); }
-    if s.starts_with('<') { return Ok((CmpOp::Lt, &s[1..])); }
-    if s.starts_with('=') { return Ok((CmpOp::Eq, &s[1..])); }
+    let err = || MacroParseError {
+        line: line_num,
+        message: "无法解析比较运算符".into(),
+    };
+    if s.starts_with(">=") {
+        return Ok((CmpOp::GtEq, &s[2..]));
+    }
+    if s.starts_with("<=") {
+        return Ok((CmpOp::LtEq, &s[2..]));
+    }
+    if s.starts_with("~=") {
+        return Ok((CmpOp::Neq, &s[2..]));
+    }
+    if s.starts_with('>') {
+        return Ok((CmpOp::Gt, &s[1..]));
+    }
+    if s.starts_with('<') {
+        return Ok((CmpOp::Lt, &s[1..]));
+    }
+    if s.starts_with('=') {
+        return Ok((CmpOp::Eq, &s[1..]));
+    }
     Err(err())
 }
 
@@ -366,27 +444,36 @@ fn parse_cmp_op(s: &str, line_num: usize) -> Result<(CmpOp, &str), MacroParseErr
 pub fn render_macro_text(cfg: &MacroConfig) -> String {
     let mut out = String::new();
     for (i, page) in cfg.pages.iter().enumerate() {
-        if i > 0 { out.push('\n'); }
+        if i > 0 {
+            out.push('\n');
+        }
         if let Some(stance) = &page.stance_filter {
             let s = match stance {
                 Stance::Shield => "shield",
-                Stance::Blade  => "blade",
-                Stance::Wall   => "wall",
-                _              => "",
+                Stance::Blade => "blade",
+                Stance::Wall => "wall",
+                _ => "",
             };
-            if !s.is_empty() { out.push_str(&format!("#page {}\n", s)); }
-            else { out.push_str("#page\n"); }
+            if !s.is_empty() {
+                out.push_str(&format!("#page {}\n", s));
+            } else {
+                out.push_str("#page\n");
+            }
         } else if i > 0 {
             // A later unfiltered page still needs an explicit delimiter.  Without
             // it, render -> parse merges this page into the preceding stance page.
             out.push_str("#page\n");
         }
         for line in &page.lines {
-            let cmd = if line.action.is_fcast() { "/fcast" } else { "/cast" };
+            let cmd = if line.action.is_fcast() {
+                "/fcast"
+            } else {
+                "/cast"
+            };
             let skill = line.action.skill_name();
             match &line.condition {
                 Some(c) => out.push_str(&format!("{} {} {}\n", cmd, c.display_string(), skill)),
-                None    => out.push_str(&format!("{} {}\n", cmd, skill)),
+                None => out.push_str(&format!("{} {}\n", cmd, skill)),
             }
         }
     }
@@ -411,7 +498,7 @@ mod tests {
         let config = parse_macro_text("/cast [rage>49] 绝刀").unwrap();
         let cond = config.pages[0].lines[0].condition.as_ref().unwrap();
         match cond {
-            MacroCondition::Rage(CmpOp::Gt, 49) => {},
+            MacroCondition::Rage(CmpOp::Gt, 49) => {}
             _ => panic!("expected Rage(Gt, 49), got {:?}", "other"),
         }
     }
@@ -424,17 +511,17 @@ mod tests {
         match cond {
             MacroCondition::And(a, bc) => {
                 match a.as_ref() {
-                    MacroCondition::Rage(CmpOp::Gt, 49) => {},
+                    MacroCondition::Rage(CmpOp::Gt, 49) => {}
                     _ => panic!("expected Rage"),
                 }
                 match bc.as_ref() {
                     MacroCondition::Or(b, c) => {
                         match b.as_ref() {
-                            MacroCondition::Buff(name) if name == "血怒" => {},
+                            MacroCondition::Buff(name) if name == "血怒" => {}
                             _ => panic!("expected Buff(血怒)"),
                         }
                         match c.as_ref() {
-                            MacroCondition::NoBuff(name) if name == "坚定" => {},
+                            MacroCondition::NoBuff(name) if name == "坚定" => {}
                             _ => panic!("expected NoBuff(坚定)"),
                         }
                     }

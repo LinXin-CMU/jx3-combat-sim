@@ -61,8 +61,12 @@ impl LoopTalents {
     /// 展平成 id 列表（GA 传给 Player 用）
     pub fn flat_ids(&self) -> Vec<u32> {
         let mut ids = Vec::new();
-        for t in [self.tier1, self.tier2, self.tier3, self.tier4, self.tier5, self.tier6, self.tier7] {
-            if let Some(id) = t { ids.push(id); }
+        for t in [
+            self.tier1, self.tier2, self.tier3, self.tier4, self.tier5, self.tier6, self.tier7,
+        ] {
+            if let Some(id) = t {
+                ids.push(id);
+            }
         }
         ids.extend(self.mixed.iter().copied());
         ids
@@ -81,7 +85,9 @@ pub struct LoopMacro {
     pub blade: String,
 }
 
-fn default_macro_mode() -> String { "general".into() }
+fn default_macro_mode() -> String {
+    "general".into()
+}
 
 impl LoopMacro {
     /// 构建完整宏文本（general → 单页；stance → 用 #page 分隔 shield/blade）
@@ -146,15 +152,19 @@ impl SequenceEntry {
 
     fn without_count(&self) -> SequenceEntry {
         match self {
-            SequenceEntry::Skill { skill, channel_ticks, offset, qijin_buff, .. } => {
-                SequenceEntry::Skill {
-                    skill: skill.clone(),
-                    count: None,
-                    channel_ticks: *channel_ticks,
-                    offset: *offset,
-                    qijin_buff: *qijin_buff,
-                }
-            }
+            SequenceEntry::Skill {
+                skill,
+                channel_ticks,
+                offset,
+                qijin_buff,
+                ..
+            } => SequenceEntry::Skill {
+                skill: skill.clone(),
+                count: None,
+                channel_ticks: *channel_ticks,
+                offset: *offset,
+                qijin_buff: *qijin_buff,
+            },
             SequenceEntry::Macro { .. } => SequenceEntry::Macro { count: None },
             SequenceEntry::WaitStance { .. } => SequenceEntry::WaitStance { count: None },
             SequenceEntry::Break { .. } => SequenceEntry::Break { count: None },

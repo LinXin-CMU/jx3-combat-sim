@@ -18,6 +18,8 @@ pub struct AgentReportContentV1 {
     pub recommendations: Vec<AgentRecommendationV1>,
     #[serde(default)]
     pub rotation_changes: Vec<RotationChangeV1>,
+    #[serde(default)]
+    pub artifacts: Vec<super::artifacts::DraftArtifactV1>,
     pub limitations: Vec<String>,
     pub refusal_reason: Option<String>,
 }
@@ -211,6 +213,7 @@ pub fn report_content_json_schema() -> Value {
                     "additionalProperties": false
                 }
             },
+            "artifacts": super::artifacts::json_schema(),
             "limitations": {"type": "array", "maxItems": MAX_RECOMMENDATIONS, "items": {"type": "string"}},
             "refusal_reason": {"type": ["string", "null"]}
         },
@@ -223,15 +226,13 @@ pub fn parse_and_validate_report(
     raw: &str,
     evidence: &EvidenceStore,
 ) -> Result<ValidatedReportContentV1, ReportValidationError> {
-    let mut report = parse_report_json(raw).map_err(|parse_error| {
-        error(
-            "invalid_report_json",
-            parse_error_message(&parse_error),
-        )
-    })?;
+    let mut report = parse_report_json(raw)
+        .map_err(|parse_error| error("invalid_report_json", parse_error_message(&parse_error)))?;
+    normalize_report_text_fields(&mut report);
     let normalized_evidence_ids = normalize_evidence_id_references(&mut report, evidence);
-    let normalized_metric_citations =
-        normalized_evidence_ids + normalize_metric_citations(&mut report, evidence);
+    let normalized_metric_citations = normalized_evidence_ids
+        + normalize_metric_citations(&mut report, evidence)
+        + normalize_rotation_anchor_markers(&mut report);
     validate_report(&report, evidence)?;
     Ok(ValidatedReportContentV1 {
         content: report,
@@ -243,17 +244,14 @@ pub fn parse_and_validate_report(
 /// Preserve valid claims from a structurally parseable model report instead of
 /// discarding the whole answer because one metric, citation, or prose number is
 /// wrong. The returned content passes the same strict validator as a normal
-/// report; unsupported pieces are removed or visibly redacted first.
+/// report. Unsupported sentences are replaced with an explicit evidence gap;
+/// unrelated evidence and topic-specific stock conclusions are never added.
 pub fn parse_and_salvage_report(
     raw: &str,
     evidence: &EvidenceStore,
 ) -> Result<ValidatedReportContentV1, ReportValidationError> {
-    let mut report = parse_report_json(raw).map_err(|parse_error| {
-        error(
-            "invalid_report_json",
-            parse_error_message(&parse_error),
-        )
-    })?;
+    let mut report = parse_report_json(raw)
+        .map_err(|parse_error| error("invalid_report_json", parse_error_message(&parse_error)))?;
     let mut sanitized_claims = 0;
     if report.schema_version != AGENT_REPORT_CONTENT_SCHEMA_V1 {
         report.schema_version = AGENT_REPORT_CONTENT_SCHEMA_V1.to_string();
@@ -265,8 +263,9 @@ pub fn parse_and_salvage_report(
     sanitized_claims += truncate_vec(&mut report.rotation_changes, MAX_ROTATION_CHANGES);
     sanitized_claims += truncate_vec(&mut report.limitations, MAX_RECOMMENDATIONS);
     let normalized_evidence_ids = normalize_evidence_id_references(&mut report, evidence);
-    let normalized_metric_citations =
-        normalized_evidence_ids + normalize_metric_citations(&mut report, evidence);
+    let normalized_metric_citations = normalized_evidence_ids
+        + normalize_metric_citations(&mut report, evidence)
+        + normalize_rotation_anchor_markers(&mut report);
 
     let mut retained_findings = Vec::with_capacity(report.findings.len());
     for mut finding in report.findings.drain(..) {
@@ -291,22 +290,22 @@ pub fn parse_and_salvage_report(
             sanitized_claims += 1;
             continue;
         }
-        sanitized_claims += sanitize_text_field(&mut finding.title, "已验证结论");
+        sanitized_claims += sanitize_text_field(&mut finding.title, "待核实的判断");
         sanitized_claims += sanitize_unsupported_numeric_prose(
             &mut finding.title,
             &finding.metrics,
             &finding.evidence_ids,
             evidence,
-            "已验证结论",
+            "待核实的判断",
         );
-        let explanation_fallback = grounded_finding_explanation(&finding, evidence);
-        sanitized_claims += sanitize_text_field(&mut finding.explanation, &explanation_fallback);
+        const EXPLANATION_GAP: &str = "这项判断的数值依据尚待核实。";
+        sanitized_claims += sanitize_text_field(&mut finding.explanation, EXPLANATION_GAP);
         sanitized_claims += sanitize_unsupported_numeric_prose(
             &mut finding.explanation,
             &finding.metrics,
             &finding.evidence_ids,
             evidence,
-            &explanation_fallback,
+            EXPLANATION_GAP,
         );
         retained_findings.push(finding);
     }
@@ -326,7 +325,7 @@ pub fn parse_and_salvage_report(
         &report_metrics,
         &report_evidence_ids,
         evidence,
-        "当前基线的可信指标与主要结论见下方。",
+        "这项判断的数值依据尚待核实。",
     );
 
     let mut retained_recommendations = Vec::with_capacity(report.recommendations.len());
@@ -353,20 +352,12 @@ pub fn parse_and_salvage_report(
             &mut recommendation.rationale,
             "建议通过新的确定性实验继续验证。",
         );
-        let rationale_fallback = comparison_decision_summary(
-            &recommendation.evidence_ids,
-            evidence,
-        )
-        .unwrap_or_else(|| {
-            "保持其余条件不变，只改这一项跑同场景 A/B；比较 DPS、核心技能次数和资源触顶，再决定是否采用。"
-                .to_string()
-        });
         sanitized_claims += sanitize_unsupported_numeric_prose(
             &mut recommendation.rationale,
             &metric_values,
             &recommendation.evidence_ids,
             evidence,
-            &rationale_fallback,
+            "这项建议的数值依据尚待核实。",
         );
         retained_recommendations.push(recommendation);
     }
@@ -429,19 +420,14 @@ pub fn parse_and_salvage_report(
     }
 
     if report.findings.is_empty() && report.refusal_reason.is_none() {
-        let Some(fallback) = direct_baseline_finding(evidence) else {
-            return Err(error(
-                "empty_salvaged_report",
-                "no verifiable claim remains after report sanitization",
-            ));
-        };
-        report.findings.push(fallback);
-        report.summary = "模型报告仅部分通过校验；以下保留模拟器直接验证的基线指标。".to_string();
-        sanitized_claims += 1;
+        return Err(error(
+            "empty_salvaged_report",
+            "no cited finding remains for the original question; repair the answer using the original question and its evidence",
+        ));
     }
 
     const PARTIAL_LIMITATION: &str =
-        "部分模型表述或指标未通过逐项证据校验，已自动隐藏；保留内容均可追溯到本次运行证据。";
+        "部分数值或引用尚待核实；相关位置已标明，其他有依据的分析继续保留。";
     if !report
         .limitations
         .iter()
@@ -459,48 +445,6 @@ pub fn parse_and_salvage_report(
         normalized_metric_citations,
         sanitized_claims: sanitized_claims.max(1),
     })
-}
-
-fn comparison_decision_summary(
-    evidence_ids: &[String],
-    evidence: &EvidenceStore,
-) -> Option<String> {
-    for evidence_id in evidence_ids {
-        let envelope = evidence.get(evidence_id)?;
-        if envelope.get("tool_name").and_then(Value::as_str) != Some("compare_scenarios") {
-            continue;
-        }
-        let candidate = envelope.pointer("/result/candidates/0")?;
-        let label = candidate
-            .get("label")
-            .and_then(Value::as_str)
-            .unwrap_or("本次单变量候选");
-        let delta_dps = candidate.get("delta_dps").and_then(Value::as_f64)?;
-        let delta_percent = candidate
-            .get("delta_percent")
-            .and_then(Value::as_f64)
-            .unwrap_or(0.0);
-        let direction = if delta_dps > 0.0 {
-            "提升"
-        } else if delta_dps < 0.0 {
-            "下降"
-        } else {
-            "没有变化"
-        };
-        let decision = if delta_dps > 0.0 {
-            "该候选有采用价值，但仍只代表当前冻结场景。"
-        } else if delta_dps < 0.0 {
-            "该候选已被否定，因此保留原方案。"
-        } else {
-            "该候选没有改善基线，因此保留原方案。"
-        };
-        return Some(format!(
-            "同场景实测中，“{label}”使平均 DPS {direction} {:.0}（{:.2}%）；{decision}",
-            delta_dps.abs(),
-            delta_percent.abs(),
-        ));
-    }
-    None
 }
 
 /// Providers that advertise JSON mode may still wrap the object in a Markdown
@@ -552,7 +496,17 @@ fn parse_report_json(raw: &str) -> Result<AgentReportContentV1, serde_json::Erro
 /// Normalize a small set of lossless provider-shape variants before applying
 /// the strict report schema. This is intentionally limited to fields whose
 /// semantic meaning is unchanged by the conversion.
-fn deserialize_compatible_report(mut value: Value) -> Result<AgentReportContentV1, serde_json::Error> {
+fn deserialize_compatible_report(
+    mut value: Value,
+) -> Result<AgentReportContentV1, serde_json::Error> {
+    let mut drafts = super::artifacts::ArtifactStore::default();
+    drafts.capture_report(&value.to_string());
+    if !drafts.is_empty() {
+        value["artifacts"] = serde_json::to_value(drafts.items())?;
+        if let Some(changes) = value.get_mut("rotation_changes").and_then(Value::as_array_mut) {
+            changes.retain(|change| !matches!(change["change_type"].as_str(), Some("add_macro_page" | "new_macro" | "macro_text")));
+        }
+    }
     let Some(object) = value.as_object_mut() else {
         return serde_json::from_value(value);
     };
@@ -618,17 +572,15 @@ fn deserialize_compatible_report(mut value: Value) -> Result<AgentReportContentV
                     fields.insert("explanation".to_string(), explanation);
                 }
             }
-            fields
-                .entry("title".to_string())
-                .or_insert_with(|| {
-                    let title = claim
-                        .as_ref()
-                        .and_then(Value::as_str)
-                        .map(|value| value.chars().take(48).collect::<String>())
-                        .filter(|value| !value.trim().is_empty())
-                        .unwrap_or_else(|| "分析结论".to_string());
-                    Value::String(title)
-                });
+            fields.entry("title".to_string()).or_insert_with(|| {
+                let title = claim
+                    .as_ref()
+                    .and_then(Value::as_str)
+                    .map(|value| value.chars().take(48).collect::<String>())
+                    .filter(|value| !value.trim().is_empty())
+                    .unwrap_or_else(|| "分析结论".to_string());
+                Value::String(title)
+            });
             fields.remove("evidence_pointers");
             let inherited_evidence_id = fields
                 .get("evidence_ids")
@@ -653,15 +605,29 @@ fn deserialize_compatible_report(mut value: Value) -> Result<AgentReportContentV
                     metric
                         .entry("evidence_id".to_string())
                         .or_insert_with(|| Value::String(inherited_evidence_id.clone()));
+                    if let Some(parsed) = metric
+                        .get("value")
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .and_then(|value| value.replace(',', "").parse::<f64>().ok())
+                        .filter(|value| value.is_finite())
+                    {
+                        metric.insert("value".to_string(), Value::from(parsed));
+                    }
                     let pointer = metric
                         .get("json_pointer")
                         .and_then(Value::as_str)
                         .unwrap_or_default();
-                    let unit = metric.get("unit").and_then(Value::as_str).unwrap_or_default();
+                    let unit = metric
+                        .get("unit")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
                     let normalized_unit = match unit {
                         "%" | "百分比" => Some("percent"),
                         "秒" => Some("seconds"),
                         "次" | "个" => Some("count"),
+                        "DPS" | "dps" => Some("damage_per_second"),
                         "数值" if pointer.ends_with("/dps") => Some("damage_per_second"),
                         "数值" if pointer.ends_with("/total_damage") => Some("damage"),
                         _ => None,
@@ -751,12 +717,47 @@ fn deserialize_compatible_report(mut value: Value) -> Result<AgentReportContentV
             let Some(fields) = change.as_object_mut() else {
                 return false;
             };
-            if fields.get("change_type").and_then(Value::as_str) == Some("edit_operation")
-            {
+            let change_type = fields
+                .get("change_type")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            // A provider may describe the outcome of a losing A/B candidate
+            // as a "revert" card. It is a decision, not an edit to apply, so
+            // leave it in the prose findings and omit it from the patch list.
+            if matches!(change_type, "revert" | "keep" | "no_change") {
+                return false;
+            }
+            let normalized_change_type = match change_type {
+                "edit_operation" | "manual" | "manual_edit" | "sequence_edit" => {
+                    Some("manual_operation")
+                }
+                "macro" | "macro_line" | "macro_edit" | "macro_statement_edit" => {
+                    Some("macro_statement")
+                }
+                _ => None,
+            };
+            if let Some(normalized) = normalized_change_type {
                 fields.insert(
                     "change_type".to_string(),
-                    Value::String("manual_operation".to_string()),
+                    Value::String(normalized.to_string()),
                 );
+            }
+            if let Some(operation) = fields
+                .get("edit_operation")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+            {
+                let normalized = match operation.as_str() {
+                    "modify" | "change" | "adjust" => Some("replace"),
+                    "delete" => Some("remove"),
+                    _ => None,
+                };
+                if let Some(normalized) = normalized {
+                    fields.insert(
+                        "edit_operation".to_string(),
+                        Value::String(normalized.to_string()),
+                    );
+                }
             }
             let removes_current = fields
                 .get("rationale")
@@ -816,6 +817,36 @@ fn sanitize_text_field(value: &mut String, fallback: &str) -> usize {
     changed
 }
 
+fn normalize_report_text_fields(report: &mut AgentReportContentV1) -> usize {
+    super::artifacts::normalize_artifacts(&mut report.artifacts);
+    let mut changed = sanitize_text_field(&mut report.summary, "本轮分析见下方。");
+    for finding in &mut report.findings {
+        changed += sanitize_text_field(&mut finding.title, "分析结论");
+        changed += sanitize_text_field(&mut finding.explanation, "本轮证据支持这项判断。");
+        for metric in &mut finding.metrics {
+            changed += sanitize_text_field(&mut metric.label, "已验证指标");
+            changed += sanitize_text_field(&mut metric.unit, "value");
+        }
+    }
+    for recommendation in &mut report.recommendations {
+        changed += sanitize_text_field(&mut recommendation.title, "下一步建议");
+        changed += sanitize_text_field(&mut recommendation.rationale, "依据当前判断继续验证。");
+    }
+    for change in &mut report.rotation_changes {
+        changed += sanitize_text_field(&mut change.target, "当前循环位置");
+        changed += sanitize_text_field(&mut change.current, "当前操作");
+        changed += sanitize_text_field(&mut change.proposed, "建议操作");
+        changed += sanitize_text_field(&mut change.rationale, "依据当前诊断与对照结果。");
+    }
+    for limitation in &mut report.limitations {
+        changed += sanitize_text_field(limitation, "存在尚未验证的边界。");
+    }
+    if let Some(reason) = &mut report.refusal_reason {
+        changed += sanitize_text_field(reason, "当前请求无法形成结论。");
+    }
+    changed
+}
+
 fn sanitize_evidence_ids(ids: &mut Vec<String>, evidence: &EvidenceStore) -> usize {
     let before = ids.len();
     let mut unique = HashSet::new();
@@ -823,62 +854,6 @@ fn sanitize_evidence_ids(ids: &mut Vec<String>, evidence: &EvidenceStore) -> usi
         valid_evidence_id(id) && evidence.contains_key(id) && unique.insert(id.clone())
     });
     before.saturating_sub(ids.len())
-}
-
-fn grounded_finding_explanation(finding: &AgentFindingV1, evidence: &EvidenceStore) -> String {
-    let title = finding.title.as_str();
-    let cites_tool = |tool_name: &str| {
-        finding.evidence_ids.iter().any(|id| {
-            evidence
-                .get(id)
-                .and_then(|item| item.get("tool_name"))
-                .and_then(Value::as_str)
-                == Some(tool_name)
-        })
-    };
-
-    let cites_equipment_comparison = cites_tool("compare_focused_equipment")
-        || cites_tool("compare_equipment_strategies");
-    if cites_equipment_comparison && (title.contains("黑话") || title.contains("装备方案")) {
-        return "装备术语已按当前心法和本地装备目录解析；最终取舍仍以同一冻结循环下的面板与伤害实测为准。"
-            .to_string();
-    }
-    if cites_equipment_comparison {
-        return "两侧装备已分别重算面板，并在同一冻结循环与目标条件下完成对照模拟；结论只适用于这组候选和当前循环。"
-            .to_string();
-    }
-    if cites_tool("compare_scenarios") {
-        return "同场景对比已经给出方向性结果；只采用实际改善基线的改法，未改善的候选保留为反证。"
-            .to_string();
-    }
-    if title.contains("怒气") || title.contains("资源") || title.contains("瓶颈") {
-        return "时间轴观察到资源触顶信号；它提示潜在浪费，但实际损失仍需保持其余条件不变的对照实验确认。"
-            .to_string();
-    }
-    if title.contains("时间轴") || title.contains("空档") || title.contains("等待") {
-        let has_gaps = finding.evidence_ids.iter().any(|id| {
-            evidence
-                .get(id)
-                .and_then(|item| item.pointer("/result/gcd_gaps"))
-                .and_then(Value::as_array)
-                .is_some_and(|items| !items.is_empty())
-        });
-        return if has_gaps {
-            "时间轴记录到主技能衔接空档；这里只确认发生位置与时长，是否造成可优化损失仍需同场景对照。"
-                .to_string()
-        } else {
-            "时间轴没有记录到主技能衔接空档；这只说明当前冻结条件下执行连续，不代表循环已经最优。"
-                .to_string()
-        };
-    }
-    if title.contains("输出") || title.contains("结构") || title.contains("伤害") {
-        return "本轮模拟给出了各技能的伤害构成；占比用于描述当前输出画像，不能单独证明循环质量。"
-            .to_string();
-    }
-    if cites_tool("analyze_timeline") {
-        return "本轮时间轴支持这项观察；因果解释与改动收益仍需同场景对照实验确认。".to_string();
-    }
-    "本轮模拟证据支持这项观察；未经同场景对比的改动收益仍作为待验证假设。".to_string()
 }
 
 fn valid_evidence_id(id: &str) -> bool {
@@ -939,45 +914,6 @@ fn metric_value_matches_source(value: f64, unit: &str, source: f64) -> bool {
     false
 }
 
-fn direct_baseline_finding(evidence: &EvidenceStore) -> Option<AgentFindingV1> {
-    const PATHS: [(&str, &str, &str); 3] = [
-        ("/result/dps", "DPS", "damage_per_second"),
-        ("/result/total_damage", "总伤害", "damage"),
-        ("/result/duration", "战斗时长", "second"),
-    ];
-    for (evidence_id, envelope) in evidence {
-        if envelope.get("tool_name").and_then(Value::as_str) != Some("simulate_scenario") {
-            continue;
-        }
-        let metrics = PATHS
-            .iter()
-            .filter_map(|(pointer, label, unit)| {
-                envelope
-                    .pointer(pointer)
-                    .and_then(Value::as_f64)
-                    .filter(|value| value.is_finite())
-                    .map(|value| GroundedMetricV1 {
-                        label: (*label).to_string(),
-                        value,
-                        unit: (*unit).to_string(),
-                        evidence_id: evidence_id.clone(),
-                        json_pointer: (*pointer).to_string(),
-                    })
-            })
-            .collect::<Vec<_>>();
-        if !metrics.is_empty() {
-            return Some(AgentFindingV1 {
-                title: "模拟器直接验证的基线".to_string(),
-                explanation: "原始模型表述未全部通过逐项校验，具体结论已缩减为可复现指标。"
-                    .to_string(),
-                evidence_ids: vec![evidence_id.clone()],
-                metrics,
-            });
-        }
-    }
-    None
-}
-
 fn normalize_metric_citations(
     report: &mut AgentReportContentV1,
     evidence: &EvidenceStore,
@@ -996,12 +932,9 @@ fn normalize_metric_citations(
             // provider may cite the view's own array position instead. Resolve
             // that losslessly before validation so the system does not reject
             // a correct metric for following its projected context.
-            if let Some(candidate) = evidence
-                .get(&metric.evidence_id)
-                .and_then(|envelope| {
-                    ranked_damage_metric_source_pointer(&metric.json_pointer, envelope)
-                })
-            {
+            if let Some(candidate) = evidence.get(&metric.evidence_id).and_then(|envelope| {
+                ranked_damage_metric_source_pointer(&metric.json_pointer, envelope)
+            }) {
                 metric.json_pointer = candidate;
                 normalized += 1;
             }
@@ -1025,9 +958,178 @@ fn normalize_metric_citations(
                     normalized += 1;
                 }
             }
+            // An existing numeric pointer identifies the event the model
+            // chose. A mismatched value must be corrected at that event;
+            // looking elsewhere for the same number changes claim ownership.
+            let has_numeric_source = evidence
+                .get(&metric.evidence_id)
+                .and_then(|envelope| envelope.pointer(&metric.json_pointer))
+                .and_then(Value::as_f64)
+                .is_some();
+            if !has_numeric_source && !metric_matches_evidence(metric, evidence) {
+                if let Some(candidate) = infer_metric_source_pointer(metric, evidence) {
+                    metric.json_pointer = candidate;
+                    normalized += 1;
+                }
+            }
         }
     }
     normalized
+}
+
+#[derive(Debug)]
+struct NumericPointerCandidate {
+    pointer: String,
+    field: String,
+    context: Vec<String>,
+}
+
+fn infer_metric_source_pointer(
+    metric: &GroundedMetricV1,
+    evidence: &EvidenceStore,
+) -> Option<String> {
+    let envelope = evidence
+        .get(&metric.evidence_id)
+        .filter(|envelope| metric_tool_allowed(envelope))?;
+    let result = envelope.get("result")?;
+    let mut candidates = Vec::new();
+    collect_numeric_pointer_candidates(result, "/result", &[], &mut candidates);
+    let original_tail = metric.json_pointer.rsplit('/').next().unwrap_or_default();
+    let mut scored = candidates
+        .into_iter()
+        .filter_map(|candidate| {
+            let source = envelope.pointer(&candidate.pointer)?.as_f64()?;
+            metric_value_matches_source(metric.value, &metric.unit, source).then(|| {
+                let mut score = metric_pointer_field_score(&metric.label, &candidate.field);
+                if !original_tail.is_empty() && original_tail == candidate.field {
+                    score += 25;
+                }
+                for term in [
+                    "绝刀",
+                    "斩刀",
+                    "血怒",
+                    "盾击",
+                    "盾飞",
+                    "盾回",
+                    "援戈",
+                    "业火麟光",
+                    "嗜血",
+                    "狂绝",
+                    "麟光甲",
+                    "流血",
+                ] {
+                    if metric.label.contains(term)
+                        && candidate.context.iter().any(|value| value.contains(term))
+                    {
+                        score += 100;
+                    }
+                }
+                (score, candidate.pointer)
+            })
+        })
+        .collect::<Vec<_>>();
+    scored.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
+    let best = scored.first()?;
+    if best.0 == 0 || scored.get(1).is_some_and(|next| next.0 == best.0) {
+        return None;
+    }
+    Some(best.1.clone())
+}
+
+fn collect_numeric_pointer_candidates(
+    value: &Value,
+    pointer: &str,
+    inherited_context: &[String],
+    output: &mut Vec<NumericPointerCandidate>,
+) {
+    match value {
+        Value::Object(object) => {
+            let mut context = inherited_context.to_vec();
+            context.extend(
+                object
+                    .values()
+                    .filter_map(Value::as_str)
+                    .take(8)
+                    .map(str::to_owned),
+            );
+            for (field, child) in object {
+                let escaped = field.replace('~', "~0").replace('/', "~1");
+                let child_pointer = format!("{pointer}/{escaped}");
+                if child.as_f64().is_some() {
+                    output.push(NumericPointerCandidate {
+                        pointer: child_pointer,
+                        field: field.clone(),
+                        context: context.clone(),
+                    });
+                } else {
+                    collect_numeric_pointer_candidates(child, &child_pointer, &context, output);
+                }
+            }
+        }
+        Value::Array(items) => {
+            for (index, child) in items.iter().enumerate() {
+                collect_numeric_pointer_candidates(
+                    child,
+                    &format!("{pointer}/{index}"),
+                    inherited_context,
+                    output,
+                );
+            }
+        }
+        _ => {}
+    }
+}
+
+fn metric_pointer_field_score(label: &str, field: &str) -> i32 {
+    let rules: &[(&[&str], &[&str])] = &[
+        (&["DPS", "秒伤"], &["dps", "delta_dps"]),
+        (
+            &["比例", "占比", "幅度", "%"],
+            &["delta_percent", "coverage_percent", "damage_share"],
+        ),
+        (&["总伤", "伤害差"], &["total_damage", "damage_delta"]),
+        (
+            &["溢出", "溢怒"],
+            &["overflow_total", "rage_overflow_total"],
+        ),
+        (
+            &["溢出事件", "溢怒事件"],
+            &["overflow_events", "event_count"],
+        ),
+        (
+            &["实际释放次数", "命中次数"],
+            &["total_matches", "selected_casts", "event_count"],
+        ),
+        (
+            &["次数", "事件数", "次数组"],
+            &["event_count", "event_count_delta", "count", "total_matches"],
+        ),
+        (
+            &["空档累计", "空档时长"],
+            &["gcd_gap_seconds", "total_seconds"],
+        ),
+        (&["空档次数"], &["gcd_gap_count", "count"]),
+        (
+            &["等待"],
+            &[
+                "recorded_wait_seconds",
+                "recorded_wait_count",
+                "total_seconds",
+                "count",
+            ],
+        ),
+        (
+            &["总获得", "获得量"],
+            &["total_rage_gained", "yuan_ge_gained_stacks"],
+        ),
+    ];
+    rules
+        .iter()
+        .filter(|(labels, _)| labels.iter().any(|needle| label.contains(needle)))
+        .flat_map(|(_, fields)| fields.iter())
+        .position(|expected| *expected == field)
+        .map(|position| 40_i32.saturating_sub(position as i32))
+        .unwrap_or(0)
 }
 
 fn ranked_damage_metric_source_pointer(pointer: &str, envelope: &Value) -> Option<String> {
@@ -1066,13 +1168,11 @@ fn normalize_evidence_id_references(
             }
             let prefix = &id[..12];
             let suffix = &id[52..];
-            let mut matches = evidence
-                .keys()
-                .filter(|candidate| {
-                    candidate.len() == 64
-                        && candidate.starts_with(prefix)
-                        && candidate.ends_with(suffix)
-                });
+            let mut matches = evidence.keys().filter(|candidate| {
+                candidate.len() == 64
+                    && candidate.starts_with(prefix)
+                    && candidate.ends_with(suffix)
+            });
             let Some(candidate) = matches.next() else {
                 continue;
             };
@@ -1100,6 +1200,35 @@ fn normalize_evidence_id_references(
     changed
 }
 
+fn normalize_rotation_anchor_markers(report: &mut AgentReportContentV1) -> usize {
+    fn normalize(text: &mut String) -> usize {
+        if !text.contains("[[") || (!text.contains("|op:") && !text.contains("|ev:")) {
+            return 0;
+        }
+        let normalized = text.replace("}}", "]]");
+        let changed = usize::from(normalized != *text);
+        *text = normalized;
+        changed
+    }
+
+    let mut changed = normalize(&mut report.summary);
+    for finding in &mut report.findings {
+        changed += normalize(&mut finding.title);
+        changed += normalize(&mut finding.explanation);
+    }
+    for recommendation in &mut report.recommendations {
+        changed += normalize(&mut recommendation.title);
+        changed += normalize(&mut recommendation.rationale);
+    }
+    for change in &mut report.rotation_changes {
+        changed += normalize(&mut change.target);
+        changed += normalize(&mut change.current);
+        changed += normalize(&mut change.proposed);
+        changed += normalize(&mut change.rationale);
+    }
+    changed
+}
+
 pub fn validate_report(
     report: &AgentReportContentV1,
     evidence: &EvidenceStore,
@@ -1121,7 +1250,7 @@ pub fn validate_report(
             "report collection limit exceeded",
         ));
     }
-    if report.findings.is_empty() && report.refusal_reason.is_none() {
+    if report.findings.is_empty() && report.artifacts.is_empty() && report.refusal_reason.is_none() {
         return Err(error(
             "empty_report",
             "report requires a verified finding or a refusal reason",
@@ -1314,15 +1443,15 @@ fn matching_rotation_input_evidence_id(
     evidence.iter().find_map(|(id, item)| {
         let tool = item.get("tool_name").and_then(Value::as_str);
         let mode_matches = match tool {
-            Some("get_current_scenario") => item
-                .pointer("/result/rotation_input/mode")
-                .and_then(Value::as_str)
-                == Some(expected_mode),
+            Some("get_current_scenario") => {
+                item.pointer("/result/rotation_input/mode")
+                    .and_then(Value::as_str)
+                    == Some(expected_mode)
+            }
             Some("inspect_rotation_input") => change.change_type == "manual_operation",
             _ => false,
         };
-        (mode_matches && evidence_contains_exact_string(item, &change.current))
-        .then(|| id.clone())
+        (mode_matches && evidence_contains_exact_string(item, &change.current)).then(|| id.clone())
     })
 }
 
@@ -1611,13 +1740,20 @@ fn validate_metric(
         .ok_or_else(|| {
             error(
                 "missing_metric_source",
-                "metric source is not a numeric evidence value",
+                format!(
+                    "metric '{}' has no numeric source at evidence {} pointer {}",
+                    metric.label, metric.evidence_id, metric.json_pointer,
+                ),
             )
         })?;
     if !metric_value_matches_source(metric.value, &metric.unit, source) {
         return Err(error(
             "metric_value_mismatch",
-            "metric value does not match cited evidence",
+            format!(
+                "metric '{}' reported {} {}, but evidence {} pointer {} contains {}",
+                metric.label, metric.value, metric.unit,
+                metric.evidence_id, metric.json_pointer, source,
+            ),
         ));
     }
     Ok(())
@@ -1630,6 +1766,7 @@ fn metric_tool_allowed(envelope: &Value) -> bool {
             "simulate_scenario"
                 | "compare_scenarios"
                 | "analyze_timeline"
+                | "inspect_timeline_events"
                 | "inspect_equipment_workspace"
                 | "compare_focused_equipment"
                 | "compare_equipment_strategies"
@@ -1669,17 +1806,22 @@ fn validate_grounded_prose<'a>(
         .collect::<Vec<_>>();
     let knowledge_literals = cited_knowledge_numeric_literals(evidence_ids, evidence);
     let tool_values = cited_tool_numeric_values(evidence_ids, evidence);
-    if numeric_literals(value).iter().any(|literal| {
+    if let Some(literal) = numeric_literals(value).into_iter().find(|literal| {
         !literal.ordinary_count
             && !literal.identifier
             && !matches_metric(*literal, &metric_values)
             && !matches_metric_label_literal(value, *literal, &metrics)
             && !matches_knowledge_literal(*literal, &knowledge_literals)
             && !matches_tool_value(*literal, &tool_values)
+            && !matches_derived_tool_value(*literal, &tool_values)
     }) {
         return Err(error(
             "numeric_prose_claim",
-            "numeric prose must restate a grounded metric value",
+            format!(
+                "numeric claim '{}' is unsupported by this claim's cited evidence in: {}",
+                &value[literal.start..literal.end],
+                value.chars().take(180).collect::<String>(),
+            ),
         ));
     }
     Ok(())
@@ -1795,19 +1937,15 @@ fn numeric_literals(value: &str) -> Vec<NumericLiteral> {
                 && (0.0..=12.0).contains(&parsed);
             // Digits embedded in identifiers (for example a source account or
             // version-like token) are not quantitative claims.
-            let inside_rotation_anchor = value[..start]
-                .rfind("[[")
-                .is_some_and(|open| {
-                    value[..start]
-                        .rfind("]]")
-                        .is_none_or(|close| close < open)
-                        && value[open..start].contains("|op:")
-                });
+            let inside_rotation_anchor = value[..start].rfind("[[").is_some_and(|open| {
+                value[..start].rfind("]]").is_none_or(|close| close < open)
+                    && (value[open..start].contains("|op:") || value[open..start].contains("|ev:"))
+            });
             let identifier = inside_rotation_anchor
                 || start
-                .checked_sub(1)
-                .and_then(|offset| bytes.get(offset))
-                .is_some_and(|byte| byte.is_ascii_alphabetic() || *byte == b'_')
+                    .checked_sub(1)
+                    .and_then(|offset| bytes.get(offset))
+                    .is_some_and(|byte| byte.is_ascii_alphabetic() || *byte == b'_')
                 || bytes
                     .get(index)
                     .is_some_and(|byte| byte.is_ascii_alphabetic() || *byte == b'_');
@@ -1849,13 +1987,50 @@ fn sanitize_unsupported_numeric_prose(
                 && !matches_metric_label_literal(value, *literal, &metric_refs)
                 && !matches_knowledge_literal(*literal, &knowledge_literals)
                 && !matches_tool_value(*literal, &tool_values)
+                && !matches_derived_tool_value(*literal, &tool_values)
         })
         .collect::<Vec<_>>();
     if unsupported.is_empty() {
         return 0;
     }
-    *value = fallback.to_string();
+    // Keep independent supported sentences. Replace the complete unsupported
+    // sentence with an explicit gap so removing a number cannot silently turn
+    // a failed comparison into an apparently verified gameplay claim.
+    let mut spans = unsupported
+        .iter()
+        .map(|literal| sentence_span(value, literal.start, literal.end))
+        .collect::<Vec<_>>();
+    spans.sort_unstable();
+    let mut merged = Vec::<(usize, usize)>::new();
+    for span in spans {
+        if let Some(last) = merged.last_mut().filter(|last| span.0 <= last.1) {
+            last.1 = last.1.max(span.1);
+        } else {
+            merged.push(span);
+        }
+    }
+    for (start, end) in merged.into_iter().rev() {
+        value.replace_range(start..end, fallback);
+    }
+    *value = value.trim().to_string();
+    sanitize_text_field(value, fallback);
     unsupported.len()
+}
+
+fn sentence_span(value: &str, literal_start: usize, literal_end: usize) -> (usize, usize) {
+    let is_boundary = |character: char| matches!(character, '。' | '！' | '？' | ';' | '；' | '\n');
+    let start = value[..literal_start]
+        .char_indices()
+        .rev()
+        .find(|(_, character)| is_boundary(*character))
+        .map(|(index, character)| index + character.len_utf8())
+        .unwrap_or(0);
+    let end = value[literal_end..]
+        .char_indices()
+        .find(|(_, character)| is_boundary(*character))
+        .map(|(index, character)| literal_end + index + character.len_utf8())
+        .unwrap_or(value.len());
+    (start, end)
 }
 
 fn cited_knowledge_numeric_literals(
@@ -1919,6 +2094,8 @@ fn cited_tool_numeric_values(evidence_ids: &[String], evidence: &EvidenceStore) 
             collect_tool_numeric_values(result, None, &mut values);
         }
     }
+    values.sort_by(f64::total_cmp);
+    values.dedup_by(|left, right| (*left - *right).abs() <= 1e-12);
     values
 }
 
@@ -1993,6 +2170,55 @@ fn matches_tool_value(literal: NumericLiteral, sources: &[f64]) -> bool {
     })
 }
 
+fn matches_derived_tool_value(literal: NumericLiteral, sources: &[f64]) -> bool {
+    if sources.is_empty() {
+        return false;
+    }
+    let displayed = literal.scaled_value();
+    let display_tolerance = (if literal.decimal_places == 0 {
+        0.5
+    } else {
+        0.5 * 10_f64.powi(-(literal.decimal_places as i32))
+    }) * literal.multiplier;
+
+    // Common lossless presentation conversions: seconds/minutes and values
+    // normalized per minute. They remain derived from cited simulator facts.
+    if !literal.percent
+        && sources.iter().any(|source| {
+            [source / 60.0, source * 60.0].into_iter().any(|candidate| {
+                (displayed - candidate).abs()
+                    <= display_tolerance.max(candidate.abs().max(1.0) * 1e-9)
+            })
+        })
+    {
+        return true;
+    }
+
+    if !literal.percent || displayed.abs() < 1e-12 {
+        return false;
+    }
+    // Percentages such as 45/1750, 54/601, or delta/baseline are legitimate
+    // arithmetic restatements. Verify the equation against two cited values
+    // instead of requiring the exact percentage to be stored redundantly.
+    let mut magnitudes = sources.iter().map(|value| value.abs()).collect::<Vec<_>>();
+    magnitudes.sort_by(f64::total_cmp);
+    magnitudes.dedup_by(|left, right| (*left - *right).abs() <= 1e-12);
+    sources.iter().any(|numerator| {
+        let expected_denominator = numerator.abs() * 100.0 / displayed.abs();
+        let insertion = magnitudes
+            .binary_search_by(|candidate| candidate.total_cmp(&expected_denominator))
+            .unwrap_or_else(|index| index);
+        [insertion.saturating_sub(1), insertion]
+            .into_iter()
+            .filter_map(|index| magnitudes.get(index))
+            .any(|denominator| {
+                denominator.abs() > 1e-12
+                    && ((numerator.abs() / denominator.abs()) * 100.0 - displayed.abs()).abs()
+                        <= display_tolerance.max(0.005)
+            })
+    })
+}
+
 fn matches_metric_label_literal(
     prose: &str,
     literal: NumericLiteral,
@@ -2058,9 +2284,126 @@ mod tests {
 
     #[test]
     fn rotation_anchor_numbers_are_navigation_ids_not_numeric_claims() {
-        let literals = numeric_literals("[[这些绝刀|op:24,57,91]] 与 [[这一段|op:20-25]]");
-        assert_eq!(literals.len(), 3);
+        let literals = numeric_literals(
+            "[[这些绝刀|op:24,57,91]]、[[这一段|op:20-25]] 与 [[两次触顶|ev:42,97]]",
+        );
+        assert_eq!(literals.len(), 4);
         assert!(literals.iter().all(|literal| literal.identifier));
+    }
+
+    #[test]
+    fn missing_prose_citations_are_repaired_instead_of_borrowing_all_run_evidence() {
+        let mut value = report();
+        value.findings[0].evidence_ids.clear();
+        value.findings[0].metrics.clear();
+        value.findings[0].title = "释放位置需要检查".to_string();
+        value.findings[0].explanation =
+            "读取对应事件后再比较释放条件。".to_string();
+        let raw = serde_json::to_string(&value).unwrap();
+
+        assert_eq!(
+            parse_and_validate_report(&raw, &evidence()).unwrap_err().code,
+            "finding_without_evidence"
+        );
+        assert_eq!(
+            parse_and_salvage_report(&raw, &evidence()).unwrap_err().code,
+            "empty_salvaged_report"
+        );
+    }
+
+    #[test]
+    fn fabricated_citations_cannot_be_replaced_with_unrelated_baseline_evidence() {
+        let mut value = report();
+        value.summary = "这些释放位置需要比较。".to_string();
+        value.findings[0].evidence_ids = vec!["b".repeat(64)];
+        value.findings[0].metrics.clear();
+        let raw = serde_json::to_string(&value).unwrap();
+
+        assert_eq!(
+            parse_and_validate_report(&raw, &evidence()).unwrap_err().code,
+            "unknown_evidence_id"
+        );
+        assert_eq!(
+            parse_and_salvage_report(&raw, &evidence()).unwrap_err().code,
+            "empty_salvaged_report"
+        );
+    }
+
+    #[test]
+    fn unrelated_tool_numbers_do_not_automatically_become_claim_evidence() {
+        let store = BTreeMap::from([
+            (
+                "a".repeat(64),
+                json!({
+                    "evidence_id": "a".repeat(64),
+                    "tool_name": "inspect_timeline_events",
+                    "result": {"total_matches": 17}
+                }),
+            ),
+            (
+                "c".repeat(64),
+                json!({
+                    "evidence_id": "c".repeat(64),
+                    "tool_name": "analyze_timeline",
+                    "result": {"rage": {"overflow_total": 45}}
+                }),
+            ),
+        ]);
+        let mut value = report();
+        value.findings[0].metrics.clear();
+        value.findings[0].explanation =
+            "这些事件需要继续比较释放条件。实测溢出怒气为45点。".to_string();
+        let raw = serde_json::to_string(&value).unwrap();
+
+        assert_eq!(
+            parse_and_validate_report(&raw, &store).unwrap_err().code,
+            "numeric_prose_claim"
+        );
+        let salvaged = parse_and_salvage_report(&raw, &store).unwrap();
+        assert_eq!(salvaged.content.findings[0].evidence_ids, vec!["a".repeat(64)]);
+        assert_eq!(
+            salvaged.content.findings[0].explanation,
+            "这些事件需要继续比较释放条件。这项判断的数值依据尚待核实。"
+        );
+    }
+
+    #[test]
+    fn provider_rotation_anchor_braces_are_normalized() {
+        let mut value = report();
+        value.findings[0].explanation = "检查[[两次绝刀|ev:4,9}}的实际状态。".to_string();
+        let parsed =
+            parse_and_validate_report(&serde_json::to_string(&value).unwrap(), &evidence())
+                .unwrap();
+        assert_eq!(
+            parsed.content.findings[0].explanation,
+            "检查[[两次绝刀|ev:4,9]]的实际状态。"
+        );
+    }
+
+    #[test]
+    fn a_completed_baseline_preserves_the_unrun_candidate_boundary() {
+        let mut value = report();
+        value.summary = "基线已完成；该候选未运行模拟，收益仍待验证。".to_string();
+        value.findings[0].explanation =
+            "当前循环已有模拟记录。新方案未执行模拟，仅能先提出机制假设。".to_string();
+        value.limitations = vec![
+            "该候选未运行模拟，收益仍待验证。".to_string(),
+            "停手后的恢复方案缺少模拟数据。".to_string(),
+        ];
+        let raw = serde_json::to_string(&value).unwrap();
+
+        let validated = parse_and_validate_report(&raw, &evidence()).unwrap();
+        assert_eq!(validated.content.summary, value.summary);
+        assert_eq!(validated.content.findings[0].explanation, value.findings[0].explanation);
+        assert_eq!(validated.content.limitations, value.limitations);
+        assert_eq!(validated.sanitized_claims, 0);
+
+        let salvaged = parse_and_salvage_report(&raw, &evidence()).unwrap();
+        assert_eq!(salvaged.content.summary, value.summary);
+        assert_eq!(salvaged.content.findings[0].explanation, value.findings[0].explanation);
+        for boundary in &value.limitations {
+            assert!(salvaged.content.limitations.contains(boundary));
+        }
     }
 
     fn evidence() -> EvidenceStore {
@@ -2112,29 +2455,6 @@ mod tests {
         ])
     }
 
-    #[test]
-    fn comparison_fallback_explains_the_completed_decision() {
-        let id = "c".repeat(64);
-        let store = BTreeMap::from([(
-            id.clone(),
-            json!({
-                "evidence_id": id,
-                "tool_name": "compare_scenarios",
-                "result": {
-                    "candidates": [{
-                        "label": "阵云判定候选",
-                        "delta_dps": -21055.56,
-                        "delta_percent": -0.6968
-                    }]
-                }
-            }),
-        )]);
-        let summary = comparison_decision_summary(&["c".repeat(64)], &store).unwrap();
-        assert!(summary.contains("下降 21056（0.70%）"));
-        assert!(summary.contains("候选已被否定"));
-        assert!(!summary.contains("再决定"));
-    }
-
     fn report() -> AgentReportContentV1 {
         AgentReportContentV1 {
             schema_version: AGENT_REPORT_CONTENT_SCHEMA_V1.to_string(),
@@ -2152,7 +2472,8 @@ mod tests {
                 }],
             }],
             recommendations: Vec::new(),
-            rotation_changes: Vec::new(),
+        rotation_changes: Vec::new(),
+        artifacts: Vec::new(),
             limitations: vec!["只验证了当前场景。".to_string()],
             refusal_reason: None,
         }
@@ -2567,7 +2888,7 @@ mod tests {
                 "evidence_pointers": ["/snippet"],
                 "metrics": [{
                     "metric_name": "覆盖率",
-                    "value": 50.0,
+                    "value": "50.0",
                     "unit": "%",
                     "json_pointer": "/result/coverage"
                 }, {
@@ -2586,8 +2907,12 @@ mod tests {
         let parsed = parse_report_json(&raw).unwrap();
         assert_eq!(parsed.schema_version, AGENT_REPORT_CONTENT_SCHEMA_V1);
         assert_eq!(parsed.findings[0].title, "分析结论");
-        assert_eq!(parsed.findings[0].explanation, "白刀是未触发援戈血影的苍雪刀。");
+        assert_eq!(
+            parsed.findings[0].explanation,
+            "白刀是未触发援戈血影的苍雪刀。"
+        );
         assert_eq!(parsed.findings[0].metrics[0].unit, "percent");
+        assert_eq!(parsed.findings[0].metrics[0].value, 50.0);
         assert_eq!(parsed.findings[0].metrics.len(), 1);
         assert_eq!(parsed.findings[0].metrics[0].evidence_id, "a".repeat(64));
         assert_eq!(parsed.recommendations[0].title, "建议");
@@ -2777,8 +3102,7 @@ mod tests {
 
     #[test]
     fn invalid_report_error_explains_the_required_shape() {
-        let error = parse_and_validate_report(r#"{"limitations":[42]}"#, &evidence())
-            .unwrap_err();
+        let error = parse_and_validate_report(r#"{"limitations":[42]}"#, &evidence()).unwrap_err();
 
         assert_eq!(error.code, "invalid_report_json");
         assert!(error.message.contains("limitations must be strings"));
@@ -2865,8 +3189,7 @@ mod tests {
         let mut value = report();
         value.summary = "当前宏判定已由场景证据确认。".to_string();
         value.findings[0].title = "当前宏原句".to_string();
-        value.findings[0].explanation =
-            "当前条件为 rage>64 且 bufftime:嗜血<6。".to_string();
+        value.findings[0].explanation = "当前条件为 rage>64 且 bufftime:嗜血<6。".to_string();
         value.findings[0].metrics.clear();
         let mut scenario_evidence = evidence();
         let envelope = scenario_evidence.get_mut(&"a".repeat(64)).unwrap();
@@ -2880,6 +3203,86 @@ mod tests {
         });
 
         validate_report(&value, &scenario_evidence).unwrap();
+    }
+
+    #[test]
+    fn prose_accepts_a_percentage_derived_from_two_cited_tool_values() {
+        let mut value = report();
+        value.summary = "实测溢出45点，占总获得1750点约2.6%。".to_string();
+        value.findings[0].explanation = value.summary.clone();
+        value.findings[0].metrics.clear();
+        let mut store = evidence();
+        store.get_mut(&"a".repeat(64)).unwrap()["result"] = json!({
+            "overflow_total": 45,
+            "total_rage_gained": 1750
+        });
+        validate_report(&value, &store).unwrap();
+    }
+
+    #[test]
+    fn compatible_metric_pointer_is_recovered_by_value_field_and_skill_context() {
+        let id = "d".repeat(64);
+        let store = BTreeMap::from([(
+            id.clone(),
+            json!({
+                "evidence_id": id,
+                "tool_name": "analyze_timeline",
+                "result": {
+                    "rage": {
+                        "overflow_sources": [
+                            {"rage_source": "麟光甲三层结算回怒", "event_count": 2, "overflow_total": 30},
+                            {"rage_source": "血怒基础回怒", "event_count": 2, "overflow_total": 10}
+                        ]
+                    }
+                }
+            }),
+        )]);
+        let mut metric = GroundedMetricV1 {
+            label: "绝刀溢出总量".to_string(),
+            value: 30.0,
+            unit: "点".to_string(),
+            evidence_id: "d".repeat(64),
+            json_pointer: "/result/rage/overflow_sources".to_string(),
+        };
+        let pointer = infer_metric_source_pointer(&metric, &store).unwrap();
+        assert_eq!(pointer, "/result/rage/overflow_sources/0/overflow_total");
+        metric.json_pointer = pointer;
+        assert!(metric_matches_evidence(&metric, &store));
+    }
+
+    #[test]
+    fn an_existing_event_pointer_cannot_move_to_another_event_to_match_a_number() {
+        let id = "a".repeat(64);
+        let store = EvidenceStore::from([(
+            id.clone(),
+            json!({
+                "evidence_id": id,
+                "tool_name": "inspect_timeline_events",
+                "result": {"events": [
+                    {"name": "技能甲", "damage": 100.0},
+                    {"name": "技能甲", "damage": 200.0}
+                ]}
+            }),
+        )]);
+        let mut value = report();
+        value.findings[0].title = "第一次释放".to_string();
+        value.findings[0].metrics[0] = GroundedMetricV1 {
+            label: "第一次释放伤害".to_string(),
+            value: 200.0,
+            unit: "damage".to_string(),
+            evidence_id: id,
+            json_pointer: "/result/events/0/damage".to_string(),
+        };
+
+        normalize_metric_citations(&mut value, &store);
+        assert_eq!(value.findings[0].metrics[0].json_pointer, "/result/events/0/damage");
+        let failure = parse_and_validate_report(
+            &serde_json::to_string(&value).unwrap(),
+            &store,
+        ).unwrap_err();
+        assert_eq!(failure.code, "metric_value_mismatch");
+        assert!(failure.message.contains("/result/events/0/damage"));
+        assert!(failure.message.contains("100"));
     }
 
     #[test]
@@ -2955,7 +3358,7 @@ mod tests {
     }
 
     #[test]
-    fn salvage_keeps_grounded_metrics_and_redacts_only_unsupported_numbers() {
+    fn salvage_keeps_grounded_metrics_and_marks_unsupported_sentences() {
         let mut value = report();
         value.summary = "当前 DPS 为 123.5，未经验证的预测为 999。".to_string();
         value.findings[0].explanation =
@@ -2980,37 +3383,57 @@ mod tests {
         assert_eq!(salvaged.content.findings[0].metrics.len(), 1);
         assert_eq!(
             salvaged.content.summary,
-            "当前基线的可信指标与主要结论见下方。"
+            "这项判断的数值依据尚待核实。"
         );
         assert!(!salvaged.content.summary.contains("999"));
         assert_eq!(
             salvaged.content.findings[0].explanation,
-            "本轮模拟给出了各技能的伤害构成；占比用于描述当前输出画像，不能单独证明循环质量。"
+            "这项判断的数值依据尚待核实。"
         );
         validate_report(&salvaged.content, &evidence()).unwrap();
     }
 
     #[test]
-    fn salvage_falls_back_to_direct_simulator_metrics_when_all_claims_are_bad() {
+    fn nonbaseline_failure_does_not_insert_a_baseline_answer() {
         let mut baseline_evidence = evidence();
         baseline_evidence.get_mut(&"a".repeat(64)).unwrap()["tool_name"] =
             json!("simulate_scenario");
         let mut value = report();
+        value.summary = "哪些释放时机值得重新安排？".to_string();
+        value.findings[0].title = "释放时机".to_string();
         value.findings[0].evidence_ids = vec!["b".repeat(64)];
         value.findings[0].metrics[0].evidence_id = "b".repeat(64);
 
-        let salvaged =
+        let failure =
             parse_and_salvage_report(&serde_json::to_string(&value).unwrap(), &baseline_evidence)
-                .unwrap();
+                .unwrap_err();
+        assert_eq!(failure.code, "empty_salvaged_report");
+        assert!(failure.message.contains("original question"));
+    }
+
+    #[test]
+    fn event_question_salvage_preserves_its_subject_and_supported_explanation() {
+        let mut value = report();
+        value.summary = "优先检查增益结束后的释放位置。".to_string();
+        value.findings[0].title = "增益结束后的释放位置".to_string();
+        value.findings[0].explanation =
+            "这段释放发生在增益结束后，应比较它的资源与增益状态。它比其他事件低999伤害。".to_string();
+        value.findings[0].metrics[0].value = 999.0;
+        value.findings[0].metrics[0].json_pointer = "/result/not_present".to_string();
+
+        let salvaged = parse_and_salvage_report(
+            &serde_json::to_string(&value).unwrap(),
+            &evidence(),
+        ).unwrap();
+
+        assert_eq!(salvaged.content.summary, value.summary);
         assert_eq!(salvaged.content.findings.len(), 1);
+        assert_eq!(salvaged.content.findings[0].title, value.findings[0].title);
+        assert!(salvaged.content.findings[0].metrics.is_empty());
         assert_eq!(
-            salvaged.content.findings[0].metrics[0].json_pointer,
-            "/result/dps"
+            salvaged.content.findings[0].explanation,
+            "这段释放发生在增益结束后，应比较它的资源与增益状态。这项判断的数值依据尚待核实。"
         );
-        assert_eq!(
-            salvaged.content.findings[0].evidence_ids,
-            vec!["a".repeat(64)]
-        );
-        validate_report(&salvaged.content, &baseline_evidence).unwrap();
+        assert!(!serde_json::to_string(&salvaged.content).unwrap().contains("基线"));
     }
 }

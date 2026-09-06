@@ -154,7 +154,7 @@ backend/prompts/agent_system_v2.md
 计划中的最小接口：
 
 ```text
-GET  /api/agent/providers
+GET  /api/agent/providers<!--  -->
 POST /api/agent/runs
 GET  /api/agent/runs/:run_id/stream
 POST /api/agent/runs/:run_id/cancel
@@ -299,7 +299,7 @@ agent_sessions/
 
 **阻断节点 C：** 任何公网演示或仓库公开动作，都需重新确认 HTTPS、限流、配额、凭据轮换、日志脱敏和许可边界。
 
-交付：已提供一键验收脚本、案例页、真实模型基线和 90 秒演示脚本；Rust 122/122、Phase 1 20/20、Phase 2 离线 12/12，真实 userdata 写保护通过，公网保持关闭。
+交付：已提供一键验收脚本、案例页、真实模型基线和 90 秒演示脚本；Rust 118/118、Phase 1 20/20、Phase 2 离线 12/12，真实 userdata 写保护通过，公网保持关闭。
 
 ## 本阶段完成标准
 

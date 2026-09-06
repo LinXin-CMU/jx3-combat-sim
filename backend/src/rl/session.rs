@@ -27,11 +27,7 @@ impl RlSessions {
         let n = self
             .counter
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let id = format!(
-            "env-{}-{}",
-            std::process::id(),
-            n
-        );
+        let id = format!("env-{}-{}", std::process::id(), n);
         let mut map = self.inner.write().await;
         map.insert(id.clone(), Arc::new(Mutex::new(env)));
         id

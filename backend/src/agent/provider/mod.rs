@@ -39,6 +39,10 @@ pub struct ProviderError {
     pub upstream_status: Option<u16>,
     #[serde(skip_serializing)]
     pub usage: TokenUsage,
+    /// Local replay-only diagnostics. This field is never serialized into
+    /// public API errors or shareable debug exports.
+    #[serde(skip_serializing)]
+    pub private_detail: Option<String>,
 }
 
 impl ProviderError {
@@ -49,6 +53,7 @@ impl ProviderError {
             retryable: false,
             upstream_status: None,
             usage: TokenUsage::default(),
+            private_detail: None,
         }
     }
 
@@ -59,6 +64,7 @@ impl ProviderError {
             retryable: false,
             upstream_status: None,
             usage: TokenUsage::default(),
+            private_detail: None,
         }
     }
 
@@ -70,6 +76,7 @@ impl ProviderError {
                 retryable: true,
                 upstream_status: None,
                 usage: TokenUsage::default(),
+                private_detail: None,
             }
         } else {
             Self {
@@ -78,6 +85,7 @@ impl ProviderError {
                 retryable: true,
                 upstream_status: None,
                 usage: TokenUsage::default(),
+                private_detail: None,
             }
         }
     }
@@ -102,6 +110,7 @@ impl ProviderError {
             retryable: status == 408 || status == 429 || status >= 500,
             upstream_status: Some(status),
             usage: TokenUsage::default(),
+            private_detail: None,
         }
     }
 
@@ -150,6 +159,7 @@ impl ProviderError {
                     retryable: false,
                     upstream_status: Some(status),
                     usage: TokenUsage::default(),
+                    private_detail: None,
                 };
             }
         }
@@ -163,6 +173,7 @@ impl ProviderError {
             retryable: false,
             upstream_status: None,
             usage: TokenUsage::default(),
+            private_detail: None,
         }
     }
 
@@ -173,6 +184,7 @@ impl ProviderError {
             retryable: false,
             upstream_status: None,
             usage: TokenUsage::default(),
+            private_detail: None,
         }
     }
 
@@ -183,11 +195,17 @@ impl ProviderError {
             retryable: false,
             upstream_status: None,
             usage: TokenUsage::default(),
+            private_detail: None,
         }
     }
 
     pub fn with_usage(mut self, usage: TokenUsage) -> Self {
         self.usage = usage;
+        self
+    }
+
+    pub fn with_private_detail(mut self, detail: String) -> Self {
+        self.private_detail = Some(detail);
         self
     }
 }

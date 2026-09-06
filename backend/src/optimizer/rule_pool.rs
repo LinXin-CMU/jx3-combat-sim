@@ -108,7 +108,8 @@ pub fn build_pool(
             };
             let name = rule_display_name(line);
             let line_text = serialize_line(line);
-            let tunables = extract_line_tunables(line, page_tag_name(page_tag), idx + 1, &line_text);
+            let tunables =
+                extract_line_tunables(line, page_tag_name(page_tag), idx + 1, &line_text);
             let is_first = match page_tag {
                 PageTag::Shield => shield_order.is_empty(),
                 PageTag::Blade => blade_order.is_empty(),
@@ -181,16 +182,22 @@ pub fn build_pool(
         match target_page {
             PageTag::Shield => {
                 shield_order.push(id.clone());
-                if c.initial_enabled { shield_enabled.insert(id); }
+                if c.initial_enabled {
+                    shield_enabled.insert(id);
+                }
             }
             PageTag::Blade => {
                 blade_order.push(id.clone());
-                if c.initial_enabled { blade_enabled.insert(id); }
+                if c.initial_enabled {
+                    blade_enabled.insert(id);
+                }
             }
             PageTag::Either => {
                 // Either 规则在两页都可候选，默认放擎盾页末尾
                 shield_order.push(id.clone());
-                if c.initial_enabled { shield_enabled.insert(id); }
+                if c.initial_enabled {
+                    shield_enabled.insert(id);
+                }
             }
         }
     }
@@ -209,7 +216,11 @@ pub fn build_pool(
 // ─────────────────────────────────────────────────────────────────────────────
 
 pub fn serialize_line(line: &MacroLine) -> String {
-    let prefix = if line.action.is_fcast() { "/fcast" } else { "/cast" };
+    let prefix = if line.action.is_fcast() {
+        "/fcast"
+    } else {
+        "/cast"
+    };
     let cond = line
         .condition
         .as_ref()
@@ -239,7 +250,9 @@ fn extract_line_tunables(
     preview: &str,
 ) -> Vec<TunableParam> {
     let mut out = Vec::new();
-    let Some(cond) = &line.condition else { return out };
+    let Some(cond) = &line.condition else {
+        return out;
+    };
     let mut leaves = Vec::new();
     walk_leaves(cond, &mut leaves);
     for (vi, leaf) in leaves.iter().enumerate() {
@@ -262,7 +275,10 @@ enum Leaf<'a> {
 fn walk_leaves<'a>(cond: &'a MacroCondition, out: &mut Vec<Leaf<'a>>) {
     use MacroCondition::*;
     match cond {
-        And(a, b) | Or(a, b) => { walk_leaves(a, out); walk_leaves(b, out); }
+        And(a, b) | Or(a, b) => {
+            walk_leaves(a, out);
+            walk_leaves(b, out);
+        }
         Rage(op, v) => out.push(Leaf::Rage(*op, *v)),
         Life(op, v) => out.push(Leaf::Life(*op, *v)),
         BuffTime(n, op, v) => out.push(Leaf::BuffTime(n.as_str(), *op, *v)),
@@ -310,24 +326,56 @@ fn leaf_to_tunable(
         Leaf::BuffTime(n, _, v) => {
             let mn = round_step((*v - 5.0).max(0.0), 0.1);
             let mx = round_step(*v + 5.0, 0.1);
-            (format!("bufftime:{}", n), *v, mn, mx, 0.1, "float", LeafKind::BuffTime)
+            (
+                format!("bufftime:{}", n),
+                *v,
+                mn,
+                mx,
+                0.1,
+                "float",
+                LeafKind::BuffTime,
+            )
         }
         Leaf::TBuffTime(n, _, v) => {
             let mn = round_step((*v - 5.0).max(0.0), 0.1);
             let mx = round_step(*v + 5.0, 0.1);
-            (format!("tbufftime:{}", n), *v, mn, mx, 0.1, "float", LeafKind::TBuffTime)
+            (
+                format!("tbufftime:{}", n),
+                *v,
+                mn,
+                mx,
+                0.1,
+                "float",
+                LeafKind::TBuffTime,
+            )
         }
         Leaf::SkillEnergy(n, _, v) => {
             let fv = *v as f64;
             let mn = (fv - 3.0).max(0.0);
             let mx = (fv + 3.0).min(10.0);
-            (format!("skill_energy:{}", n), fv, mn, mx, 1.0, "int", LeafKind::SkillEnergy)
+            (
+                format!("skill_energy:{}", n),
+                fv,
+                mn,
+                mx,
+                1.0,
+                "int",
+                LeafKind::SkillEnergy,
+            )
         }
         Leaf::NearbyEnemy(_, v) => {
             let fv = *v as f64;
             let mn = (fv - 5.0).max(0.0);
             let mx = (fv + 5.0).min(30.0);
-            ("nearby_enemy".to_string(), fv, mn, mx, 1.0, "int", LeafKind::NearbyEnemy)
+            (
+                "nearby_enemy".to_string(),
+                fv,
+                mn,
+                mx,
+                1.0,
+                "int",
+                LeafKind::NearbyEnemy,
+            )
         }
     };
 
@@ -351,7 +399,9 @@ fn leaf_to_tunable(
 }
 
 fn round_step(v: f64, step: f64) -> f64 {
-    if step <= 0.0 { return v; }
+    if step <= 0.0 {
+        return v;
+    }
     let scale = (1.0 / step).round();
     (v * scale).round() / scale
 }

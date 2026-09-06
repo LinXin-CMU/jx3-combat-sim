@@ -4,9 +4,9 @@
 //! 陷阵奇穴 (41834)：15s ICD 内连发两次"地坼"(41902，视为盾击)
 //! 天下宏愿橙武装备：1024 制累计 prob=307，触发"盾击·神兵"(25780)
 
-use crate::*;
-use crate::equip_effects::TIANXIA_HONGYUAN_WEAPON_IDS;
 use super::ji_po_yuan_ge;
+use crate::equip_effects::TIANXIA_HONGYUAN_WEAPON_IDS;
+use crate::*;
 
 pub fn cast_skill(player: &mut Player, em: &mut ScriptEmitter, t: f64) {
     // 盾压 CD 期望重置：标记本帧施放了非盾压盾系技能

@@ -106,7 +106,11 @@ impl MacroConfig {
                 }
             }
         }
-        out.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)).then(a.2.cmp(&b.2)));
+        out.sort_by(|a, b| {
+            a.0.cmp(&b.0)
+                .then(a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+                .then(a.2.cmp(&b.2))
+        });
         out.dedup();
         out
     }
@@ -161,8 +165,12 @@ impl CmpOp {
 impl CmpOp {
     pub fn symbol(self) -> &'static str {
         match self {
-            CmpOp::Gt => ">", CmpOp::Lt => "<", CmpOp::Eq => "=",
-            CmpOp::GtEq => ">=", CmpOp::LtEq => "<=", CmpOp::Neq => "~=",
+            CmpOp::Gt => ">",
+            CmpOp::Lt => "<",
+            CmpOp::Eq => "=",
+            CmpOp::GtEq => ">=",
+            CmpOp::LtEq => "<=",
+            CmpOp::Neq => "~=",
         }
     }
 }
@@ -199,7 +207,9 @@ impl MacroCondition {
             MacroCondition::SkillNotInCd(n) => format!("skill_notin_cd:{}", n),
             MacroCondition::SkillExists(id) => format!("skill:{}", id),
             MacroCondition::SkillNotExists(id) => format!("noskill:{}", id),
-            MacroCondition::SkillEnergy(n, op, v) => format!("skill_energy:{}{}{}", n, op.symbol(), v),
+            MacroCondition::SkillEnergy(n, op, v) => {
+                format!("skill_energy:{}{}{}", n, op.symbol(), v)
+            }
             MacroCondition::LastSkill(n) => format!("last_skill={}", n),
             MacroCondition::LastSkillNot(n) => format!("last_skill~={}", n),
             MacroCondition::NearbyEnemy(op, v) => format!("nearby_enemy{}{}", op.symbol(), v),

@@ -19,6 +19,7 @@ pub struct SimulatorContext<'a> {
     pub mount: Mount,
     pub constants: MountConstants,
     pub skills: &'a [SkillSpec],
+    pub talents: &'a [crate::TalentEntry],
     pub recipes: &'a [RecipeEntry],
     pub team_buffs: &'a [TeamBuffEntry],
     pub formations: &'a [FormationEntry],
@@ -168,6 +169,10 @@ pub struct ScenarioSummary {
     pub network_delay_ms: u32,
     pub boss_attack_interval: Option<f64>,
     pub rotation_input: RotationInputSummary,
+    /// Versioned definitions for interpretation; observations remain in the
+    /// simulator/timeline evidence. Optional for historical summary decoding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mechanics_context: Option<super::mechanics::MechanicsContextV1>,
 }
 
 const MAX_ROTATION_INPUT_ITEMS: usize = 128;
@@ -183,11 +188,21 @@ pub struct RotationInputSummary {
     pub macro_semantics: Option<MacroSemanticsSummary>,
     pub macro_statements: Vec<MacroStatementSummary>,
     pub manual_operations: Vec<ManualOperationSummary>,
+    #[serde(default)]
+    pub total_items: usize,
+    #[serde(default)]
+    pub returned_item_count: usize,
+    #[serde(default)]
+    pub skill_semantics: BTreeMap<String, SkillExecutionSemanticsV1>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct MacroSemanticsSummary {
+    /// Stable product-facing classification. A page without a stance filter is
+    /// a general one-page macro, not a "single-stance" macro.
+    pub structure: String,
+    pub page_count: usize,
     pub operator_precedence: String,
     pub associativity: String,
     pub line_selection: String,
@@ -260,7 +275,9 @@ fn macro_condition_ast(condition: &crate::macro_engine::MacroCondition) -> serde
         MacroCondition::SkillNotInCd(name) => {
             serde_json::json!({"kind": "skill_not_in_cd", "skill_name": name})
         }
-        MacroCondition::SkillExists(id) => serde_json::json!({"kind": "skill_exists", "skill_id": id}),
+        MacroCondition::SkillExists(id) => {
+            serde_json::json!({"kind": "skill_exists", "skill_id": id})
+        }
         MacroCondition::SkillNotExists(id) => {
             serde_json::json!({"kind": "skill_not_exists", "skill_id": id})
         }
@@ -288,18 +305,29 @@ fn macro_condition_ast(condition: &crate::macro_engine::MacroCondition) -> serde
     }
 }
 
+pub type ManualOperationSummary = RotationInputEntryV1;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
-pub struct ManualOperationSummary {
-    /// Stable identity for this exact occurrence. It does not depend on UI
-    /// wrapping, zoom level, or display mode.
-    pub anchor_id: String,
-    pub sequence_index: usize,
-    /// Human-facing one-based operation number.
-    pub operation_number: usize,
-    pub skill_name: String,
-    pub channel_ticks: Option<u32>,
-    pub timing_offset_seconds: Option<f64>,
+pub struct SkillCooldownSemanticsV1 {
+    pub skill_id: u32,
+    pub cooldown_id: String,
+    pub kind: String,
+    pub mode: crate::CdMode,
+    pub base_duration_seconds: f64,
+    pub haste_scaled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct SkillExecutionSemanticsV1 {
+    pub basis: String,
+    pub skill_ids: Vec<u32>,
+    /// None means unresolved or rank-dependent. This follows the simulator's
+    /// own main-GCD predicate, including auxiliary GCD skills.
+    pub is_main_gcd: Option<bool>,
+    pub cooldown_semantics: String,
+    pub cooldowns: Vec<SkillCooldownSemanticsV1>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -317,6 +345,19 @@ pub struct RotationInputEntryV1 {
     pub channel_ticks: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timing_offset_seconds: Option<f64>,
+    /// Positive delay from this operation's earliest legal cast time. Dynamic
+    /// follow-GCD-end scheduling has no fixed delay and serializes as null.
+    #[serde(default)]
+    pub delay_seconds: Option<f64>,
+    #[serde(default)]
+    pub timing_mode: String,
+    /// Original scenario encoding for exact replay, including negative sentinels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_timing_offset: Option<f64>,
+    #[serde(default)]
+    pub is_main_gcd: Option<bool>,
+    #[serde(default)]
+    pub cooldown_semantics: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -336,12 +377,83 @@ pub struct RotationInputInspectionV1 {
     pub matches: Vec<RotationInputMatchV1>,
     pub window: Vec<RotationInputEntryV1>,
     pub next_start_index: Option<usize>,
+    /// Query matches in the entire input sequence, before pagination.
+    #[serde(default)]
+    pub total_matches: Option<usize>,
+    #[serde(default)]
+    pub returned_match_count: usize,
+    #[serde(default)]
+    pub returned_window_count: usize,
+    #[serde(default)]
+    pub page_start_index: usize,
+    #[serde(default)]
+    pub has_more: bool,
+    #[serde(default)]
+    pub skill_semantics: BTreeMap<String, SkillExecutionSemanticsV1>,
+}
+
+fn skill_execution_semantics(name: &str, skills: &[SkillSpec]) -> SkillExecutionSemanticsV1 {
+    let mut matched = skills.iter().filter(|skill| !skill.passive && skill.name == name)
+        .collect::<Vec<_>>();
+    if matched.is_empty() {
+        matched = skills.iter().filter(|skill| {
+            !skill.passive && skill.name.split('·').next() == Some(name)
+        }).collect();
+    }
+    let is_main_gcd = matched.first().and_then(|first| {
+        let expected = crate::skill_is_main(first);
+        matched.iter().all(|skill| crate::skill_is_main(skill) == expected).then_some(expected)
+    });
+    let cooldown_semantics = match is_main_gcd {
+        Some(true) => "main_gcd",
+        Some(false) if matched.iter().any(|skill| skill.cooldowns.iter().any(|cd| {
+            cd.cd_id.starts_with("gcd_") && cd.mode == crate::CdMode::CheckAndTrigger
+        })) => "auxiliary_gcd",
+        Some(false) => "independent_of_main_gcd",
+        None if matched.is_empty() => "unresolved_skill",
+        None => "rank_dependent",
+    };
+    SkillExecutionSemanticsV1 {
+        basis: "runtime_skill_definition_base_values".to_string(),
+        skill_ids: matched.iter().map(|skill| skill.skill_id).collect(),
+        is_main_gcd,
+        cooldown_semantics: cooldown_semantics.to_string(),
+        cooldowns: matched.iter().flat_map(|skill| skill.cooldowns.iter().map(|cd| {
+            SkillCooldownSemanticsV1 {
+                skill_id: skill.skill_id,
+                cooldown_id: cd.cd_id.clone(),
+                kind: if cd.cd_id.starts_with("gcd_") { "shared_gcd" }
+                    else if cd.cd_id.starts_with("protect_") { "skill_protection" }
+                    else { "skill_cooldown" }.to_string(),
+                mode: cd.mode,
+                base_duration_seconds: cd.duration,
+                haste_scaled: cd.haste,
+            }
+        })).collect(),
+    }
+}
+
+fn input_skill_semantics<'a>(
+    names: impl IntoIterator<Item = &'a str>,
+    skills: &[SkillSpec],
+) -> BTreeMap<String, SkillExecutionSemanticsV1> {
+    names.into_iter().collect::<std::collections::BTreeSet<_>>().into_iter()
+        .map(|name| (name.to_string(), skill_execution_semantics(name, skills))).collect()
 }
 
 fn manual_rotation_entry(
     simulation: &crate::SimulateRequest,
     sequence_index: usize,
+    skill_semantics: &BTreeMap<String, SkillExecutionSemanticsV1>,
 ) -> RotationInputEntryV1 {
+    let raw_timing_offset = simulation.timing_offsets.get(&sequence_index.to_string()).copied();
+    let timing_mode = match raw_timing_offset {
+        Some(value) if value < 0.0 => "follow_gcd_end",
+        Some(value) if value > 0.0 => "delay_from_earliest_cast",
+        _ => "as_soon_as_available",
+    };
+    let delay_seconds = raw_timing_offset.filter(|value| *value >= 0.0);
+    let semantics = skill_semantics.get(&simulation.sequence[sequence_index]);
     RotationInputEntryV1 {
         anchor_id: format!("sequence:{sequence_index}"),
         sequence_index,
@@ -351,10 +463,13 @@ fn manual_rotation_entry(
             .channel_ticks
             .get(&sequence_index.to_string())
             .copied(),
-        timing_offset_seconds: simulation
-            .timing_offsets
-            .get(&sequence_index.to_string())
-            .copied(),
+        timing_offset_seconds: delay_seconds,
+        delay_seconds,
+        timing_mode: timing_mode.to_string(),
+        raw_timing_offset,
+        is_main_gcd: semantics.and_then(|value| value.is_main_gcd),
+        cooldown_semantics: semantics.map(|value| value.cooldown_semantics.clone())
+            .unwrap_or_else(|| "unresolved_skill".to_string()),
     }
 }
 
@@ -367,16 +482,23 @@ pub fn inspect_rotation_input(
     start_index: usize,
     limit: usize,
     context_radius: usize,
+    context: &SimulatorContext<'_>,
     provenance: &ToolProvenance,
 ) -> Result<EvidenceEnvelopeV1<RotationInputInspectionV1>, ToolError> {
     let started = Instant::now();
     validate_trace_id(trace_id)?;
     snapshot.verify_hash()?;
+    verify_runtime(snapshot, context)?;
     let simulation = &snapshot.simulation;
     let total_items = simulation.sequence.len();
+    let mut skill_semantics = input_skill_semantics(simulation.sequence.iter().map(String::as_str), context.skills);
     let normalized_query = query.map(str::trim).filter(|value| !value.is_empty());
     let mut matches = Vec::new();
     let mut query_next_start_index = None;
+    let total_matches = normalized_query.map(|query| {
+        let query = query.to_lowercase();
+        simulation.sequence.iter().filter(|name| name.to_lowercase().contains(&query)).count()
+    });
     if let Some(query) = normalized_query {
         let query = query.to_lowercase();
         let match_limit = limit.min(8);
@@ -394,12 +516,12 @@ pub fn inspect_rotation_input(
             let before_start = sequence_index.saturating_sub(context_radius);
             let after_end = (sequence_index + context_radius + 1).min(total_items);
             matches.push(RotationInputMatchV1 {
-                matched: manual_rotation_entry(simulation, sequence_index),
+                matched: manual_rotation_entry(simulation, sequence_index, &skill_semantics),
                 before: (before_start..sequence_index)
-                    .map(|index| manual_rotation_entry(simulation, index))
+                    .map(|index| manual_rotation_entry(simulation, index, &skill_semantics))
                     .collect(),
                 after: ((sequence_index + 1)..after_end)
-                    .map(|index| manual_rotation_entry(simulation, index))
+                    .map(|index| manual_rotation_entry(simulation, index, &skill_semantics))
                     .collect(),
             });
         }
@@ -407,7 +529,7 @@ pub fn inspect_rotation_input(
     let window = if normalized_query.is_none() {
         let end = start_index.saturating_add(limit).min(total_items);
         (start_index.min(total_items)..end)
-            .map(|index| manual_rotation_entry(simulation, index))
+            .map(|index| manual_rotation_entry(simulation, index, &skill_semantics))
             .collect()
     } else {
         Vec::new()
@@ -419,6 +541,10 @@ pub fn inspect_rotation_input(
     } else {
         None
     };
+    let names = matches.iter().flat_map(|item| {
+        std::iter::once(&item.matched).chain(item.before.iter()).chain(item.after.iter())
+    }).chain(window.iter()).map(|item| item.skill_name.as_str()).collect::<std::collections::BTreeSet<_>>();
+    skill_semantics.retain(|name, _| names.contains(name.as_str()));
     let result = RotationInputInspectionV1 {
         mode: if simulation
             .macro_text
@@ -430,6 +556,12 @@ pub fn inspect_rotation_input(
             "manual_sequence".to_string()
         },
         total_items,
+        total_matches,
+        returned_match_count: matches.len(),
+        returned_window_count: window.len(),
+        page_start_index: start_index.min(total_items),
+        has_more: next_start_index.is_some(),
+        skill_semantics,
         query: normalized_query.map(str::to_string),
         matches,
         window,
@@ -474,6 +606,7 @@ pub struct SimulationSummary {
     pub skills: Vec<SkillDamageSummary>,
 }
 
+#[derive(Clone)]
 pub struct SimulationExecution {
     pub evidence: EvidenceEnvelopeV1<SimulationSummary>,
     pub response: SimulateResponse,
@@ -482,16 +615,18 @@ pub struct SimulationExecution {
 pub fn get_current_scenario(
     trace_id: &str,
     snapshot: &ScenarioSnapshotV1,
+    context: &SimulatorContext<'_>,
     provenance: &ToolProvenance,
 ) -> Result<EvidenceEnvelopeV1<ScenarioSummary>, ToolError> {
     let started = Instant::now();
     snapshot.verify_hash()?;
+    verify_runtime(snapshot, context)?;
     let simulation = &snapshot.simulation;
     let target = simulation
         .target
         .as_ref()
         .ok_or(ScenarioError::MissingField("simulation.target"))?;
-    let rotation_input = summarize_rotation_input(simulation);
+    let rotation_input = summarize_rotation_input(simulation, context.skills);
     let result = ScenarioSummary {
         game_version: snapshot.game_version.clone(),
         mount: snapshot.mount.clone(),
@@ -537,6 +672,7 @@ pub fn get_current_scenario(
         network_delay_ms: simulation.network_delay,
         boss_attack_interval: simulation.boss_attack_interval,
         rotation_input,
+        mechanics_context: Some(super::mechanics::build_mechanics_context(snapshot, context)),
     };
 
     Ok(EvidenceEnvelopeV1::new(
@@ -550,28 +686,19 @@ pub fn get_current_scenario(
     )?)
 }
 
-fn summarize_rotation_input(simulation: &crate::SimulateRequest) -> RotationInputSummary {
+fn summarize_rotation_input(simulation: &crate::SimulateRequest, skills: &[SkillSpec]) -> RotationInputSummary {
     let Some(macro_text) = simulation
         .macro_text
         .as_deref()
         .filter(|text| !text.trim().is_empty())
     else {
-        let operations = simulation
+        let skill_semantics = input_skill_semantics(simulation.sequence.iter().take(MAX_ROTATION_INPUT_ITEMS).map(String::as_str), skills);
+        let operations: Vec<_> = simulation
             .sequence
             .iter()
             .take(MAX_ROTATION_INPUT_ITEMS)
             .enumerate()
-            .map(|(sequence_index, skill_name)| ManualOperationSummary {
-                anchor_id: format!("sequence:{sequence_index}"),
-                sequence_index,
-                operation_number: sequence_index + 1,
-                skill_name: skill_name.clone(),
-                channel_ticks: simulation.channel_ticks.get(&sequence_index.to_string()).copied(),
-                timing_offset_seconds: simulation
-                    .timing_offsets
-                    .get(&sequence_index.to_string())
-                    .copied(),
-            })
+            .map(|(sequence_index, _)| manual_rotation_entry(simulation, sequence_index, &skill_semantics))
             .collect();
         return RotationInputSummary {
             mode: "manual_sequence".to_string(),
@@ -580,6 +707,9 @@ fn summarize_rotation_input(simulation: &crate::SimulateRequest) -> RotationInpu
             truncated: simulation.sequence.len() > MAX_ROTATION_INPUT_ITEMS,
             macro_semantics: None,
             macro_statements: Vec::new(),
+            total_items: simulation.sequence.len(),
+            returned_item_count: operations.len(),
+            skill_semantics,
             manual_operations: operations,
         };
     };
@@ -598,15 +728,26 @@ fn summarize_rotation_input(simulation: &crate::SimulateRequest) -> RotationInpu
             .iter()
             .flat_map(|page| page.lines.iter())
             .map(|line| {
-                line.condition.as_ref().map(|condition| {
-                    (macro_condition_ast(condition), condition.semantic_string())
-                })
+                line.condition
+                    .as_ref()
+                    .map(|condition| (macro_condition_ast(condition), condition.semantic_string()))
             })
             .collect::<Vec<_>>()
     });
-    let stance_pages_present = parsed.as_ref().ok().is_some_and(|config| {
-        config.pages.iter().any(|page| page.stance_filter.is_some())
-    });
+    let stance_pages_present = parsed
+        .as_ref()
+        .ok()
+        .is_some_and(|config| config.pages.iter().any(|page| page.stance_filter.is_some()));
+    let page_count = parsed
+        .as_ref()
+        .ok()
+        .map(|config| config.pages.len())
+        .unwrap_or(0);
+    let macro_structure = if stance_pages_present {
+        "stance_split_pages"
+    } else {
+        "general_single_page"
+    };
     let mut parsed_statement_index = 0usize;
     let mut page = 0usize;
     let mut stance = None;
@@ -632,7 +773,11 @@ fn summarize_rotation_input(simulation: &crate::SimulateRequest) -> RotationInpu
         let Some((command, rest)) = statement
             .strip_prefix("/fcast")
             .map(|rest| ("fcast", rest.trim()))
-            .or_else(|| statement.strip_prefix("/cast").map(|rest| ("cast", rest.trim())))
+            .or_else(|| {
+                statement
+                    .strip_prefix("/cast")
+                    .map(|rest| ("cast", rest.trim()))
+            })
         else {
             continue;
         };
@@ -655,7 +800,11 @@ fn summarize_rotation_input(simulation: &crate::SimulateRequest) -> RotationInpu
                 None => (None, rest.trim().to_string()),
             }
         } else {
-            let skill_name = rest.split_whitespace().last().unwrap_or_default().to_string();
+            let skill_name = rest
+                .split_whitespace()
+                .last()
+                .unwrap_or_default()
+                .to_string();
             let condition = rest
                 .strip_suffix(&skill_name)
                 .map(str::trim)
@@ -675,18 +824,28 @@ fn summarize_rotation_input(simulation: &crate::SimulateRequest) -> RotationInpu
             statement: statement.to_string(),
         });
     }
+    let skill_semantics = input_skill_semantics(statements.iter().map(|statement| statement.skill_name.as_str()), skills);
     RotationInputSummary {
         mode: "macro".to_string(),
         parse_status,
         parse_error,
         truncated: total_statements > MAX_ROTATION_INPUT_ITEMS,
+        total_items: total_statements,
+        returned_item_count: statements.len(),
+        skill_semantics,
         macro_semantics: Some(MacroSemanticsSummary {
+            structure: macro_structure.to_string(),
+            page_count,
             operator_precedence: "and_or_equal".to_string(),
             associativity: "right".to_string(),
             line_selection: "source_order_first_condition_true_and_castable".to_string(),
             absent_bufftime_result: false,
             stance_pages_present,
-            page_selection: "first_unfiltered_or_current_stance_page_in_source_order".to_string(),
+            page_selection: if stance_pages_present {
+                "current_stance_page_in_source_order".to_string()
+            } else {
+                "single_unfiltered_page_used_in_all_stances".to_string()
+            },
             page_selection_is_automatic: true,
             pause_stance_rule: "pausing_input_does_not_change_stance; resume_uses_the_page_for_the_stance_after_buff_time_has_advanced".to_string(),
             dun_fei_stance_rule: "after_the_shield_flight_delay_stance_is_blade; before_the_shield_flight_buff_expires_a_short_pause_resumes_on_the_blade_page_unless_shield_return_was_cast; natural_expiration_returns_shield".to_string(),
@@ -843,6 +1002,7 @@ mod tests {
                 mount: self.mount,
                 constants: self.constants,
                 skills: &self.skills,
+                talents: &[],
                 recipes: &self.recipes,
                 team_buffs: &self.team_buffs,
                 formations: &self.formations,
@@ -898,7 +1058,7 @@ mod tests {
             ScenarioSnapshotV1::capture(GameVersion::AnYingQianJi, Mount::FenShanJin, request())
                 .unwrap();
         let evidence =
-            get_current_scenario("trace-summary", &snapshot, &ToolProvenance::fixture()).unwrap();
+            get_current_scenario("trace-summary", &snapshot, &Fixture::load().context(), &ToolProvenance::fixture()).unwrap();
 
         assert_eq!(evidence.tool_name, GET_CURRENT_SCENARIO);
         assert_eq!(evidence.scenario_hash, snapshot.scenario_hash);
@@ -935,6 +1095,7 @@ mod tests {
             0,
             16,
             2,
+            &Fixture::load().context(),
             &ToolProvenance::fixture(),
         )
         .unwrap();
@@ -964,10 +1125,15 @@ mod tests {
             0,
             32,
             1,
+            &Fixture::load().context(),
             &ToolProvenance::fixture(),
         )
         .unwrap();
         assert_eq!(first.result.matches.len(), 8);
+        assert_eq!(first.result.total_matches, Some(20));
+        assert_eq!(first.result.returned_match_count, 8);
+        assert_eq!(first.result.returned_window_count, 0);
+        assert!(first.result.has_more);
         assert_eq!(first.result.next_start_index, Some(8));
 
         let second = inspect_rotation_input(
@@ -977,10 +1143,63 @@ mod tests {
             first.result.next_start_index.unwrap(),
             32,
             1,
+            &Fixture::load().context(),
             &ToolProvenance::fixture(),
         )
         .unwrap();
         assert_eq!(second.result.matches[0].matched.operation_number, 9);
+        assert_eq!(second.result.total_matches, Some(20));
+        assert_eq!(second.result.page_start_index, 8);
+        let last = inspect_rotation_input(
+            "trace-rotation-page-last", &snapshot, Some("斩刀"), 16, 32, 1,
+            &Fixture::load().context(), &ToolProvenance::fixture(),
+        ).unwrap();
+        assert_eq!(last.result.total_matches, Some(20));
+        assert_eq!(last.result.returned_match_count, 4);
+        assert!(!last.result.has_more);
+    }
+
+    #[test]
+    fn rotation_input_describes_dynamic_timing_and_runtime_cooldown_roles() {
+        let fixture = Fixture::load();
+        let mut value = request();
+        value.sequence = vec!["盾击".to_string(), "血怒".to_string(), "业火麟光".to_string(), "盾挡".to_string()];
+        value.timing_offsets.insert("1".to_string(), -1.0);
+        value.timing_offsets.insert("2".to_string(), 0.25);
+        let snapshot = ScenarioSnapshotV1::capture(fixture.version, fixture.mount, value).unwrap();
+        let before = serde_json::to_value(&snapshot).unwrap();
+        let inspection = inspect_rotation_input(
+            "trace-timing-semantics", &snapshot, None, 0, 32, 0,
+            &fixture.context(), &ToolProvenance::fixture(),
+        ).unwrap().result;
+        let blood_rage = &inspection.window[1];
+        assert_eq!(blood_rage.raw_timing_offset, Some(-1.0));
+        assert_eq!(blood_rage.timing_mode, "follow_gcd_end");
+        assert_eq!(blood_rage.delay_seconds, None);
+        assert_eq!(blood_rage.timing_offset_seconds, None);
+        assert_eq!(blood_rage.is_main_gcd, Some(false));
+        assert_eq!(blood_rage.cooldown_semantics, "independent_of_main_gcd");
+        assert!(serde_json::to_value(blood_rage).unwrap()["delay_seconds"].is_null());
+        let blood_definition = &inspection.skill_semantics["血怒"];
+        assert!(blood_definition.cooldowns.iter().any(|cd| {
+            cd.kind == "skill_protection" && cd.base_duration_seconds == 0.5
+        }));
+        assert!(!blood_definition.cooldowns.iter().any(|cd| cd.kind == "shared_gcd"));
+        assert_eq!(inspection.window[0].is_main_gcd, Some(true));
+        assert_eq!(inspection.window[2].is_main_gcd, Some(false));
+        assert_eq!(inspection.window[2].cooldown_semantics, "independent_of_main_gcd");
+        assert_eq!(inspection.window[3].cooldown_semantics, "auxiliary_gcd");
+        assert_eq!(inspection.window[3].is_main_gcd, Some(false));
+        assert_eq!(inspection.window[2].timing_mode, "delay_from_earliest_cast");
+        assert_eq!(inspection.window[2].delay_seconds, Some(0.25));
+        assert_eq!(inspection.total_matches, None);
+        assert_eq!(inspection.returned_window_count, 4);
+        assert_eq!(inspection.skill_semantics.len(), 4);
+        let summary = get_current_scenario(
+            "trace-timing-summary", &snapshot, &fixture.context(), &ToolProvenance::fixture(),
+        ).unwrap().result;
+        assert_eq!(summary.rotation_input.manual_operations[1], *blood_rage);
+        assert_eq!(serde_json::to_value(&snapshot).unwrap(), before);
     }
 
     #[test]
@@ -994,7 +1213,7 @@ mod tests {
             ScenarioSnapshotV1::capture(GameVersion::AnYingQianJi, Mount::FenShanJin, value)
                 .unwrap();
         let evidence =
-            get_current_scenario("trace-macro-input", &snapshot, &ToolProvenance::fixture())
+            get_current_scenario("trace-macro-input", &snapshot, &Fixture::load().context(), &ToolProvenance::fixture())
                 .unwrap();
 
         let input = evidence.result.rotation_input;
@@ -1027,9 +1246,11 @@ mod tests {
         );
         let semantics = input.macro_semantics.as_ref().unwrap();
         assert!(semantics.stance_pages_present);
+        assert_eq!(semantics.structure, "stance_split_pages");
+        assert_eq!(semantics.page_count, 2);
         assert_eq!(
             semantics.page_selection,
-            "first_unfiltered_or_current_stance_page_in_source_order"
+            "current_stance_page_in_source_order"
         );
         assert!(semantics.page_selection_is_automatic);
         assert!(semantics
@@ -1044,6 +1265,26 @@ mod tests {
         );
         assert_eq!(input.macro_statements[1].command, "fcast");
         assert_eq!(input.macro_statements[1].page, 1);
+    }
+
+    #[test]
+    fn current_scenario_calls_an_unfiltered_macro_a_general_single_page() {
+        let mut value = request();
+        value.macro_text = Some("/cast 斩刀\n/cast 盾击".to_string());
+        let snapshot =
+            ScenarioSnapshotV1::capture(GameVersion::AnYingQianJi, Mount::FenShanJin, value)
+                .unwrap();
+        let evidence =
+            get_current_scenario("trace-general-macro", &snapshot, &Fixture::load().context(), &ToolProvenance::fixture())
+                .unwrap();
+        let semantics = evidence.result.rotation_input.macro_semantics.unwrap();
+        assert_eq!(semantics.structure, "general_single_page");
+        assert_eq!(semantics.page_count, 1);
+        assert!(!semantics.stance_pages_present);
+        assert_eq!(
+            semantics.page_selection,
+            "single_unfiltered_page_used_in_all_stances"
+        );
     }
 
     #[test]

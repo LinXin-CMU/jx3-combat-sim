@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use crate::macro_engine::{MacroConfig, MacroLine, MacroPage, MacroCondition};
+use crate::macro_engine::{MacroCondition, MacroConfig, MacroLine, MacroPage};
 use crate::Stance;
 
 use super::analyze::TunableParam;
@@ -38,7 +38,10 @@ pub fn render_individual(
     // 按 rule_id 分组 values，便于局部写入
     let mut values_by_rule: HashMap<&str, Vec<(usize, f64)>> = HashMap::new();
     for (i, (rid, vi)) in param_keys.iter().enumerate() {
-        values_by_rule.entry(rid.as_str()).or_default().push((*vi, values[i]));
+        values_by_rule
+            .entry(rid.as_str())
+            .or_default()
+            .push((*vi, values[i]));
     }
 
     let (shield_page, shield_emitted, shield_truncated) =
@@ -47,7 +50,9 @@ pub fn render_individual(
         render_page(Stance::Blade, blade_order, pool, &values_by_rule);
 
     RenderResult {
-        config: MacroConfig { pages: vec![shield_page, blade_page] },
+        config: MacroConfig {
+            pages: vec![shield_page, blade_page],
+        },
         shield_emitted,
         blade_emitted,
         shield_truncated,
@@ -64,8 +69,12 @@ fn render_page(
     // 先构造 (rule_id, MacroLine, locked) 的启用列表
     let mut staged: Vec<(String, MacroLine, bool)> = Vec::new();
     for (rid, enabled) in order {
-        if !enabled { continue; }
-        let Some(rule) = pool.rules.get(rid) else { continue; };
+        if !enabled {
+            continue;
+        }
+        let Some(rule) = pool.rules.get(rid) else {
+            continue;
+        };
         let mut line = clone_macro_line(&rule.parsed);
         if let Some(vals) = values_by_rule.get(rid.as_str()) {
             apply_rule_values(&mut line, &rule.tunables, vals);
@@ -77,11 +86,14 @@ fn render_page(
     // 用"游戏实际字符数"（去括号、去 .0 尾的 compact 形式），与最终粘贴宏一致
     let mut truncated: Vec<String> = Vec::new();
     loop {
-        let total: usize = staged.iter()
-            .map(|(_, l, _)| compact_len(&serialize_line(l)) + 1)  // +1 换行符
+        let total: usize = staged
+            .iter()
+            .map(|(_, l, _)| compact_len(&serialize_line(l)) + 1) // +1 换行符
             .sum::<usize>()
-            .saturating_sub(1);  // 最后一行无换行
-        if total <= MAX_PAGE_CHARS { break; }
+            .saturating_sub(1); // 最后一行无换行
+        if total <= MAX_PAGE_CHARS {
+            break;
+        }
         // 从末尾找第一个非 locked 的去掉
         let pos = staged.iter().rposition(|(_, _, locked)| !*locked);
         match pos {
@@ -89,13 +101,20 @@ fn render_page(
                 let (rid, _, _) = staged.remove(p);
                 truncated.push(rid);
             }
-            None => break,  // 全部 locked 也超限：兜底放行（渲染出无法模拟的宏，评估会得 0 DPS）
+            None => break, // 全部 locked 也超限：兜底放行（渲染出无法模拟的宏，评估会得 0 DPS）
         }
     }
 
     let emitted: Vec<String> = staged.iter().map(|(rid, _, _)| rid.clone()).collect();
     let lines: Vec<MacroLine> = staged.into_iter().map(|(_, l, _)| l).collect();
-    (MacroPage { stance_filter: Some(stance), lines }, emitted, truncated)
+    (
+        MacroPage {
+            stance_filter: Some(stance),
+            lines,
+        },
+        emitted,
+        truncated,
+    )
 }
 
 /// 游戏里粘贴宏的实际字符数：去 `[` `]` 括号 + 去 `N.0` 尾的 `.0`
@@ -106,11 +125,16 @@ fn compact_len(src: &str) -> usize {
     let mut i = 0;
     while i < chars.len() {
         let c = chars[i];
-        if c == '[' || c == ']' { i += 1; continue; }
+        if c == '[' || c == ']' {
+            i += 1;
+            continue;
+        }
         if c == '.'
-            && i + 1 < chars.len() && chars[i + 1] == '0'
+            && i + 1 < chars.len()
+            && chars[i + 1] == '0'
             && (i + 2 >= chars.len() || !chars[i + 2].is_ascii_digit())
-            && i > 0 && chars[i - 1].is_ascii_digit()
+            && i > 0
+            && chars[i - 1].is_ascii_digit()
         {
             i += 2;
             continue;
@@ -123,11 +147,13 @@ fn compact_len(src: &str) -> usize {
 
 /// 把 values 写入一条 line 的 condition leaf（按 visit_idx 定位）
 fn apply_rule_values(line: &mut MacroLine, tunables: &[TunableParam], values: &[(usize, f64)]) {
-    let Some(cond) = &mut line.condition else { return; };
+    let Some(cond) = &mut line.condition else {
+        return;
+    };
     for (vi, v) in values {
         let mut counter = 0usize;
         set_nth_leaf(cond, *vi, &mut counter, *v);
-        let _ = tunables;  // 保留参数签名一致性，暂不使用
+        let _ = tunables; // 保留参数签名一致性，暂不使用
     }
 }
 
@@ -135,31 +161,48 @@ fn set_nth_leaf(cond: &mut MacroCondition, target: usize, counter: &mut usize, v
     use MacroCondition::*;
     match cond {
         And(a, b) | Or(a, b) => {
-            if set_nth_leaf(a, target, counter, v) { return true; }
+            if set_nth_leaf(a, target, counter, v) {
+                return true;
+            }
             set_nth_leaf(b, target, counter, v)
         }
         Rage(_, val) => {
-            if *counter == target { *val = v.round() as i32; return true; }
+            if *counter == target {
+                *val = v.round() as i32;
+                return true;
+            }
             *counter += 1;
             false
         }
         Life(_, val) => {
-            if *counter == target { *val = v; return true; }
+            if *counter == target {
+                *val = v;
+                return true;
+            }
             *counter += 1;
             false
         }
         BuffTime(_, _, val) | TBuffTime(_, _, val) => {
-            if *counter == target { *val = v; return true; }
+            if *counter == target {
+                *val = v;
+                return true;
+            }
             *counter += 1;
             false
         }
         SkillEnergy(_, _, val) => {
-            if *counter == target { *val = v.max(0.0).round() as u32; return true; }
+            if *counter == target {
+                *val = v.max(0.0).round() as u32;
+                return true;
+            }
             *counter += 1;
             false
         }
         NearbyEnemy(_, val) => {
-            if *counter == target { *val = v.max(0.0).round() as u32; return true; }
+            if *counter == target {
+                *val = v.max(0.0).round() as u32;
+                return true;
+            }
             *counter += 1;
             false
         }

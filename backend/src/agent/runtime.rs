@@ -16,6 +16,7 @@ pub struct AgentRuntime {
     mount: Mount,
     constants: MountConstants,
     skills: Vec<SkillSpec>,
+    talents: Vec<crate::TalentEntry>,
     recipes: Vec<RecipeEntry>,
     team_buffs: Vec<TeamBuffEntry>,
     formations: Vec<FormationEntry>,
@@ -34,6 +35,7 @@ impl AgentRuntime {
             mount: *state.mount.read().await,
             constants: *state.constants.read().await,
             skills: state.skills.read().await.clone(),
+            talents: state.talents.read().await.clone(),
             recipes: state.recipes.read().await.clone(),
             team_buffs: state.team_buffs.read().await.clone(),
             formations: state.formations.read().await.clone(),
@@ -59,6 +61,7 @@ impl AgentRuntime {
             mount: self.mount,
             constants: self.constants,
             skills: &self.skills,
+            talents: &self.talents,
             recipes: &self.recipes,
             team_buffs: &self.team_buffs,
             formations: &self.formations,
@@ -79,10 +82,24 @@ impl AgentRuntime {
         stone_id: u32,
         talents: &[u32],
     ) -> equip::CalcResponse {
-        let data = self.equip_data.as_deref().expect("equipment data is available in live runtime");
-        equip::calculate(data, &equip::CalcRequest {
-            slots: slots.clone(), stone_id, mount: match self.mount { Mount::FenShanJin => 10390, Mount::TieGuYi => 10389 }, talents: talents.to_vec(),
-        }, &self.base_stats, &self.mount_conversions)
+        let data = self
+            .equip_data
+            .as_deref()
+            .expect("equipment data is available in live runtime");
+        equip::calculate(
+            data,
+            &equip::CalcRequest {
+                slots: slots.clone(),
+                stone_id,
+                mount: match self.mount {
+                    Mount::FenShanJin => 10390,
+                    Mount::TieGuYi => 10389,
+                },
+                talents: talents.to_vec(),
+            },
+            &self.base_stats,
+            &self.mount_conversions,
+        )
     }
 
     pub fn equipment_item(&self, subtype: u8, id: u32) -> Option<&equip::EquipItem> {
@@ -90,18 +107,25 @@ impl AgentRuntime {
     }
 
     pub fn equipment_items(&self) -> impl Iterator<Item = &equip::EquipItem> {
-        self.equip_data.as_deref().into_iter().flat_map(|data| data.items.values())
+        self.equip_data
+            .as_deref()
+            .into_iter()
+            .flat_map(|data| data.items.values())
     }
 
     pub fn equipment_set_name(&self, set_id: u32) -> Option<String> {
-        self.equip_data.as_deref()?.sets.get(&set_id).map(|set| set.name.clone())
+        self.equip_data
+            .as_deref()?
+            .sets
+            .get(&set_id)
+            .map(|set| set.name.clone())
     }
 
     #[cfg(test)]
     pub fn fixture() -> Self {
         use crate::{
             formations_file, load_formations, load_recipes, load_school_toml, load_skills,
-            load_team_buffs, recipes_file, skills_dir, team_buffs_file,
+            load_talents, load_team_buffs, recipes_file, skills_dir, talents_file, team_buffs_file,
         };
         use std::path::Path;
 
@@ -109,6 +133,7 @@ impl AgentRuntime {
         let mount = Mount::FenShanJin;
         let (constants, _, _, _, _) = load_school_toml(game_version, mount).unwrap();
         let skills = load_skills(Path::new(&skills_dir(game_version, mount)));
+        let talents = load_talents(Path::new(&talents_file(game_version, mount)));
         let recipes = load_recipes(Path::new(&recipes_file(game_version)));
         let team_buffs = load_team_buffs(Path::new(&team_buffs_file(game_version)));
         let formations = load_formations(Path::new(&formations_file(game_version)));
@@ -118,6 +143,7 @@ impl AgentRuntime {
             mount,
             constants,
             skills,
+            talents,
             recipes,
             team_buffs,
             formations,

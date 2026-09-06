@@ -1,8 +1,8 @@
 //! BC（行为克隆）预训练子进程管理 + SSE。镜像 training.rs 的模式。
 
 use std::process::Stdio;
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 use axum::{
     extract::State,
@@ -79,13 +79,27 @@ pub struct PretrainStartRequest {
     pub device: String,
 }
 
-fn default_n_envs() -> u32 { 4 }
-fn default_n_samples() -> u32 { 50_000 }
-fn default_n_epochs() -> u32 { 10 }
-fn default_batch() -> u32 { 512 }
-fn default_lr() -> f64 { 1e-3 }
-fn default_hidden() -> u32 { 256 }
-fn default_device() -> String { "cuda".into() }
+fn default_n_envs() -> u32 {
+    4
+}
+fn default_n_samples() -> u32 {
+    50_000
+}
+fn default_n_epochs() -> u32 {
+    10
+}
+fn default_batch() -> u32 {
+    512
+}
+fn default_lr() -> f64 {
+    1e-3
+}
+fn default_hidden() -> u32 {
+    256
+}
+fn default_device() -> String {
+    "cuda".into()
+}
 
 #[derive(Debug, Serialize)]
 pub struct PretrainStartResponse {
@@ -125,7 +139,10 @@ pub async fn start_handler(
     if !pretrain_py.exists() {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(err(&format!("找不到 pretrain.py: {}", pretrain_py.display()))),
+            Json(err(&format!(
+                "找不到 pretrain.py: {}",
+                pretrain_py.display()
+            ))),
         )
             .into_response();
     }
@@ -155,7 +172,10 @@ pub async fn start_handler(
         "recipes": req.recipes,
     });
     let spec_path = runs_root.join("spec.json");
-    if let Err(e) = std::fs::write(&spec_path, serde_json::to_string_pretty(&spec).unwrap_or_default()) {
+    if let Err(e) = std::fs::write(
+        &spec_path,
+        serde_json::to_string_pretty(&spec).unwrap_or_default(),
+    ) {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(err(&format!("写 spec.json 失败: {}", e))),
@@ -208,7 +228,9 @@ pub async fn start_handler(
             match reader.next_line().await {
                 Ok(Some(line)) => {
                     let trimmed = line.trim();
-                    if trimmed.is_empty() { continue; }
+                    if trimmed.is_empty() {
+                        continue;
+                    }
                     match serde_json::from_str::<JsonValue>(trimmed) {
                         Ok(ev) => {
                             if ev.get("event").and_then(|v| v.as_str()) == Some("done") {
@@ -230,7 +252,9 @@ pub async fn start_handler(
             let mut g = child_arc.lock().await;
             if let Some(mut c) = g.take() {
                 c.wait().await.ok().and_then(|s| s.code())
-            } else { None }
+            } else {
+                None
+            }
         };
         let _ = tx.send(serde_json::json!({
             "event": "exit",
@@ -261,9 +285,12 @@ pub async fn stop_handler(State(shared): State<SharedState>) -> Response {
     let state = shared.rl_pretrain.clone();
     let guard = state.current.lock().await;
     let Some(active) = guard.as_ref() else {
-        return Json(serde_json::json!({"stopped": false, "reason": "无进行中的任务"})).into_response();
+        return Json(serde_json::json!({"stopped": false, "reason": "无进行中的任务"}))
+            .into_response();
     };
-    active.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    active
+        .stop
+        .store(true, std::sync::atomic::Ordering::Relaxed);
     let run_id = active.run_id.clone();
     let child_arc = active.child.clone();
     drop(guard);
@@ -273,8 +300,13 @@ pub async fn stop_handler(State(shared): State<SharedState>) -> Response {
         let pid = child_guard.as_ref().and_then(|c| c.id());
         let killed = if let Some(c) = child_guard.as_mut() {
             let _ = c.start_kill();
-            tokio::time::timeout(std::time::Duration::from_secs(3), c.wait()).await.ok().is_some()
-        } else { true };
+            tokio::time::timeout(std::time::Duration::from_secs(3), c.wait())
+                .await
+                .ok()
+                .is_some()
+        } else {
+            true
+        };
         (pid, killed)
     };
     let mut force_killed = false;
@@ -282,9 +314,12 @@ pub async fn stop_handler(State(shared): State<SharedState>) -> Response {
         if let Some(p) = pid {
             #[cfg(windows)]
             let r = std::process::Command::new("taskkill")
-                .args(["/F", "/T", "/PID", &p.to_string()]).output();
+                .args(["/F", "/T", "/PID", &p.to_string()])
+                .output();
             #[cfg(not(windows))]
-            let r = std::process::Command::new("kill").args(["-9", &p.to_string()]).output();
+            let r = std::process::Command::new("kill")
+                .args(["-9", &p.to_string()])
+                .output();
             force_killed = r.map(|x| x.status.success()).unwrap_or(false);
         }
     }
@@ -313,7 +348,9 @@ pub async fn stream_handler(
             match res {
                 Ok(ev) => {
                     let data = serde_json::to_string(&ev).unwrap_or_else(|_| "{}".into());
-                    Some(Ok::<_, std::convert::Infallible>(SseEvent::default().data(data)))
+                    Some(Ok::<_, std::convert::Infallible>(
+                        SseEvent::default().data(data),
+                    ))
                 }
                 Err(_) => None,
             }
@@ -329,8 +366,12 @@ pub async fn list_handler() -> Json<JsonValue> {
     let mut runs = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&root) {
         for e in entries.flatten() {
-            let Ok(ft) = e.file_type() else { continue; };
-            if !ft.is_dir() { continue; }
+            let Ok(ft) = e.file_type() else {
+                continue;
+            };
+            if !ft.is_dir() {
+                continue;
+            }
             let run_id = e.file_name().to_string_lossy().to_string();
             let ckpt = e.path().join("pretrained.pt");
             if ckpt.exists() {

@@ -43,6 +43,7 @@ pub struct Manager {
     userdata_root: PathBuf,
     next_port: AtomicU16,
     login_html: String,
+    max_workers: usize,
 }
 
 impl Manager {
@@ -97,20 +98,25 @@ impl Manager {
             if dead {
                 map.remove(user);
             }
+            if map.len() >= self.max_workers {
+                return Err("服务繁忙，请稍后重试".into());
+            }
             let p = self.pick_port();
             let dir = self.userdata_dir_for(user);
             let _ = std::fs::create_dir_all(&dir);
             let icon_dir = self.userdata_root.join("icon_cache");
             let _ = std::fs::create_dir_all(&icon_dir);
             // worker 的 stdout/stderr 重定向到各自日志文件，避免继承 router 管道被启动期海量日志写满阻塞
-            let (out, err) = match std::fs::File::create(dir.join("worker.log")) {
+            let (out, err) = match std::fs::OpenOptions::new().create(true).append(true).open(dir.join("worker.log")) {
                 Ok(f) => match f.try_clone() {
                     Ok(f2) => (Stdio::from(f), Stdio::from(f2)),
                     Err(_) => (Stdio::null(), Stdio::null()),
                 },
                 Err(_) => (Stdio::null(), Stdio::null()),
             };
-            let child = Command::new(&self.exe)
+            let mut command = Command::new(&self.exe);
+            command.kill_on_drop(true);
+            let child = command
                 .env_remove("JX3_ROUTER")
                 .env_remove("JX3_AUTH_PASSWORD")
                 .env("JX3_PORT", p.to_string())
@@ -123,8 +129,20 @@ impl Manager {
                 .stderr(err)
                 .spawn()
                 .map_err(|e| format!("spawn worker 失败: {e}"))?;
-            println!("[router] 为用户 {:?} 启动 worker，端口 {}，数据目录 {}", user, p, dir.display());
-            map.insert(user.to_string(), WorkerEntry { port: p, child, last_seen: Instant::now() });
+            println!(
+                "[router] 为用户 {:?} 启动 worker，端口 {}，数据目录 {}",
+                user,
+                p,
+                dir.display()
+            );
+            map.insert(
+                user.to_string(),
+                WorkerEntry {
+                    port: p,
+                    child,
+                    last_seen: Instant::now(),
+                },
+            );
             port = p;
         }
 
@@ -184,7 +202,12 @@ fn now_hms() -> String {
         .map(|d| d.as_secs())
         .unwrap_or(0)
         + 8 * 3600;
-    format!("{:02}:{:02}:{:02}", (secs / 3600) % 24, (secs / 60) % 60, secs % 60)
+    format!(
+        "{:02}:{:02}:{:02}",
+        (secs / 3600) % 24,
+        (secs / 60) % 60,
+        secs % 60
+    )
 }
 
 /// 是否在控制台记录此请求。只记有意义的 API 调用，过滤静态资源 + 高频低信号噪声
@@ -224,7 +247,7 @@ async fn proxy(State(mgr): State<Arc<Manager>>, req: Request) -> Response {
     // 2) 确保 worker
     let port = match mgr.ensure_worker(&user).await {
         Ok(p) => p,
-        Err(e) => return (StatusCode::BAD_GATEWAY, e).into_response(),
+        Err(_) => return (StatusCode::SERVICE_UNAVAILABLE, "服务正在准备或繁忙，请稍后重试").into_response(),
     };
 
     // 3) 拆请求
@@ -239,7 +262,13 @@ async fn proxy(State(mgr): State<Arc<Manager>>, req: Request) -> Response {
 
     // 控制台记录：哪个用户调了什么 API（过滤静态/高频噪声）
     if should_log_path(parts.uri.path()) {
-        println!("[router] {} 用户 {:?} → {} {}", now_hms(), user, parts.method, parts.uri.path());
+        println!(
+            "[router] {} 用户 {:?} → {} {}",
+            now_hms(),
+            user,
+            parts.method,
+            parts.uri.path()
+        );
     }
 
     let body_bytes: Bytes = match axum::body::to_bytes(body, MAX_BODY).await {
@@ -296,9 +325,11 @@ pub async fn run() {
         eprintln!("[router] 错误：router 模式必须设置 JX3_AUTH_PASSWORD");
         std::process::exit(1);
     }
-    let userdata_root = std::fs::canonicalize(crate::userdata_base())
-        .unwrap_or_else(|_| crate::userdata_base());
-    crate::auth::init(master, userdata_root.join("whitelist.json"));
+    let userdata_root =
+        std::fs::canonicalize(crate::userdata_base()).unwrap_or_else(|_| crate::userdata_base());
+    let auth_file = std::env::var_os("JX3_AUTH_FILE").map(PathBuf::from)
+        .unwrap_or_else(|| userdata_root.join("whitelist.json"));
+    crate::auth::init(master, auth_file);
 
     // 登入页（router 不经过 ServeDir，直接读文件）
     let login_html = std::fs::read_to_string("../frontend/login.html")
@@ -321,6 +352,7 @@ pub async fn run() {
         userdata_root,
         next_port: AtomicU16::new(4001),
         login_html,
+        max_workers: std::env::var("JX3_MAX_WORKERS").ok().and_then(|v| v.parse().ok()).unwrap_or(4),
     });
 
     // 空闲回收
@@ -359,7 +391,10 @@ pub async fn run() {
                     let _ = w.child.start_kill();
                 }
             }
-            println!("[router] 预热完成，用时 {:.1}s（首个用户将走热缓存）", t.elapsed().as_secs_f64());
+            println!(
+                "[router] 预热完成，用时 {:.1}s（首个用户将走热缓存）",
+                t.elapsed().as_secs_f64()
+            );
         });
     }
 
@@ -375,7 +410,10 @@ pub async fn run() {
         .with_state(mgr.clone());
 
     let bind_addr = std::env::var("JX3_BIND").unwrap_or_else(|_| "0.0.0.0".into());
-    let port: u16 = std::env::var("JX3_PORT").ok().and_then(|s| s.parse().ok()).unwrap_or(3005);
+    let port: u16 = std::env::var("JX3_PORT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(3005);
     let listener = tokio::net::TcpListener::bind(format!("{bind_addr}:{port}"))
         .await
         .unwrap();

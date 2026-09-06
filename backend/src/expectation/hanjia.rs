@@ -58,9 +58,15 @@ impl HanjiaCarry {
     }
 
     pub fn reset(&mut self) {
-        for v in self.p_tau.iter_mut() { *v = 0.0; }
-        for v in self.a_carry.iter_mut() { *v = 0.0; }
-        for v in self.b_carry.iter_mut() { *v = 0.0; }
+        for v in self.p_tau.iter_mut() {
+            *v = 0.0;
+        }
+        for v in self.a_carry.iter_mut() {
+            *v = 0.0;
+        }
+        for v in self.b_carry.iter_mut() {
+            *v = 0.0;
+        }
         self.p_tau[0] = 1.0;
     }
 
@@ -72,11 +78,17 @@ impl HanjiaCarry {
         let (a_now, b_now) = encode_hanjia(cz);
 
         // ── Step 1: 衰减（τ → τ-1，τ=0 保持） ──
-        for v in self.buf_p.iter_mut() { *v = 0.0; }
-        for v in self.buf_a.iter_mut() { *v = 0.0; }
-        for v in self.buf_b.iter_mut() { *v = 0.0; }
+        for v in self.buf_p.iter_mut() {
+            *v = 0.0;
+        }
+        for v in self.buf_a.iter_mut() {
+            *v = 0.0;
+        }
+        for v in self.buf_b.iter_mut() {
+            *v = 0.0;
+        }
         self.buf_p[0] = self.p_tau[0]; // τ=0 (无 buff) 保持
-        // τ=1..n 的概率质量左移到 buf[0..n-1]
+                                       // τ=1..n 的概率质量左移到 buf[0..n-1]
         for tau in 1..=n {
             self.buf_p[tau - 1] += self.p_tau[tau];
             self.buf_a[tau - 1] += self.a_carry[tau];
@@ -87,12 +99,12 @@ impl HanjiaCarry {
         // 不刷新分支 ×(1-q)
         let one_minus_q = 1.0 - q;
         for tau in 0..=n {
-            self.p_tau[tau]   = one_minus_q * self.buf_p[tau];
+            self.p_tau[tau] = one_minus_q * self.buf_p[tau];
             self.a_carry[tau] = one_minus_q * self.buf_a[tau];
             self.b_carry[tau] = one_minus_q * self.buf_b[tau];
         }
         // 刷新分支：质量 collapse 到 τ=n（满），带本帧 (A, B)
-        self.p_tau[n]   += q;
+        self.p_tau[n] += q;
         self.a_carry[n] += q * a_now as f64;
         self.b_carry[n] += q * b_now as f64;
 
@@ -114,7 +126,9 @@ impl HanjiaCarry {
 /// B：300/层  低位（最大 125 层；编码 raw=cz×7%，量化到 300 倍数后取余）
 pub fn encode_hanjia(cz: f64) -> (u32, u32) {
     let raw = cz * 0.07;
-    if raw < 0.0 { return (0, 0); }
+    if raw < 0.0 {
+        return (0, 0);
+    }
     let quantized = ((raw / 300.0).round() * 300.0) as i64;
     let quantized = quantized.max(0);
     let a = (quantized / 30000).min(125) as u32;
@@ -177,8 +191,11 @@ mod tests {
             hj.tick(q, 500000.0);
         }
         let stats = hj.tick(q, 500000.0);
-        assert!(stats.p_alive > 0.97 && stats.p_alive < 0.99,
-                "稳态 P(alive) = {} (期望 ~0.98)", stats.p_alive);
+        assert!(
+            stats.p_alive > 0.97 && stats.p_alive < 0.99,
+            "稳态 P(alive) = {} (期望 ~0.98)",
+            stats.p_alive
+        );
     }
 
     /// 稳态：基础 CZ=500000，E[B] ≈ 17 × P(alive) ≈ 16.7
@@ -191,10 +208,16 @@ mod tests {
             hj.tick(q, 500000.0);
         }
         let stats = hj.tick(q, 500000.0);
-        assert!((stats.e_b - 16.7).abs() < 0.5,
-                "E[B] = {} (期望 ~16.7)", stats.e_b);
-        assert!((stats.e_a - 0.98).abs() < 0.05,
-                "E[A] = {} (期望 ~0.98)", stats.e_a);
+        assert!(
+            (stats.e_b - 16.7).abs() < 0.5,
+            "E[B] = {} (期望 ~16.7)",
+            stats.e_b
+        );
+        assert!(
+            (stats.e_a - 0.98).abs() < 0.05,
+            "E[A] = {} (期望 ~0.98)",
+            stats.e_a
+        );
     }
 
     /// 动态拆招值：t<20s 用 500000，t∈[20,40) 用 700000，t≥40 回 500000
@@ -219,8 +242,11 @@ mod tests {
             last_stats = hj.tick(q, 700000.0);
         }
         // 跳变后 20s 应该已基本稳态在 ~62
-        assert!((last_stats.e_b - 61.9).abs() < 1.5,
-                "20s 后 E[B] = {} (期望 ~62)", last_stats.e_b);
+        assert!(
+            (last_stats.e_b - 61.9).abs() < 1.5,
+            "20s 后 E[B] = {} (期望 ~62)",
+            last_stats.e_b
+        );
 
         // 关键验证：跳变后立即不会瞬间跳到 62
         let mut hj2 = HanjiaCarry::new(12.0);
@@ -230,15 +256,20 @@ mod tests {
         // 在 t=20s 那一帧就跳变 CZ=700000
         let immediately_after_jump = hj2.tick(q, 700000.0);
         // E[B] 应该接近跳变前的 16.7（一帧不可能立即收敛）
-        assert!(immediately_after_jump.e_b < 25.0,
-                "跳变后 1 帧 E[B] = {}（不应瞬间跳到 62）", immediately_after_jump.e_b);
+        assert!(
+            immediately_after_jump.e_b < 25.0,
+            "跳变后 1 帧 E[B] = {}（不应瞬间跳到 62）",
+            immediately_after_jump.e_b
+        );
     }
 
     /// reset 后回到初始态
     #[test]
     fn reset_works() {
         let mut hj = HanjiaCarry::new(12.0);
-        for _ in 0..500 { hj.tick(0.05, 500000.0); }
+        for _ in 0..500 {
+            hj.tick(0.05, 500000.0);
+        }
         hj.reset();
         assert_eq!(hj.p_tau[0], 1.0);
         assert!((hj.total_prob() - 1.0).abs() < 1e-12);
@@ -262,7 +293,10 @@ mod tests {
         }
         // 期望攻击力加成：E[A] × 30000 + E[B] × 300
         let atk_bonus = last.e_a * 30000.0 + last.e_b * 300.0;
-        assert!(atk_bonus > 5000.0 && atk_bonus < 50000.0,
-                "联动 E[atk_bonus] = {} (期望 5K~50K)", atk_bonus);
+        assert!(
+            atk_bonus > 5000.0 && atk_bonus < 50000.0,
+            "联动 E[atk_bonus] = {} (期望 5K~50K)",
+            atk_bonus
+        );
     }
 }

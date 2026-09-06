@@ -20,7 +20,7 @@
 
 use super::FPS;
 
-const BUFF_FRAMES: usize = 8 * FPS as usize;       // 128
+const BUFF_FRAMES: usize = 8 * FPS as usize; // 128
 const MAX_STACK: usize = 5;
 const PER_STACK: f64 = 0.06;
 const STATE_COUNT: usize = 1 + MAX_STACK * BUFF_FRAMES * 2; // 1281
@@ -76,12 +76,20 @@ impl JiantieDist {
         }
         let mut p = vec![0.0; STATE_COUNT];
         p[0] = 1.0;
-        Self { p, p_max, k_of, locked_of, buf: vec![0.0; STATE_COUNT] }
+        Self {
+            p,
+            p_max,
+            k_of,
+            locked_of,
+            buf: vec![0.0; STATE_COUNT],
+        }
     }
 
     /// 重置到初始态（无 buff）
     pub fn reset(&mut self) {
-        for v in self.p.iter_mut() { *v = 0.0; }
+        for v in self.p.iter_mut() {
+            *v = 0.0;
+        }
         self.p[0] = 1.0;
     }
 
@@ -95,15 +103,19 @@ impl JiantieDist {
         // ── Step 1: 衰减 ──────────────────────────────────────────
         // self.p → self.buf（按 τ→τ-1 重排）
         let p_dec = &mut self.buf;
-        for v in p_dec.iter_mut() { *v = 0.0; }
-        p_dec[0] = self.p[0];   // 无 buff 态保持
+        for v in p_dec.iter_mut() {
+            *v = 0.0;
+        }
+        p_dec[0] = self.p[0]; // 无 buff 态保持
 
         for k in 1..=MAX_STACK {
             for tau in 1..=BUFF_FRAMES {
                 for l in 0..2 {
                     let src = sid(k, tau, l);
                     let mass = self.p[src];
-                    if mass == 0.0 { continue; }
+                    if mass == 0.0 {
+                        continue;
+                    }
                     if tau == 1 {
                         // buff 本帧到期，回到无 buff 态
                         p_dec[0] += mass;
@@ -119,7 +131,9 @@ impl JiantieDist {
         let mut pre_hit_parry_sum = p_dec[0] * p_0.min(p_max);
         for s in 1..n {
             let mass = p_dec[s];
-            if mass == 0.0 { continue; }
+            if mass == 0.0 {
+                continue;
+            }
             let pk = (p_0 + PER_STACK * self.k_of[s] as f64).min(p_max);
             pre_hit_parry_sum += mass * pk;
         }
@@ -168,7 +182,9 @@ impl JiantieDist {
         probs[0] = p_new[0];
         for s in 1..n {
             let mass = p_new[s];
-            if mass == 0.0 { continue; }
+            if mass == 0.0 {
+                continue;
+            }
             let k = self.k_of[s] as usize;
             e_stacks += mass * k as f64;
             let pk = (p_0 + PER_STACK * k as f64).min(p_max);
@@ -222,11 +238,17 @@ mod tests {
             dist.tick(0.0, 1.0);
         }
         let stats = dist.tick(0.0, 1.0);
-        assert!(stats.e_stacks > 4.0 && stats.e_stacks <= 5.0,
-                "稳态 E[k] = {} (期望 4.0~5.0)", stats.e_stacks);
+        assert!(
+            stats.e_stacks > 4.0 && stats.e_stacks <= 5.0,
+            "稳态 E[k] = {} (期望 4.0~5.0)",
+            stats.e_stacks
+        );
         // E[parry] = 0 + 0.06 × E[k]，应在 0.24 ~ 0.30
-        assert!(stats.e_parry_rate > 0.20 && stats.e_parry_rate < 0.31,
-                "E[parry] = {} (期望 0.20~0.31)", stats.e_parry_rate);
+        assert!(
+            stats.e_parry_rate > 0.20 && stats.e_parry_rate < 0.31,
+            "E[parry] = {} (期望 0.20~0.31)",
+            stats.e_parry_rate
+        );
     }
 
     /// 极端场景 2：p_0 = 1.0 → 第一次受击即锁定
@@ -240,8 +262,16 @@ mod tests {
         }
         let stats = dist.tick(1.0, 1.0);
         // 第 1 帧受击 → 立即锁定在 k=1 / 招架率 1.0
-        assert!((stats.e_stacks - 1.0).abs() < 1e-6, "E[k] = {} (期望 1.0)", stats.e_stacks);
-        assert!((stats.e_parry_rate - 1.0).abs() < 1e-6, "E[parry] = {} (期望 1.0)", stats.e_parry_rate);
+        assert!(
+            (stats.e_stacks - 1.0).abs() < 1e-6,
+            "E[k] = {} (期望 1.0)",
+            stats.e_stacks
+        );
+        assert!(
+            (stats.e_parry_rate - 1.0).abs() < 1e-6,
+            "E[parry] = {} (期望 1.0)",
+            stats.e_parry_rate
+        );
     }
 
     /// 一般稳态：Δ=2s, p_0=0.20，跑 60s 看稳态期望层数
@@ -255,11 +285,17 @@ mod tests {
             last = dist.tick(0.20, h);
         }
         // 稳态期望层数应该在 [3.5, 5.0] 之间（受击概率不高，但 buff 持续 8s）
-        assert!(last.e_stacks > 2.0 && last.e_stacks < 5.0,
-                "稳态 E[k] = {} (期望区间 2~5)", last.e_stacks);
+        assert!(
+            last.e_stacks > 2.0 && last.e_stacks < 5.0,
+            "稳态 E[k] = {} (期望区间 2~5)",
+            last.e_stacks
+        );
         // 招架率 = p_0 + 0.06×E[k]，应在 0.32 ~ 0.50
-        assert!(last.e_parry_rate > 0.30 && last.e_parry_rate < 0.55,
-                "稳态 E[parry] = {} (期望 0.30~0.55)", last.e_parry_rate);
+        assert!(
+            last.e_parry_rate > 0.30 && last.e_parry_rate < 0.55,
+            "稳态 E[parry] = {} (期望 0.30~0.55)",
+            last.e_parry_rate
+        );
     }
 
     /// 概率分布 stack_probs 加起来 = 1
@@ -270,8 +306,11 @@ mod tests {
         for _ in 0..200 {
             let stats = dist.tick(0.30, h);
             let total: f64 = stats.stack_probs.iter().sum();
-            assert!((total - 1.0).abs() < 1e-10,
-                    "stack_probs sum = {} (期望 1)", total);
+            assert!(
+                (total - 1.0).abs() < 1e-10,
+                "stack_probs sum = {} (期望 1)",
+                total
+            );
         }
     }
 
@@ -287,7 +326,9 @@ mod tests {
     #[test]
     fn reset_works() {
         let mut dist = JiantieDist::new(0.75);
-        for _ in 0..100 { dist.tick(0.3, 0.05); }
+        for _ in 0..100 {
+            dist.tick(0.3, 0.05);
+        }
         dist.reset();
         assert_eq!(dist.p[0], 1.0);
         assert!((dist.total_prob() - 1.0).abs() < 1e-12);

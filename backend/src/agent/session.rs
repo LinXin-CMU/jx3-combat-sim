@@ -31,8 +31,8 @@ pub const AGENT_REPLAY_EVENT_SCHEMA_V1: &str = "agent-replay-event/v1";
 const MAX_SESSION_ID_BYTES: usize = 64;
 const MAX_TITLE_CHARS: usize = 80;
 const MAX_SESSIONS_RETURNED: usize = 200;
-const MAX_CONTEXT_TURNS: usize = 2;
-const MAX_CONTEXT_FIELD_CHARS: usize = 256;
+const MAX_CONTEXT_TURNS: usize = 4;
+const MAX_CONTEXT_FIELD_CHARS: usize = 512;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -202,6 +202,7 @@ pub struct AgentSessionDetailV1 {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentSessionRunBinding {
     pub session_id: String,
+    pub resume_tools: Vec<(String, Value)>,
     pub prior_context: Option<String>,
     pub prior_playbook_id: Option<String>,
 }
@@ -286,33 +287,36 @@ impl AgentSessionStore {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let (session_id, parent_run_id, prior_context, prior_playbook_id) =
             match requested_session_id {
-            Some(session_id) => {
-                validate_session_id(session_id)?;
-                let detail = self.load_session_unlocked(session_id)?;
-                if detail.summary.corrupted_event_count > 0 {
-                    return Err(error(
-                        "agent_session_corrupted",
-                        "session contains corrupted events; start a new session instead",
-                    ));
+                Some(session_id) => {
+                    validate_session_id(session_id)?;
+                    let detail = self.load_session_unlocked(session_id)?;
+                    if detail.summary.corrupted_event_count > 0 {
+                        return Err(error(
+                            "agent_session_corrupted",
+                            "session contains corrupted events; start a new session instead",
+                        ));
+                    }
+                    let prior_context = build_prior_context(&detail.events);
+                    let prior_playbook_id = detail
+                        .events
+                        .iter()
+                        .rev()
+                        .find_map(|event| event.playbook_id.clone());
+                    (
+                        session_id.to_string(),
+                        detail.summary.last_run_id,
+                        prior_context,
+                        prior_playbook_id,
+                    )
                 }
-                let prior_context = build_prior_context(&detail.events);
-                let prior_playbook_id = detail
-                    .events
-                    .iter()
-                    .rev()
-                    .find_map(|event| event.playbook_id.clone());
-                (
-                    session_id.to_string(),
-                    detail.summary.last_run_id,
-                    prior_context,
-                    prior_playbook_id,
-                )
-            }
-            None => {
-                let session_id = self.create_session_unlocked(question)?;
-                (session_id, None, None, None)
-            }
-        };
+                None => {
+                    let session_id = self.create_session_unlocked(question)?;
+                    (session_id, None, None, None)
+                }
+            };
+        let resume_tools = self.load_session_unlocked(&session_id)
+            .map(|detail| resume_tool_queries(&detail.events, scenario_hash))
+            .unwrap_or_default();
         self.append_event_unlocked(
             &session_id,
             AgentSessionEventV1::user_message(run_id, question),
@@ -329,6 +333,7 @@ impl AgentSessionStore {
         )?;
         Ok(AgentSessionRunBinding {
             session_id,
+            resume_tools,
             prior_context,
             prior_playbook_id,
         })
@@ -719,6 +724,28 @@ fn summarize(
 
 /// Rebuild only the last visible reports, never the raw provider transcript or
 /// hidden reasoning. Current-run tools remain the sole source of numeric truth.
+pub(super) fn resume_tool_queries(events: &[AgentSessionEventV1], scenario_hash: &str) -> Vec<(String, Value)> {
+    let mut queries = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for result in events.iter().rev().filter_map(|event| event.result.as_ref())
+        .filter(|result| result.scenario_hash == scenario_hash).take(3)
+    {
+        if let Some(debug) = &result.debug {
+            for call in debug.tool_calls.iter().rev().filter(|call| call.ok) {
+                if !matches!(call.tool_name.as_str(),
+                    "simulate_scenario" | "analyze_timeline" |
+                    "inspect_timeline_events" | "inspect_rotation_input") { continue; }
+                let key = format!("{}:{}", call.tool_name, call.arguments);
+                if seen.insert(key) {
+                    queries.push((call.tool_name.clone(), call.arguments.clone()));
+                    if queries.len() == 24 { return queries; }
+                }
+            }
+        }
+    }
+    queries
+}
+
 fn build_prior_context(events: &[AgentSessionEventV1]) -> Option<String> {
     let turns = events
         .iter()
@@ -732,20 +759,33 @@ fn build_prior_context(events: &[AgentSessionEventV1]) -> Option<String> {
                     .map(|debug| clipped(&debug.question))
                     .unwrap_or_default();
                 return Some(serde_json::json!({
+                    "run_id": &result.run_id,
                     "question": original_question,
                     "status": status_name(&result.status),
                     "assistant_question": clipped(&clarification.question),
+                    "analysis_text": clarification.analysis_text.as_deref().map(|text| text.chars().take(1_200).collect::<String>()),
+                    "proposed_code_blocks": clarification.analysis_text.as_deref().map(extract_proposed_code_blocks).unwrap_or_default(),
+                    "continuation_goal": original_question,
+                    "proposal_status": "historical_unverified_candidate",
+                    "artifacts": result.report.as_ref().map(|report| &report.content.artifacts),
                     "reason": clipped(&clarification.reason),
                     "answer_hint": clarification.answer_hint.as_deref().map(clipped),
+                    "options": &clarification.options,
                 }));
             }
             result.report.as_ref().map(|report| serde_json::json!({
+                    "run_id": &result.run_id,
+                    "scenario_hash": &report.scenario_hash,
+                    "prompt_version": &report.prompt_version,
+                    "fact_status": "historical_assistant_interpretation",
                     "question": clipped(&report.question),
                     "status": status_name(&result.status),
                     "summary": clipped(&report.content.summary),
+                    "artifacts": &report.content.artifacts,
                     "findings": report.content.findings.iter().take(4).map(|finding| serde_json::json!({
                         "title": clipped(&finding.title),
                         "explanation": clipped(&finding.explanation),
+                        "historical_evidence_ids": &finding.evidence_ids,
                         "metrics": finding.metrics.iter().take(6).map(|metric| serde_json::json!({
                             "label": clipped(&metric.label),
                             "value": metric.value,
@@ -767,11 +807,31 @@ fn build_prior_context(events: &[AgentSessionEventV1]) -> Option<String> {
     }
     let mut chronological = turns;
     chronological.reverse();
-    serde_json::to_string(&serde_json::json!({
+    // Share the bounded artifact budget across turns rather than duplicating
+    // whole drafts in each turn. Keep them independent of prose compaction.
+    let mut drafts = super::artifacts::ArtifactStore::default();
+    for turn in &mut chronological {
+        drafts.capture_report(&turn.to_string());
+        if let Some(fields) = turn.as_object_mut() { fields.remove("artifacts"); }
+    }
+    let mut context = serde_json::json!({
         "schema_version": "agent-session-context/v1",
+        "purpose": "conversation_continuity",
+        "fact_status": "historical_assistant_interpretation",
+        "status_meaning": "status 记录当时运行状态；玩法解释仍需结合当前机制与证据核对。",
         "turns": chronological,
-    }))
-    .ok()
+        "artifacts": drafts.items(),
+    });
+    if context.to_string().len() > 32 * 1024 {
+        if let Some(turns) = context["turns"].as_array_mut() {
+            for turn in turns {
+                if let Some(fields) = turn.as_object_mut() {
+                    for key in ["findings", "recommendations", "limitations", "analysis_text"] { fields.remove(key); }
+                }
+            }
+        }
+    }
+    serde_json::to_string(&context).ok()
 }
 
 fn clipped(value: &str) -> String {
@@ -783,6 +843,16 @@ fn clipped(value: &str) -> String {
         output.push('…');
     }
     output
+}
+
+fn extract_proposed_code_blocks(text: &str) -> Vec<String> {
+    text.split("```").enumerate().filter(|(index, _)| index % 2 == 1)
+        .map(|(_, block)| {
+            let code = block.split_once('\n').map(|(_, code)| code).unwrap_or(block).trim();
+            code.to_string()
+        })
+        .filter(|code| !code.is_empty() && code.chars().count() <= 800)
+        .take(3).collect()
 }
 
 fn status_name(status: &AgentRunStatus) -> &'static str {
@@ -1096,11 +1166,23 @@ mod tests {
 
     #[test]
     fn clarification_is_kept_in_next_turn_context() {
-        let context = build_prior_context(&[clarification_result_event("run-question")])
-            .expect("context");
+        let context =
+            build_prior_context(&[clarification_result_event("run-question")]).expect("context");
         assert!(context.contains("needs_user_input"));
         assert!(context.contains("你指的是哪两个保存方案"));
         assert!(context.contains("回复两个名称"));
+    }
+
+    #[test]
+    fn clarification_keeps_complete_candidate_after_long_explanation() {
+        let mut event = clarification_result_event("run-long-proposal");
+        let result = event.result.as_mut().unwrap();
+        let code = "/cast [buff:狂绝&nobuff:血怒·惊涌] 血怒";
+        result.clarification.as_mut().unwrap().analysis_text = Some(format!("{}\n```\n{code}\n```", "分析说明".repeat(400)));
+        let context = build_prior_context(&[event]).unwrap();
+        let value: Value = serde_json::from_str(&context).unwrap();
+        assert_eq!(value["turns"][0]["proposed_code_blocks"][0], code);
+        assert_eq!(value["turns"][0]["proposal_status"], "historical_unverified_candidate");
     }
 
     #[test]

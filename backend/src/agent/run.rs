@@ -217,12 +217,7 @@ impl AgentRunRecord {
     fn publish_replay(&self, event: AgentReplayEventV1) {
         if self
             .sessions
-            .append_replay_event(
-                &self.session_id,
-                &self.run_id,
-                &event.kind,
-                event.payload,
-            )
+            .append_replay_event(&self.session_id, &self.run_id, &event.kind, event.payload)
             .is_err()
         {
             self.persistence_error.store(true, Ordering::SeqCst);
@@ -438,6 +433,7 @@ impl AgentRunManager {
                     message: error.message,
                 })?;
             input.session_context = binding.prior_context;
+            input.resume_tools = binding.resume_tools;
             input.session_playbook_id = binding.prior_playbook_id;
             let record = AgentRunRecord::new(
                 input.run_id.clone(),
@@ -565,6 +561,7 @@ pub async fn create_run_handler(
         question: request.question,
         scenario: scenario.clone(),
         session_context: None,
+        resume_tools: Vec::new(),
         session_playbook_id: None,
         task_hint: request.task_hint,
         analysis_surface: request.analysis_surface,
@@ -773,6 +770,7 @@ mod tests {
         let scenario = runtime.fixture_scenario();
         let run_id = "run-manager-success".to_string();
         let input = AgentRunInput {
+            resume_tools: Vec::new(),
             run_id: run_id.clone(),
             question: "分析当前循环。".to_string(),
             scenario,
@@ -863,6 +861,7 @@ mod tests {
         let (manager, root) = test_manager("cancel");
         let runtime = AgentRuntime::fixture();
         let first = AgentRunInput {
+            resume_tools: Vec::new(),
             run_id: "run-active-first".to_string(),
             question: "等待取消。".to_string(),
             scenario: runtime.fixture_scenario(),
@@ -885,6 +884,7 @@ mod tests {
 
         let second_runtime = AgentRuntime::fixture();
         let second = AgentRunInput {
+            resume_tools: Vec::new(),
             run_id: "run-active-second".to_string(),
             question: "不应启动。".to_string(),
             scenario: second_runtime.fixture_scenario(),

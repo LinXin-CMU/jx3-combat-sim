@@ -4,15 +4,15 @@
 //! 评估 = 克隆 baseline MacroConfig → 写入阈值 → simulate_macro → DPS。
 
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use rand::prelude::*;
 use rand_distr::{Distribution, Normal};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::macro_engine::{MacroConfig, MacroAction, MacroLine};
+use crate::macro_engine::{MacroAction, MacroConfig, MacroLine};
 use crate::macro_eval::simulate_macro;
 use crate::{Attributes, Player, RecipeEntry, SkillSpec, Stance, TargetConfig};
 
@@ -60,7 +60,9 @@ pub struct EffectiveTunable {
 
 impl EffectiveTunable {
     pub fn random(&self, rng: &mut impl Rng) -> f64 {
-        if self.max <= self.min { return self.min; }
+        if self.max <= self.min {
+            return self.min;
+        }
         let raw = rng.gen_range(self.min..=self.max);
         snap(raw, self.min, self.max, self.step)
     }
@@ -68,11 +70,15 @@ impl EffectiveTunable {
         let c = v.clamp(self.min, self.max);
         snap(c, self.min, self.max, self.step)
     }
-    pub fn range(&self) -> f64 { (self.max - self.min).max(self.step) }
+    pub fn range(&self) -> f64 {
+        (self.max - self.min).max(self.step)
+    }
 }
 
 fn snap(v: f64, min: f64, max: f64, step: f64) -> f64 {
-    if step <= 0.0 { return v.clamp(min, max); }
+    if step <= 0.0 {
+        return v.clamp(min, max);
+    }
     let scale = (1.0 / step).round().max(1.0);
     ((v * scale).round() / scale).clamp(min, max)
 }
@@ -116,7 +122,7 @@ pub struct FitnessCtx {
 /// 多次评估的统计量
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct EvalStats {
-    pub fitness: f64,   // mean - 0.5*std（用于选拔）
+    pub fitness: f64, // mean - 0.5*std（用于选拔）
     pub mean: f64,
     pub std: f64,
     pub min_dps: f64,
@@ -133,11 +139,14 @@ impl FitnessCtx {
         let skills = &*self.skills;
         let mut skill_map: HashMap<&str, Vec<&SkillSpec>> = HashMap::new();
         for s in skills.iter() {
-            if s.passive { continue; }
+            if s.passive {
+                continue;
+            }
             let base = s.name.split('·').next().unwrap_or(&s.name);
             skill_map.entry(base).or_default().push(s);
         }
-        let skill_by_id: HashMap<u32, &SkillSpec> = skills.iter().map(|s| (s.skill_id, s)).collect();
+        let skill_by_id: HashMap<u32, &SkillSpec> =
+            skills.iter().map(|s| (s.skill_id, s)).collect();
         let recipes_table = self.recipes_table.as_slice();
 
         let mut player = Player::new(self.haste_level, self.talents.clone(), self.recipes.clone());
@@ -153,28 +162,44 @@ impl FitnessCtx {
         let mut prev_time = 0.0f64;
         let mut is_first_main = true;
 
-        let (timeline, _debug) = simulate_macro(
-            &cfg, &mut player, &skill_map,
-            max_slots, dur, delay_sec,
-            &mut prev_time, &mut is_first_main, None,
-            dmg_ctx.as_ref(), recipes_table, &skill_by_id,
+        let (timeline, _debug, _line_stats) = simulate_macro(
+            &cfg,
+            &mut player,
+            &skill_map,
+            max_slots,
+            dur,
+            delay_sec,
+            &mut prev_time,
+            &mut is_first_main,
+            None,
+            dmg_ctx.as_ref(),
+            recipes_table,
+            &skill_by_id,
             &scen.pauses,
         );
 
         let total: f64 = timeline.iter().filter_map(|e| e.damage_total).sum();
-        let last_cast = timeline.iter().rev().find(|e| !e.triggered).map(|e| e.cast_time).unwrap_or(0.0);
+        let last_cast = timeline
+            .iter()
+            .rev()
+            .find(|e| !e.triggered)
+            .map(|e| e.cast_time)
+            .unwrap_or(0.0);
         let fight_time = player.fight_end(last_cast).min(dur).max(0.001);
         total / fight_time
     }
 
     /// 旧 API：单次模拟（只指定时长，延迟/怒气走 ctx 默认）
     pub fn run_once(&self, values: &[f64], duration: f64) -> f64 {
-        self.run_once_scen(values, &ScenarioSpec {
-            delay_ms: self.network_delay_ms,
-            initial_rage: self.initial_rage,
-            duration,
-            pauses: Vec::new(),
-        })
+        self.run_once_scen(
+            values,
+            &ScenarioSpec {
+                delay_ms: self.network_delay_ms,
+                initial_rage: self.initial_rage,
+                duration,
+                pauses: Vec::new(),
+            },
+        )
     }
 
     /// 中点时长（用于归档 canonical DPS，与回放一致）
@@ -185,7 +210,10 @@ impl FitnessCtx {
     /// 评估：scenarios 非空走场景遍历；否则 K 次随机时长采样
     pub fn evaluate(&self, values: &[f64]) -> EvalStats {
         let samples: Vec<f64> = if !self.scenarios.is_empty() {
-            self.scenarios.iter().map(|s| self.run_once_scen(values, s)).collect()
+            self.scenarios
+                .iter()
+                .map(|s| self.run_once_scen(values, s))
+                .collect()
         } else {
             let k = self.samples_per_eval.max(1);
             let lo = self.duration_min.max(1.0);
@@ -193,7 +221,11 @@ impl FitnessCtx {
             let mut rng = rand::thread_rng();
             let mut out: Vec<f64> = Vec::with_capacity(k);
             for _ in 0..k {
-                let dur = if (hi - lo).abs() < 1e-6 { lo } else { rng.gen_range(lo..=hi) };
+                let dur = if (hi - lo).abs() < 1e-6 {
+                    lo
+                } else {
+                    rng.gen_range(lo..=hi)
+                };
                 out.push(self.run_once(values, dur));
             }
             out
@@ -205,17 +237,27 @@ impl FitnessCtx {
         let min_dps = samples.iter().cloned().fold(f64::INFINITY, f64::min);
         let max_dps = samples.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
         // fitness = 0.5×均值 + 0.5×最差（复合：均值驱动搜索，保底内化稳定性）
-        EvalStats { fitness: 0.5 * mean + 0.5 * min_dps, mean, std, min_dps, max_dps }
+        EvalStats {
+            fitness: 0.5 * mean + 0.5 * min_dps,
+            mean,
+            std,
+            min_dps,
+            max_dps,
+        }
     }
 }
 
 // MacroConfig 没有 Clone derive，手动递归复制
 fn clone_macro_config(cfg: &MacroConfig) -> MacroConfig {
     MacroConfig {
-        pages: cfg.pages.iter().map(|p| crate::macro_engine::MacroPage {
-            stance_filter: p.stance_filter,
-            lines: p.lines.iter().map(clone_macro_line).collect(),
-        }).collect(),
+        pages: cfg
+            .pages
+            .iter()
+            .map(|p| crate::macro_engine::MacroPage {
+                stance_filter: p.stance_filter,
+                lines: p.lines.iter().map(clone_macro_line).collect(),
+            })
+            .collect(),
     }
 }
 
@@ -267,39 +309,79 @@ pub struct Individual {
 fn random_individual(tunables: &[EffectiveTunable]) -> Individual {
     let mut rng = rand::thread_rng();
     let values = tunables.iter().map(|t| t.random(&mut rng)).collect();
-    Individual { values, fitness: 0.0, stats: EvalStats::default() }
+    Individual {
+        values,
+        fitness: 0.0,
+        stats: EvalStats::default(),
+    }
 }
 
 /// 首代 seed：默认参数（用户在 UI 给的 original）
 fn seed_individual(tunables: &[EffectiveTunable]) -> Individual {
-    let values = tunables.iter().map(|t| t.clamp_snap(t.param.original)).collect();
-    Individual { values, fitness: 0.0, stats: EvalStats::default() }
+    let values = tunables
+        .iter()
+        .map(|t| t.clamp_snap(t.param.original))
+        .collect();
+    Individual {
+        values,
+        fitness: 0.0,
+        stats: EvalStats::default(),
+    }
 }
 
 fn tournament<'a>(pop: &'a [Individual], k: usize, rng: &mut impl Rng) -> &'a Individual {
     tournament_by(pop, k, rng, &|ind: &Individual| ind.fitness)
 }
 
-fn tournament_by<'a>(pop: &'a [Individual], k: usize, rng: &mut impl Rng, key: &dyn Fn(&Individual) -> f64) -> &'a Individual {
+fn tournament_by<'a>(
+    pop: &'a [Individual],
+    k: usize,
+    rng: &mut impl Rng,
+    key: &dyn Fn(&Individual) -> f64,
+) -> &'a Individual {
     let mut best: Option<&'a Individual> = None;
     for _ in 0..k.max(1) {
         let i = rng.gen_range(0..pop.len());
         let cand = &pop[i];
-        if best.map_or(true, |b| key(cand) > key(b)) { best = Some(cand); }
+        if best.map_or(true, |b| key(cand) > key(b)) {
+            best = Some(cand);
+        }
     }
     best.unwrap()
 }
 
-fn crossover(a: &Individual, b: &Individual, tunables: &[EffectiveTunable], rate: f64, rng: &mut impl Rng) -> Individual {
-    if !rng.gen_bool(rate) { return a.clone(); }
+fn crossover(
+    a: &Individual,
+    b: &Individual,
+    tunables: &[EffectiveTunable],
+    rate: f64,
+    rng: &mut impl Rng,
+) -> Individual {
+    if !rng.gen_bool(rate) {
+        return a.clone();
+    }
     let alpha = rng.gen_range(0.0..=1.0);
-    let values = a.values.iter().zip(b.values.iter()).enumerate()
+    let values = a
+        .values
+        .iter()
+        .zip(b.values.iter())
+        .enumerate()
         .map(|(i, (&x, &y))| tunables[i].clamp_snap(alpha * x + (1.0 - alpha) * y))
         .collect();
-    Individual { values, fitness: 0.0, stats: EvalStats::default() }
+    Individual {
+        values,
+        fitness: 0.0,
+        stats: EvalStats::default(),
+    }
 }
 
-fn mutate(ind: &mut Individual, tunables: &[EffectiveTunable], rate: f64, sigma_pct: f64, rng: &mut impl Rng) {
+fn mutate(
+    ind: &mut Individual,
+    tunables: &[EffectiveTunable],
+    rate: f64,
+    sigma_pct: f64,
+    rng: &mut impl Rng,
+) {
     for (i, v) in ind.values.iter_mut().enumerate() {
         if rng.gen_bool(rate) {
             let t = &tunables[i];
@@ -327,7 +409,9 @@ pub enum Event {
         enabled_ids: Vec<String>,
     },
     /// seed 个体（默认阈值）的 DPS —— 初代评估完成后立即发送，用作"提升 %"基准
-    Baseline { dps: f64 },
+    Baseline {
+        dps: f64,
+    },
     Progress {
         gen: usize,
         best: f64,
@@ -357,9 +441,16 @@ pub enum Event {
         #[serde(skip_serializing_if = "Option::is_none")]
         struct_diff: Option<super::struct_ga::StructDiff>,
     },
-    TopN { items: Vec<TopNEntry> },
-    Done { best_dps: f64, total_gens: usize },
-    Error { message: String },
+    TopN {
+        items: Vec<TopNEntry>,
+    },
+    Done {
+        best_dps: f64,
+        total_gens: usize,
+    },
+    Error {
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -407,8 +498,12 @@ impl<'a> GaRun<'a> {
             if dps_mode {
                 ind.fitness
             } else {
-                let cv = if ind.stats.mean.abs() > 1e-9 { ind.stats.std / ind.stats.mean } else { f64::INFINITY };
-                -cv  // 负 CV：越小的 CV 越好 → 负值越大越好
+                let cv = if ind.stats.mean.abs() > 1e-9 {
+                    ind.stats.std / ind.stats.mean
+                } else {
+                    f64::INFINITY
+                };
+                -cv // 负 CV：越小的 CV 越好 → 负值越大越好
             }
         };
 
@@ -426,8 +521,18 @@ impl<'a> GaRun<'a> {
         let baseline_dps = population.first().map(|i| i.fitness).unwrap_or(0.0);
         (self.sink)(Event::Baseline { dps: baseline_dps });
 
-        let mut best_score = population.iter().map(|i| sort_key(i)).fold(f64::NEG_INFINITY, f64::max);
-        let mut best_ind = population.iter().max_by(|a, b| sort_key(a).partial_cmp(&sort_key(b)).unwrap_or(std::cmp::Ordering::Equal)).cloned();
+        let mut best_score = population
+            .iter()
+            .map(|i| sort_key(i))
+            .fold(f64::NEG_INFINITY, f64::max);
+        let mut best_ind = population
+            .iter()
+            .max_by(|a, b| {
+                sort_key(a)
+                    .partial_cmp(&sort_key(b))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .cloned();
 
         if let Some(ref bi) = best_ind {
             let canonical = self.ctx.run_once(&bi.values, self.ctx.midpoint_duration());
@@ -435,8 +540,11 @@ impl<'a> GaRun<'a> {
             let macro_text = build_macro_text_for(bi, self.ctx);
             if let Ok(rel) = self.archive.write_milestone(0, canonical, &cfg) {
                 (self.sink)(Event::Milestone {
-                    gen: 0, dps: canonical, file: rel,
-                    values: bi.values.clone(), macro_text,
+                    gen: 0,
+                    dps: canonical,
+                    file: rel,
+                    values: bi.values.clone(),
+                    macro_text,
                     stats: Some(bi.stats.clone()),
                     struct_diff: None,
                 });
@@ -445,21 +553,39 @@ impl<'a> GaRun<'a> {
 
         let mut gens_completed = 0usize;
         for gen in 0..self.params.generations {
-            if self.stop.load(Ordering::Relaxed) { break; }
+            if self.stop.load(Ordering::Relaxed) {
+                break;
+            }
             gens_completed = gen + 1;
 
             let stats = compute_stats(&population);
-            let best_ind_ref = population.iter().max_by(|a, b| sort_key(a).partial_cmp(&sort_key(b)).unwrap_or(std::cmp::Ordering::Equal));
+            let best_ind_ref = population.iter().max_by(|a, b| {
+                sort_key(a)
+                    .partial_cmp(&sort_key(b))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
             let best_values = best_ind_ref.map(|i| i.values.clone()).unwrap_or_default();
             // 另外取 CV 最低的个体（前端以它为"当前代最稳"来画 CV 曲线 + 仪表盘）
             let cv_best = population.iter().min_by(|a, b| {
-                let ca = if a.stats.mean.abs() > 1e-9 { a.stats.std / a.stats.mean } else { f64::INFINITY };
-                let cb = if b.stats.mean.abs() > 1e-9 { b.stats.std / b.stats.mean } else { f64::INFINITY };
+                let ca = if a.stats.mean.abs() > 1e-9 {
+                    a.stats.std / a.stats.mean
+                } else {
+                    f64::INFINITY
+                };
+                let cb = if b.stats.mean.abs() > 1e-9 {
+                    b.stats.std / b.stats.mean
+                } else {
+                    f64::INFINITY
+                };
                 ca.partial_cmp(&cb).unwrap_or(std::cmp::Ordering::Equal)
             });
             let (best_cv, best_mean_dps, best_min_dps) = match cv_best {
                 Some(i) => {
-                    let cv = if i.stats.mean.abs() > 1e-9 { i.stats.std / i.stats.mean } else { 0.0 };
+                    let cv = if i.stats.mean.abs() > 1e-9 {
+                        i.stats.std / i.stats.mean
+                    } else {
+                        0.0
+                    };
                     (Some(cv), Some(i.stats.mean), Some(i.stats.min_dps))
                 }
                 None => (None, None, None),
@@ -470,23 +596,41 @@ impl<'a> GaRun<'a> {
                 "best_cv": best_cv, "best_mean_dps": best_mean_dps, "best_min_dps": best_min_dps,
             })).ok();
             (self.sink)(Event::Progress {
-                gen, best: stats.best, avg: stats.avg, worst: stats.worst, diversity: stats.diversity,
+                gen,
+                best: stats.best,
+                avg: stats.avg,
+                worst: stats.worst,
+                diversity: stats.diversity,
                 best_values,
-                best_cv, best_mean_dps, best_min_dps,
+                best_cv,
+                best_mean_dps,
+                best_min_dps,
             });
 
             // 下一代：精英 + 锦标赛/交叉/变异
             let elite_count = ((pop_size as f64) * self.params.elitism_pct).ceil() as usize;
             let mut sorted = population.clone();
-            sorted.sort_by(|a, b| sort_key(b).partial_cmp(&sort_key(a)).unwrap_or(std::cmp::Ordering::Equal));
+            sorted.sort_by(|a, b| {
+                sort_key(b)
+                    .partial_cmp(&sort_key(a))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
             let mut new_pop: Vec<Individual> = sorted.into_iter().take(elite_count).collect();
 
             let mut rng = rand::thread_rng();
             while new_pop.len() < pop_size {
-                let p1 = tournament_by(&population, self.params.tournament_k, &mut rng, &sort_key).clone();
-                let p2 = tournament_by(&population, self.params.tournament_k, &mut rng, &sort_key).clone();
+                let p1 = tournament_by(&population, self.params.tournament_k, &mut rng, &sort_key)
+                    .clone();
+                let p2 = tournament_by(&population, self.params.tournament_k, &mut rng, &sort_key)
+                    .clone();
                 let mut child = crossover(&p1, &p2, tunables, self.params.crossover_rate, &mut rng);
-                mutate(&mut child, tunables, self.params.mutation_rate, self.params.mutation_sigma_pct, &mut rng);
+                mutate(
+                    &mut child,
+                    tunables,
+                    self.params.mutation_rate,
+                    self.params.mutation_sigma_pct,
+                    &mut rng,
+                );
                 new_pop.push(child);
             }
 
@@ -495,7 +639,14 @@ impl<'a> GaRun<'a> {
             population = new_pop;
 
             // 里程碑检查
-            let gen_best = population.iter().max_by(|a, b| sort_key(a).partial_cmp(&sort_key(b)).unwrap_or(std::cmp::Ordering::Equal)).cloned();
+            let gen_best = population
+                .iter()
+                .max_by(|a, b| {
+                    sort_key(a)
+                        .partial_cmp(&sort_key(b))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .cloned();
             if let Some(gb) = gen_best {
                 let gb_score = sort_key(&gb);
                 if gb_score > best_score + 1e-6 {
@@ -505,8 +656,11 @@ impl<'a> GaRun<'a> {
                     let macro_text = build_macro_text_for(&gb, self.ctx);
                     if let Ok(rel) = self.archive.write_milestone(gen + 1, canonical, &cfg) {
                         (self.sink)(Event::Milestone {
-                            gen: gen + 1, dps: canonical, file: rel,
-                            values: gb.values.clone(), macro_text,
+                            gen: gen + 1,
+                            dps: canonical,
+                            file: rel,
+                            values: gb.values.clone(),
+                            macro_text,
                             stats: Some(gb.stats.clone()),
                             struct_diff: None,
                         });
@@ -517,11 +671,17 @@ impl<'a> GaRun<'a> {
         }
 
         // Top N（末代去重）按遗传方向排序
-        population.sort_by(|a, b| sort_key(b).partial_cmp(&sort_key(a)).unwrap_or(std::cmp::Ordering::Equal));
+        population.sort_by(|a, b| {
+            sort_key(b)
+                .partial_cmp(&sort_key(a))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         let effective_top_n = self.params.top_n.min((gens_completed + 1).max(1));
         let mut top: Vec<Individual> = Vec::new();
         for ind in population.iter() {
-            if top.len() >= effective_top_n { break; }
+            if top.len() >= effective_top_n {
+                break;
+            }
             if !top.iter().any(|t| values_approx_eq(&t.values, &ind.values)) {
                 top.push(ind.clone());
             }
@@ -533,7 +693,9 @@ impl<'a> GaRun<'a> {
             let macro_text = build_macro_text_for(ind, self.ctx);
             if let Ok(rel) = self.archive.write_topn(i + 1, canonical, &cfg) {
                 entries.push(TopNEntry {
-                    rank: i + 1, dps: canonical, file: rel,
+                    rank: i + 1,
+                    dps: canonical,
+                    file: rel,
                     values: ind.values.clone(),
                     macro_text,
                     stats: Some(ind.stats.clone()),
@@ -549,10 +711,14 @@ impl<'a> GaRun<'a> {
 }
 
 fn cmp_fit(a: &&Individual, b: &&Individual) -> std::cmp::Ordering {
-    a.fitness.partial_cmp(&b.fitness).unwrap_or(std::cmp::Ordering::Equal)
+    a.fitness
+        .partial_cmp(&b.fitness)
+        .unwrap_or(std::cmp::Ordering::Equal)
 }
 fn cmp_fit_desc(a: &Individual, b: &Individual) -> std::cmp::Ordering {
-    b.fitness.partial_cmp(&a.fitness).unwrap_or(std::cmp::Ordering::Equal)
+    b.fitness
+        .partial_cmp(&a.fitness)
+        .unwrap_or(std::cmp::Ordering::Equal)
 }
 
 fn evaluate_population(pop: &mut [Individual], ctx: &FitnessCtx) {
@@ -581,15 +747,26 @@ fn compute_stats(pop: &[Individual]) -> Stats {
     let mut total_std = 0.0;
     for d in 0..dim {
         let mean = pop.iter().map(|i| i.values[d]).sum::<f64>() / n as f64;
-        let var = pop.iter().map(|i| (i.values[d] - mean).powi(2)).sum::<f64>() / n as f64;
+        let var = pop
+            .iter()
+            .map(|i| (i.values[d] - mean).powi(2))
+            .sum::<f64>()
+            / n as f64;
         total_std += var.sqrt();
     }
     let diversity = total_std / dim as f64;
-    Stats { best, avg, worst, diversity }
+    Stats {
+        best,
+        avg,
+        worst,
+        diversity,
+    }
 }
 
 fn values_approx_eq(a: &[f64], b: &[f64]) -> bool {
-    if a.len() != b.len() { return false; }
+    if a.len() != b.len() {
+        return false;
+    }
     a.iter().zip(b.iter()).all(|(x, y)| (x - y).abs() < 1e-3)
 }
 
@@ -622,11 +799,16 @@ fn build_loop_config(ind: &Individual, ctx: &FitnessCtx, base: &LoopConfig) -> L
 fn macro_config_to_loop_macro(cfg: &MacroConfig) -> LoopMacro {
     let any_stance = cfg.pages.iter().any(|p| p.stance_filter.is_some());
     if !any_stance {
-        let text = if cfg.pages.is_empty() { String::new() }
-            else { serialize_lines(&cfg.pages[0].lines) };
+        let text = if cfg.pages.is_empty() {
+            String::new()
+        } else {
+            serialize_lines(&cfg.pages[0].lines)
+        };
         return LoopMacro {
-            mode: "general".into(), general: text,
-            shield: String::new(), blade: String::new(),
+            mode: "general".into(),
+            general: text,
+            shield: String::new(),
+            blade: String::new(),
         };
     }
     let mut shield = String::new();
@@ -639,7 +821,12 @@ fn macro_config_to_loop_macro(cfg: &MacroConfig) -> LoopMacro {
             _ => {}
         }
     }
-    LoopMacro { mode: "stance".into(), general: String::new(), shield, blade }
+    LoopMacro {
+        mode: "stance".into(),
+        general: String::new(),
+        shield,
+        blade,
+    }
 }
 
 /// 个体 → 完整宏文本（用于前端 TopN/Milestone 内嵌预览 + 复制）
@@ -650,7 +837,10 @@ fn build_macro_text_for(ind: &Individual, ctx: &FitnessCtx) -> String {
     apply_values(&mut cfg, &params, &ind.values);
     let any_stance = cfg.pages.iter().any(|p| p.stance_filter.is_some());
     let raw = if !any_stance {
-        cfg.pages.get(0).map(|p| serialize_lines(&p.lines)).unwrap_or_default()
+        cfg.pages
+            .get(0)
+            .map(|p| serialize_lines(&p.lines))
+            .unwrap_or_default()
     } else {
         let mut out = String::new();
         for p in &cfg.pages {
@@ -661,7 +851,9 @@ fn build_macro_text_for(ind: &Individual, ctx: &FitnessCtx) -> String {
                 _ => None,
             };
             if let Some(t) = tag {
-                if !out.is_empty() { out.push('\n'); }
+                if !out.is_empty() {
+                    out.push('\n');
+                }
                 out.push_str(&format!("#page {}\n", t));
             }
             out.push_str(&serialize_lines(&p.lines));
@@ -685,9 +877,11 @@ fn format_macro_compact(src: &str) -> String {
         }
         // ".0" 尾：前面是数字，后面不是数字（即不是 "10.01" 这种小数中段）
         if c == '.'
-            && i + 1 < chars.len() && chars[i + 1] == '0'
+            && i + 1 < chars.len()
+            && chars[i + 1] == '0'
             && (i + 2 >= chars.len() || !chars[i + 2].is_ascii_digit())
-            && i > 0 && chars[i - 1].is_ascii_digit()
+            && i > 0
+            && chars[i - 1].is_ascii_digit()
         {
             i += 2;
             continue;
@@ -699,20 +893,33 @@ fn format_macro_compact(src: &str) -> String {
 }
 
 fn serialize_lines(lines: &[MacroLine]) -> String {
-    lines.iter().map(|l| {
-        let prefix = if l.action.is_fcast() { "/fcast" } else { "/cast" };
-        let cond = l.condition.as_ref()
-            .map(|c| format!(" [{}]", c.display_string()))
-            .unwrap_or_default();
-        let skill = match &l.action {
-            MacroAction::Cast(n) | MacroAction::FCast(n) => n.as_str(),
-        };
-        format!("{}{} {}", prefix, cond, skill)
-    }).collect::<Vec<_>>().join("\n")
+    lines
+        .iter()
+        .map(|l| {
+            let prefix = if l.action.is_fcast() {
+                "/fcast"
+            } else {
+                "/cast"
+            };
+            let cond = l
+                .condition
+                .as_ref()
+                .map(|c| format!(" [{}]", c.display_string()))
+                .unwrap_or_default();
+            let skill = match &l.action {
+                MacroAction::Cast(n) | MacroAction::FCast(n) => n.as_str(),
+            };
+            format!("{}{} {}", prefix, cond, skill)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn chrono_like_iso() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
-    let secs = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
     format!("t{}", secs)
 }

@@ -7,15 +7,19 @@
 //! - 嗜血奇穴(21281)：施展绝刀获得嗜血 buff（伤害+5%，12秒）
 //! - 援戈
 
+use super::{lin_guang, xue_shi, yuan_ge};
 use crate::*;
-use super::{yuan_ge, lin_guang, xue_shi};
 
 /// 怒气段表（基础 / 秘籍3005 减费后）
 const RAGE_SEGMENTS: [u32; 5] = [25, 35, 45, 55, 65];
 const RAGE_SEGMENTS_3005: [u32; 5] = [10, 20, 30, 40, 50];
 
 fn segments(player: &Player) -> &'static [u32; 5] {
-    if player.has_recipe(3005) { &RAGE_SEGMENTS_3005 } else { &RAGE_SEGMENTS }
+    if player.has_recipe(3005) {
+        &RAGE_SEGMENTS_3005
+    } else {
+        &RAGE_SEGMENTS
+    }
 }
 
 /// 当前怒气段（按当前 rage 选最大可用段）
@@ -23,7 +27,10 @@ fn segments(player: &Player) -> &'static [u32; 5] {
 /// 橙武 + 怒气不足最低段：返回 0 让 can_cast 通过
 pub fn effective_rage_cost(player: &Player, _skill: &SkillSpec) -> u32 {
     let segs = segments(player);
-    let max_seg = segs.iter().rev().copied()
+    let max_seg = segs
+        .iter()
+        .rev()
+        .copied()
         .find(|&seg| player.rage >= seg as i32);
     match max_seg {
         Some(seg) => seg,
@@ -69,13 +76,13 @@ pub fn cast_skill(player: &mut Player, em: &mut ScriptEmitter, t: f64) {
 
     // 狂绝：返还已消耗的怒气，消耗狂绝 buff
     if player.has_buff(BUFF_KUANG_JUE) {
-        player.add_rage(player.last_rage_cost as i32);
+        player.add_rage_from(player.last_rage_cost as i32, "狂绝返还绝刀怒气");
         player.remove_buff(BUFF_KUANG_JUE);
     }
 
     // 橙武：擎刀绝刀消耗归零（事后返还，让 last_rage_cost 仍按段算秘籍/name）
     if player.has_buff(BUFF_CHENG_WU) {
-        player.add_rage(player.last_rage_cost as i32);
+        player.add_rage_from(player.last_rage_cost as i32, "橙武返还绝刀怒气");
     }
 
     // 嗜血奇穴：施展绝刀获得嗜血 buff

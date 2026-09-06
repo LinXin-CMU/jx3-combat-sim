@@ -78,11 +78,17 @@ function Start-AgentCase {
   $simulationCalls = @($toolNames | Where-Object { $_ -eq 'simulate_scenario' }).Count
   $timelineCalls = @($toolNames | Where-Object { $_ -eq 'analyze_timeline' }).Count
   $baselineCalls = $simulationCalls + $timelineCalls
+  # Continuation restores immutable evidence before the model runs. Those
+  # server-initiated reads are recorded in debug, not as new tool_started calls.
+  $restoredBaseline = @($status.result.debug.tool_calls | Where-Object {
+    $_.call_id -like 'resume-*' -and $_.server_initiated -and $_.ok -and
+    $_.tool_name -in @('simulate_scenario', 'analyze_timeline')
+  }).Count
   $knowledgeCalls = @($toolNames | Where-Object { $_ -eq 'search_knowledge_base' }).Count
   $unexpectedCalls = @($toolNames | Where-Object { $_ -notin @('get_current_scenario', 'simulate_scenario', 'analyze_timeline', 'search_knowledge_base') })
   Assert-True ($status.result.accounting.tool_calls -eq $toolNames.Count) "Run $($created.run_id) tool accounting does not match its trace."
   Assert-True ($scenarioCalls -eq 1) "Run $($created.run_id) did not capture exactly one scenario."
-  Assert-True ($baselineCalls -eq 1) "Run $($created.run_id) did not execute exactly one deterministic baseline or timeline diagnosis."
+  Assert-True (($baselineCalls + $restoredBaseline) -eq 1) "Run $($created.run_id) did not execute or restore exactly one deterministic baseline or timeline diagnosis."
   Assert-True ($knowledgeCalls -le 1) "Run $($created.run_id) repeated its optional knowledge prefetch."
   Assert-True ($unexpectedCalls.Count -eq 0) "Run $($created.run_id) crossed the offline read-only tool boundary."
   Assert-True ($status.result.accounting.simulations -eq 1) "Run $($created.run_id) used an unexpected simulation count."

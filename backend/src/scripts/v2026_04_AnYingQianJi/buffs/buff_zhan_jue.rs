@@ -6,7 +6,7 @@
 use crate::*;
 
 pub fn on_tick(player: &mut Player, _em: &mut ScriptEmitter, _t: f64) {
-    player.add_rage(100);
+    player.add_rage_from(100, "战绝周期回怒");
 }
 
 pub fn on_expire(player: &mut Player, _em: &mut ScriptEmitter, _t: f64) {

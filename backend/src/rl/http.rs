@@ -153,7 +153,11 @@ pub async fn create_handler(
         allowed_actions: req.allowed_actions.map(|v| {
             let mut mask = [false; ACTION_COUNT];
             mask[0] = true; // 等待始终允许
-            for a in v { if (a as usize) < ACTION_COUNT { mask[a as usize] = true; } }
+            for a in v {
+                if (a as usize) < ACTION_COUNT {
+                    mask[a as usize] = true;
+                }
+            }
             mask
         }),
     };
@@ -172,16 +176,17 @@ pub async fn create_handler(
     .into_response()
 }
 
-pub async fn reset_handler(
-    State(shared): State<SharedState>,
-    Path(id): Path<String>,
-) -> Response {
+pub async fn reset_handler(State(shared): State<SharedState>, Path(id): Path<String>) -> Response {
     let Some(env_arc) = shared.rl_sessions.get(&id).await else {
         return not_found(&id);
     };
     let mut env = env_arc.lock().await;
     let (obs, mask) = env.reset();
-    Json(ResetResponse { obs, mask: mask.to_vec() }).into_response()
+    Json(ResetResponse {
+        obs,
+        mask: mask.to_vec(),
+    })
+    .into_response()
 }
 
 pub async fn step_handler(
@@ -230,8 +235,16 @@ pub async fn step_advance_handler(
     }
     let done_now = env.done();
     // episode 结束时顺手把 dps 打进响应，Python 侧无需额外 /info 请求
-    let episode_dps = if done_now { Some(env.fight_dps()) } else { None };
-    let total_damage = if done_now { Some(env.total_damage) } else { None };
+    let episode_dps = if done_now {
+        Some(env.fight_dps())
+    } else {
+        None
+    };
+    let total_damage = if done_now {
+        Some(env.total_damage)
+    } else {
+        None
+    };
     Json(serde_json::json!({
         "obs": env.observe(),
         "mask": env.legal_mask().to_vec(),
@@ -288,10 +301,7 @@ pub async fn macro_decision_handler(
     Json(MacroDecisionResponse { action }).into_response()
 }
 
-pub async fn info_handler(
-    State(shared): State<SharedState>,
-    Path(id): Path<String>,
-) -> Response {
+pub async fn info_handler(State(shared): State<SharedState>, Path(id): Path<String>) -> Response {
     let Some(env_arc) = shared.rl_sessions.get(&id).await else {
         return not_found(&id);
     };
@@ -306,10 +316,7 @@ pub async fn info_handler(
     .into_response()
 }
 
-pub async fn close_handler(
-    State(shared): State<SharedState>,
-    Path(id): Path<String>,
-) -> Response {
+pub async fn close_handler(State(shared): State<SharedState>, Path(id): Path<String>) -> Response {
     let removed = shared.rl_sessions.remove(&id).await;
     Json(serde_json::json!({ "closed": removed })).into_response()
 }

@@ -1478,7 +1478,10 @@ function annotateTimelineSequenceAnchors(timeline) {
   if (!Array.isArray(timeline) || typeof readSequence !== 'function') return;
   const sequence = readSequence();
   const casts = timeline.filter(ev => ev && !ev.triggered);
-  casts.forEach(ev => { delete ev._sequenceIndex; });
+  casts.forEach((ev, activeEventIndex) => {
+    delete ev._sequenceIndex;
+    ev._activeEventIndex = activeEventIndex;
+  });
   let castIndex = 0;
   sequence.forEach((skill, sequenceIndex) => {
     if (!skill || skill.startsWith('__clearCD__') || skill === '__切体态延迟中__' || skill === '__战绝回怒__') return;
@@ -1603,6 +1606,10 @@ function renderTimeline(timeline, opts) {
       .map(ev => ev?._sequenceIndex)
       .filter(Number.isInteger);
     if (sequenceIndices.length) slotEl.dataset.sequenceIndices = sequenceIndices.join(',');
+    const activeEventIndices = [group.main, ...group.top]
+      .map(ev => ev?._activeEventIndex)
+      .filter(Number.isInteger);
+    if (activeEventIndices.length) slotEl.dataset.activeEventIndices = activeEventIndices.join(',');
     slotEl.dataset.castTime = String(group.time);
 
     // 等待块（所有行共用，放在 slot 最左侧）
@@ -1691,24 +1698,55 @@ function renderTimeline(timeline, opts) {
 /** Agent 文本引用 ↔ 当前技能轴的只读桥。 */
 (function installAgentTimelineBridge() {
   let clearFocusTimer = null;
+  let pendingFocusTimer = null;
 
-  const normalizeRanges = ranges => (Array.isArray(ranges) ? ranges : [])
+  const normalizeReferences = ranges => (Array.isArray(ranges) ? ranges : [])
     .map(range => ({
+      kind: range?.kind === 'event' ? 'event' : 'operation',
       start: Math.max(0, Number(range?.start) || 0),
       end: Math.max(0, Number(range?.end ?? range?.start) || 0),
     }))
-    .map(range => range.start <= range.end ? range : { start: range.end, end: range.start });
+    .map(range => range.start <= range.end
+      ? range
+      : { kind: range.kind, start: range.end, end: range.start });
 
   function activeEvents() {
     const timeline = Array.isArray(lastSimResult?.timeline) ? lastSimResult.timeline : [];
     annotateTimelineSequenceAnchors(timeline);
-    return timeline.filter(ev => ev && !ev.triggered && Number.isInteger(ev._sequenceIndex));
+    return timeline.filter(ev => ev && !ev.triggered && Number.isInteger(ev._activeEventIndex));
   }
 
   function describe(ranges) {
     const sequence = typeof readSequence === 'function' ? readSequence() : [];
     const events = activeEvents();
-    return normalizeRanges(ranges).map(range => {
+    return normalizeReferences(ranges).map(range => {
+      if (range.kind === 'event') {
+        const valid = range.start < events.length && range.end < events.length;
+        const contextStart = range.start === range.end ? Math.max(0, range.start - 2) : range.start;
+        const contextEnd = range.start === range.end ? Math.min(events.length - 1, range.end + 2) : range.end;
+        const selectedEvents = events.filter(ev => ev._activeEventIndex >= range.start && ev._activeEventIndex <= range.end);
+        const contextEvents = events.filter(ev => ev._activeEventIndex >= contextStart && ev._activeEventIndex <= contextEnd);
+        const first = selectedEvents[0] || contextEvents[0];
+        const last = selectedEvents[selectedEvents.length - 1] || contextEvents[contextEvents.length - 1];
+        const endDuration = last ? (last.channel_duration || last.gcd || 0) : 0;
+        return {
+          ...range,
+          valid,
+          timeLabel: first && last
+            ? (range.start === range.end
+              ? `${Number(first.cast_time).toFixed(2)}s`
+              : `${Number(first.cast_time).toFixed(2)}s–${Number(last.cast_time + endDuration).toFixed(2)}s`)
+            : '当前技能轴未找到对应事件',
+          skills: contextEvents.map(ev => ({
+            ...eventDetails(ev),
+            index: ev._activeEventIndex,
+            name: ev.name || '未释放',
+            short: typeof shortName === 'function' ? shortName(ev.name || '未释放') : String(ev.name || '?').slice(0, 1),
+            selected: ev._activeEventIndex >= range.start && ev._activeEventIndex <= range.end,
+            time: Number(ev.cast_time),
+          })),
+        };
+      }
       const valid = range.start < sequence.length && range.end < sequence.length;
       const contextStart = range.start === range.end ? Math.max(0, range.start - 2) : range.start;
       const contextEnd = range.start === range.end ? Math.min(sequence.length - 1, range.end + 2) : range.end;
@@ -1733,6 +1771,7 @@ function renderTimeline(timeline, opts) {
           const index = contextStart + offset;
           const name = sequence[index] || '未释放';
           return {
+            ...eventDetails(eventByIndex.get(index), name),
             index,
             name,
             short: typeof shortName === 'function' ? shortName(name) : name.slice(0, 1),
@@ -1745,45 +1784,100 @@ function renderTimeline(timeline, opts) {
   }
 
   function clearFocus() {
+    document.querySelectorAll('.agent-axis-row-band').forEach(el => el.remove());
+    document.getElementById('timeline_track')?.classList.remove('agent-axis-row-active');
     document.querySelectorAll('.tl-slot.agent-axis-focus, .sim-seq-item.agent-axis-focus')
       .forEach(el => el.classList.remove('agent-axis-focus'));
   }
 
+  function eventDetails(event, name) {
+    const state = value => value ? {
+      ...value,
+      buffs: (value.buffs || []).filter(buff =>
+        !(document.getElementById('sim_hide_team_buffs')?.checked ?? true) || !_isTeamBuffId(buff.buff_id)
+      ).map(buff => ({ ...buff, iconUrl: buff.icon ? _localIcon(buff.icon) :
+        (typeof _getBuffIconUrl === 'function' ? _getBuffIconUrl(buff.buff_id) : '') })),
+      target_buffs: (value.target_buffs || []).map(buff => ({ ...buff,
+        iconUrl: buff.icon ? _localIcon(buff.icon) :
+          (typeof _getBuffIconUrl === 'function' ? _getBuffIconUrl(buff.buff_id) : '') })),
+    } : null;
+    return {
+      iconUrl: _getSkillIcon(event?.name || name || ''),
+      before: state(event?.state_before), after: state(event?.state_after),
+      rageCost: event?.rage_cost, damage: event?.damage,
+      damageNormal: event?.damage_normal, damageCrit: event?.damage_crit,
+    };
+  }
+
   function focus(range) {
-    const [normalized] = normalizeRanges([range]);
+    const [normalized] = normalizeReferences([range]);
     if (!normalized) return false;
     window.Jx3Nav?.switchPage('page-sim');
     const panel = document.getElementById('sim_timeline_panel');
     if (panel?.classList.contains('sim-timeline-collapsed')) {
       document.getElementById('sim_timeline_header')?.click();
     }
-    window.setTimeout(() => {
+    if (pendingFocusTimer) window.clearTimeout(pendingFocusTimer);
+    if (clearFocusTimer) window.clearTimeout(clearFocusTimer);
+    pendingFocusTimer = window.setTimeout(() => {
       clearFocus();
-      const slots = Array.from(document.querySelectorAll('#timeline_track .tl-slot[data-sequence-indices]'))
-        .filter(slot => slot.dataset.sequenceIndices.split(',').some(value => {
+      const scrollBehavior = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+      const dataKey = normalized.kind === 'event' ? 'activeEventIndices' : 'sequenceIndices';
+      const selector = normalized.kind === 'event'
+        ? '#timeline_track .tl-slot[data-active-event-indices]'
+        : '#timeline_track .tl-slot[data-sequence-indices]';
+      const slots = Array.from(document.querySelectorAll(selector))
+        .filter(slot => String(slot.dataset[dataKey] || '').split(',').some(value => {
           const index = Number(value);
           return index >= normalized.start && index <= normalized.end;
         }));
-      slots.forEach(slot => slot.classList.add('agent-axis-focus'));
+      slots.forEach(slot => { void slot.offsetWidth; slot.classList.add('agent-axis-focus'); });
+      if (slots.length) document.getElementById('timeline_track')?.classList.add('agent-axis-row-active');
       const scroll = document.querySelector('#sim_timeline_panel .sim-timeline-scroll');
       if (scroll && slots.length) {
         const left = Math.min(...slots.map(slot => slot.offsetLeft));
         const right = Math.max(...slots.map(slot => slot.offsetLeft + slot.offsetWidth));
-        scroll.scrollTo({ left: Math.max(0, (left + right) / 2 - scroll.clientWidth / 2), behavior: 'smooth' });
+        scroll.scrollTo({ left: Math.max(0, (left + right) / 2 - scroll.clientWidth / 2), behavior: scrollBehavior });
       }
 
+      const focusedSequenceIndices = normalized.kind === 'event'
+        ? activeEvents()
+            .filter(ev => ev._activeEventIndex >= normalized.start && ev._activeEventIndex <= normalized.end)
+            .map(ev => ev._sequenceIndex)
+            .filter(Number.isInteger)
+        : null;
       const sequenceItems = Array.from(document.querySelectorAll('#sim_sequence .sim-seq-item[data-sequence-index]'))
         .filter(item => {
           const index = Number(item.dataset.sequenceIndex);
-          return index >= normalized.start && index <= normalized.end;
+          return focusedSequenceIndices
+            ? focusedSequenceIndices.includes(index)
+            : index >= normalized.start && index <= normalized.end;
         });
-      sequenceItems.forEach(item => item.classList.add('agent-axis-focus'));
+      sequenceItems.forEach(item => { void item.offsetWidth; item.classList.add('agent-axis-focus'); });
       const sequencePanel = document.getElementById('sim_sequence');
       if (sequencePanel && sequenceItems.length) {
+        const panelRect = sequencePanel.getBoundingClientRect();
+        const rows = [];
+        sequenceItems.forEach(item => {
+          const rect = item.getBoundingClientRect();
+          const middle = (rect.top + rect.bottom) / 2;
+          if (rows.some(row => middle >= row.top && middle <= row.bottom)) return;
+          const peers = Array.from(sequencePanel.querySelectorAll('.sim-seq-item'))
+            .map(peer => peer.getBoundingClientRect()).filter(peer => peer.top <= middle && peer.bottom >= middle);
+          rows.push({top: Math.min(...peers.map(peer => peer.top)), bottom: Math.max(...peers.map(peer => peer.bottom))});
+        });
+        rows.forEach(row => {
+          const band = document.createElement('div');
+          band.className = 'agent-axis-row-band';
+          band.setAttribute('aria-hidden', 'true');
+          band.style.top = `${row.top - panelRect.top - sequencePanel.clientTop + sequencePanel.scrollTop - 5}px`;
+          band.style.height = `${row.bottom - row.top + 10}px`;
+          sequencePanel.appendChild(band);
+        });
         const first = sequenceItems[0];
         sequencePanel.scrollTo({
           top: Math.max(0, first.offsetTop - sequencePanel.clientHeight / 2 + first.offsetHeight / 2),
-          behavior: 'smooth',
+          behavior: scrollBehavior,
         });
       }
       if (clearFocusTimer) window.clearTimeout(clearFocusTimer);

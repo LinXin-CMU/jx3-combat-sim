@@ -12,7 +12,7 @@
 //!     rank_01_dps_XXXXXXX.json
 //! ```
 
-use std::fs::{File, OpenOptions, create_dir_all};
+use std::fs::{create_dir_all, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -27,7 +27,11 @@ pub struct ArchiveWriter {
 }
 
 impl ArchiveWriter {
-    pub fn new<T: Serialize>(run_id: String, meta: &T, baseline: &LoopConfig) -> std::io::Result<Self> {
+    pub fn new<T: Serialize>(
+        run_id: String,
+        meta: &T,
+        baseline: &LoopConfig,
+    ) -> std::io::Result<Self> {
         let root = resolve_runs_root().join(&run_id);
         create_dir_all(root.join("milestones"))?;
         create_dir_all(root.join("topN"))?;
@@ -40,7 +44,11 @@ impl ArchiveWriter {
             .append(true)
             .open(root.join("progress.jsonl"))?;
 
-        Ok(Self { run_id, root, progress })
+        Ok(Self {
+            run_id,
+            root,
+            progress,
+        })
     }
 
     pub fn append_progress<T: Serialize>(&mut self, entry: &T) -> std::io::Result<()> {
@@ -50,7 +58,12 @@ impl ArchiveWriter {
         self.progress.flush()
     }
 
-    pub fn write_milestone(&self, gen: usize, dps: f64, cfg: &LoopConfig) -> std::io::Result<String> {
+    pub fn write_milestone(
+        &self,
+        gen: usize,
+        dps: f64,
+        cfg: &LoopConfig,
+    ) -> std::io::Result<String> {
         let name = format!("gen_{:04}_dps_{}.json", gen, dps.round() as i64);
         let rel = format!("milestones/{}", name);
         write_json_pretty(&self.root.join(&rel), cfg)?;
@@ -75,7 +88,9 @@ fn resolve_runs_root() -> PathBuf {
 }
 
 fn write_json_pretty<T: Serialize>(path: &Path, value: &T) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() { create_dir_all(parent)?; }
+    if let Some(parent) = path.parent() {
+        create_dir_all(parent)?;
+    }
     let text = serde_json::to_string_pretty(value)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     std::fs::write(path, text)
@@ -84,7 +99,9 @@ fn write_json_pretty<T: Serialize>(path: &Path, value: &T) -> std::io::Result<()
 /// 列出所有已归档的运行（按 run_id 逆序）
 pub fn list_runs() -> std::io::Result<Vec<String>> {
     let root = resolve_runs_root();
-    if !root.exists() { return Ok(Vec::new()); }
+    if !root.exists() {
+        return Ok(Vec::new());
+    }
     let mut ids = Vec::new();
     for entry in std::fs::read_dir(&root)? {
         let entry = entry?;
@@ -102,15 +119,17 @@ pub fn list_runs() -> std::io::Result<Vec<String>> {
 pub fn read_meta(run_id: &str) -> std::io::Result<serde_json::Value> {
     let root = resolve_runs_root().join(run_id);
     let text = std::fs::read_to_string(root.join("meta.json"))?;
-    serde_json::from_str(&text)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    serde_json::from_str(&text).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
 }
 
 pub fn read_archive_file(run_id: &str, rel: &str) -> std::io::Result<String> {
     let root = resolve_runs_root().join(run_id);
     // 简单路径安全检查：不允许 .. / 绝对路径
     if rel.contains("..") || rel.starts_with('/') || rel.starts_with('\\') {
-        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "invalid path"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "invalid path",
+        ));
     }
     std::fs::read_to_string(root.join(rel))
 }
@@ -118,7 +137,9 @@ pub fn read_archive_file(run_id: &str, rel: &str) -> std::io::Result<String> {
 /// 列出 milestones / topN 文件
 pub fn list_archive_subdir(run_id: &str, subdir: &str) -> std::io::Result<Vec<String>> {
     let root = resolve_runs_root().join(run_id).join(subdir);
-    if !root.exists() { return Ok(Vec::new()); }
+    if !root.exists() {
+        return Ok(Vec::new());
+    }
     let mut files = Vec::new();
     for entry in std::fs::read_dir(&root)? {
         let entry = entry?;

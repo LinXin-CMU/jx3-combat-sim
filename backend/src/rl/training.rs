@@ -12,8 +12,8 @@
 //! train.py 路径：默认 `<cwd>/../python/train.py`（相对 backend 工作目录）。
 
 use std::process::Stdio;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use axum::{
     extract::State,
@@ -54,7 +54,10 @@ pub struct RuntimeParams {
 
 impl Default for RuntimeParams {
     fn default() -> Self {
-        Self { eval_every: 10, eval_duration: 60.0 }
+        Self {
+            eval_every: 10,
+            eval_duration: 60.0,
+        }
     }
 }
 
@@ -136,18 +139,40 @@ pub struct TrainStartRequest {
     pub allowed_actions: Option<Vec<u32>>,
 }
 
-fn default_eval_every() -> u32 { 10 }
-fn default_eval_duration() -> f64 { 60.0 }
+fn default_eval_every() -> u32 {
+    10
+}
+fn default_eval_duration() -> f64 {
+    60.0
+}
 
-fn default_n_envs() -> u32 { 8 }
-fn default_n_steps() -> u32 { 2048 }
-fn default_n_epochs() -> u32 { 10 }
-fn default_minibatch() -> u32 { 512 }
-fn default_lr() -> f64 { 3e-4 }
-fn default_gamma() -> f64 { 0.999 }
-fn default_ent_coef() -> f64 { 0.01 }
-fn default_device() -> String { "cuda".into() }
-fn default_save_every() -> u32 { 20 }
+fn default_n_envs() -> u32 {
+    8
+}
+fn default_n_steps() -> u32 {
+    2048
+}
+fn default_n_epochs() -> u32 {
+    10
+}
+fn default_minibatch() -> u32 {
+    512
+}
+fn default_lr() -> f64 {
+    3e-4
+}
+fn default_gamma() -> f64 {
+    0.999
+}
+fn default_ent_coef() -> f64 {
+    0.01
+}
+fn default_device() -> String {
+    "cuda".into()
+}
+fn default_save_every() -> u32 {
+    20
+}
 
 #[derive(Debug, Serialize)]
 pub struct TrainStartResponse {
@@ -243,7 +268,10 @@ pub async fn start_handler(
         "allowed_actions": req.allowed_actions,
     });
     let spec_path = runs_root.join("spec.json");
-    if let Err(e) = std::fs::write(&spec_path, serde_json::to_string_pretty(&spec).unwrap_or_default()) {
+    if let Err(e) = std::fs::write(
+        &spec_path,
+        serde_json::to_string_pretty(&spec).unwrap_or_default(),
+    ) {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(err(&format!("写 spec.json 失败: {}", e))),
@@ -299,7 +327,9 @@ pub async fn start_handler(
             match reader.next_line().await {
                 Ok(Some(line)) => {
                     let trimmed = line.trim();
-                    if trimmed.is_empty() { continue; }
+                    if trimmed.is_empty() {
+                        continue;
+                    }
                     match serde_json::from_str::<JsonValue>(trimmed) {
                         Ok(ev) => {
                             *train_for_last.last_event.lock().await = Some(ev.clone());
@@ -359,7 +389,8 @@ pub async fn stop_handler(State(shared): State<SharedState>) -> Response {
     let train = shared.rl_train.clone();
     let guard = train.current.lock().await;
     let Some(active) = guard.as_ref() else {
-        return Json(serde_json::json!({"stopped": false, "reason": "无进行中的任务"})).into_response();
+        return Json(serde_json::json!({"stopped": false, "reason": "无进行中的任务"}))
+            .into_response();
     };
     active.stop.store(true, Ordering::Relaxed);
     let run_id = active.run_id.clone();
@@ -372,7 +403,10 @@ pub async fn stop_handler(State(shared): State<SharedState>) -> Response {
         let pid = child_guard.as_ref().and_then(|c| c.id());
         let killed = if let Some(c) = child_guard.as_mut() {
             let _ = c.start_kill();
-            tokio::time::timeout(std::time::Duration::from_secs(3), c.wait()).await.ok().is_some()
+            tokio::time::timeout(std::time::Duration::from_secs(3), c.wait())
+                .await
+                .ok()
+                .is_some()
         } else {
             true
         };
@@ -410,7 +444,8 @@ pub async fn stop_handler(State(shared): State<SharedState>) -> Response {
         "pid": pid,
         "killed": killed_first,
         "force_killed": force_killed,
-    })).into_response()
+    }))
+    .into_response()
 }
 
 /// 扫 python/runs/ 目录，列出历史 run 及其 ckpt 文件（递归查找 *.pt）
@@ -419,8 +454,12 @@ pub async fn list_runs_handler() -> Json<serde_json::Value> {
     let mut runs: Vec<serde_json::Value> = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&root) {
         for e in entries.flatten() {
-            let Ok(ft) = e.file_type() else { continue; };
-            if !ft.is_dir() { continue; }
+            let Ok(ft) = e.file_type() else {
+                continue;
+            };
+            if !ft.is_dir() {
+                continue;
+            }
             let run_id = e.file_name().to_string_lossy().to_string();
             let run_dir = e.path();
             let spec_path = run_dir.join("spec.json");
@@ -442,18 +481,30 @@ pub async fn list_runs_handler() -> Json<serde_json::Value> {
 }
 
 /// 递归收集 *.pt 文件（相对 run_root 做 name，显示时便于区分阶段）
-fn collect_ckpts(dir: &std::path::Path, run_root: &std::path::Path, out: &mut Vec<serde_json::Value>) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return; };
+fn collect_ckpts(
+    dir: &std::path::Path,
+    run_root: &std::path::Path,
+    out: &mut Vec<serde_json::Value>,
+) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     for f in entries.flatten() {
         let path = f.path();
-        let Ok(ft) = f.file_type() else { continue; };
+        let Ok(ft) = f.file_type() else {
+            continue;
+        };
         if ft.is_dir() {
             collect_ckpts(&path, run_root, out);
             continue;
         }
         let name = f.file_name().to_string_lossy().to_string();
-        if !name.ends_with(".pt") { continue; }
-        let rel = path.strip_prefix(run_root).ok()
+        if !name.ends_with(".pt") {
+            continue;
+        }
+        let rel = path
+            .strip_prefix(run_root)
+            .ok()
             .map(|p| p.to_string_lossy().replace('\\', "/"))
             .unwrap_or_else(|| name.clone());
         let meta = std::fs::metadata(&path).ok();
@@ -508,7 +559,9 @@ pub async fn stream_handler(
             match res {
                 Ok(ev) => {
                     let data = serde_json::to_string(&ev).unwrap_or_else(|_| "{}".into());
-                    Some(Ok::<_, std::convert::Infallible>(SseEvent::default().data(data)))
+                    Some(Ok::<_, std::convert::Infallible>(
+                        SseEvent::default().data(data),
+                    ))
                 }
                 Err(_) => None,
             }
@@ -527,8 +580,12 @@ fn err(msg: &str) -> JsonValue {
 }
 
 /// 供 analysis.rs 复用的包装
-pub fn resolve_python_dir_pub() -> std::path::PathBuf { resolve_python_dir() }
-pub fn resolve_python_bin_pub(dir: &std::path::Path) -> String { resolve_python_bin(dir) }
+pub fn resolve_python_dir_pub() -> std::path::PathBuf {
+    resolve_python_dir()
+}
+pub fn resolve_python_bin_pub(dir: &std::path::Path) -> String {
+    resolve_python_bin(dir)
+}
 
 /// 解析 python 目录：优先 ./python；其次 ../python（相对 backend 工作目录）
 fn resolve_python_dir() -> std::path::PathBuf {
@@ -557,7 +614,11 @@ fn resolve_python_bin(python_dir: &std::path::Path) -> String {
 
     let candidates = [
         python_dir.join(".venv").join(rel[0]).join(rel[1]),
-        python_dir.join("..").join(".venv").join(rel[0]).join(rel[1]),
+        python_dir
+            .join("..")
+            .join(".venv")
+            .join(rel[0])
+            .join(rel[1]),
     ];
     for c in &candidates {
         if c.exists() {

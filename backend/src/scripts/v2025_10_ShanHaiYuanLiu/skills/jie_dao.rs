@@ -1,8 +1,8 @@
 //! 劫刀脚本 (ID: 13052)
 //! 秘籍怒气减少已在 effective_rage_cost 中处理
 
+use super::{lin_guang, xue_shi, yuan_ge};
 use crate::*;
-use super::{yuan_ge, lin_guang, xue_shi};
 
 pub fn cast_skill(player: &mut Player, em: &mut ScriptEmitter, t: f64) {
     // 苍雪刀公共效果

@@ -7,7 +7,9 @@ use crate::*;
 
 pub fn cast_skill(player: &mut Player, em: &mut ScriptEmitter, t: f64) {
     let stacks = player.zhen_yun_consumed_stacks;
-    if stacks == 0 { return; }
+    if stacks == 0 {
+        return;
+    }
 
     // 按层数选系数
     let coeff_per_hit = if stacks <= 15 {

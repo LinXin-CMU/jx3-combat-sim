@@ -6,7 +6,7 @@
   <title>剑网3 苍云PVE循环模拟器</title>
   <link rel="icon" href="favicon.ico" type="image/x-icon">
   <link rel="stylesheet" href="style.css?v=20260902-prompts1">
-  <link rel="stylesheet" href="agent.css?v=20260904-axisrefs1">
+  <link rel="stylesheet" href="agent.css?v=20260906-macropages1">
 </head>
 <body>
   <div class="container">
@@ -167,19 +167,13 @@
             <p class="hub-card-desc">枚举候选装备组合，按当前循环跑模拟，找出最优配装</p>
             <button class="hub-card-btn">开始 →</button>
           </div>
-          <div class="hub-card" data-hub-action="workflow-agent">
-            <div class="hub-card-icon">✦</div>
-            <h2 class="hub-card-title">AI 战斗分析</h2>
-            <p class="hub-card-desc">模型负责提出假设，确定性模拟器负责数字，所有结论都带可复现证据</p>
-            <div class="hub-card-badge agent-safe-badge">本地 · 只读工具</div>
-            <button class="hub-card-btn">开始 →</button>
-          </div>
         </div>
         <div class="hub-tools">
           <div class="hub-tools-title">独立工具</div>
           <div class="hub-tools-row">
             <button class="hub-tool" data-hub-goto="page-equip">⚔️ 配装器</button>
             <button class="hub-tool" id="hub_macro_settings">📝 宏设置</button>
+            <button class="hub-tool" data-hub-goto="page-agent">✦ AI 战斗分析</button>
           </div>
         </div>
       </div>
@@ -240,16 +234,7 @@
               <div class="agent-welcome-mark">✦</div>
               <h3>从一个可验证的问题开始</h3>
               <p>先在“循环模拟”准备场景，再问 Agent 当前攻略、输出基线、候选改动或时间轴异常。引用资料会标明赛季与原始来源。</p>
-              <div class="agent-starter-grid">
-                <button class="sim-btn" data-agent-question="这套循环的整体输出和伤害结构怎么样？" data-agent-task-hint="baseline_analysis">分析当前基线</button>
-                <button class="sim-btn" data-agent-question="这套循环哪里顺，哪里可能在空转或浪费资源？" data-agent-task-hint="rotation_stall_diagnosis">诊断时间轴</button>
-                <button class="sim-btn" data-agent-question="结合当前版本攻略，解释这套循环的核心思路。" data-agent-task-hint="general_analysis">查询版本攻略</button>
-                <button class="sim-btn" data-agent-question="为了更准确地判断这套循环，下一步最值得检查什么？" data-agent-task-hint="general_analysis">下一步分析</button>
-                <button class="sim-btn" data-agent-question="这套循环做得好的地方和最主要的问题是什么？" data-agent-task-hint="baseline_analysis">分析循环优缺点</button>
-                <button class="sim-btn" data-agent-question="这是宏循环还是手动循环？它的执行特点是什么？" data-agent-task-hint="macro_analysis">识别输入模式</button>
-                <button class="sim-btn" data-agent-question="我保存了哪些可以互相比较的宏或循环？" data-agent-task-hint="saved_artifact_analysis">选择保存方案</button>
-                <button class="sim-btn" data-agent-question="这套循环在移动、转火、停手和网络延迟变化时表现怎么样？" data-agent-task-hint="practical_adaptation">分析实战适配</button>
-              </div>
+              <div class="agent-starter-grid"></div>
             </div>
           </section>
 
@@ -2029,12 +2014,7 @@
           <span id="sim_ai_context_text">等待当前循环完成一次模拟</span>
         </div>
 
-        <div class="sim-ai-quick" id="sim_ai_quick" aria-label="常用分析">
-          <button type="button" class="sim-btn" data-sim-ai-question="这套循环的整体输出和伤害结构怎么样？" data-agent-task-hint="baseline_analysis">基线分析</button>
-          <button type="button" class="sim-btn" data-sim-ai-question="这套循环哪里顺，哪里可能在空转或浪费资源？" data-agent-task-hint="rotation_stall_diagnosis">时间轴诊断</button>
-          <button type="button" class="sim-btn" data-sim-ai-question="结合当前版本攻略，解释这套循环的核心思路。" data-agent-task-hint="general_analysis">版本攻略</button>
-          <button type="button" class="sim-btn" data-sim-ai-question="为了更准确地判断这套循环，下一步最值得检查什么？" data-agent-task-hint="general_analysis">下一步分析</button>
-        </div>
+        <div class="sim-ai-quick" id="sim_ai_quick" aria-label="常用分析"></div>
 
         <section class="sim-ai-chat" id="sim_ai_chat" aria-live="polite">
           <div class="sim-ai-welcome">
@@ -2821,7 +2801,7 @@
       s.onload = next; s.onerror = next;
       document.body.appendChild(s);
     }
-    var SCRIPTS = ['state.js', 'app.js?v=20260904-axisrefs1', 'agent.js?v=20260904-axisrefs1'];
+    var SCRIPTS = ['state.js', 'app.js?v=20260904-axisrefs1', 'agent.js?v=20260906-markdown-lists1'];
     var go = function () { loadSeq(SCRIPTS); };
     try {
       fetch('/api/settings', { cache: 'no-store' })

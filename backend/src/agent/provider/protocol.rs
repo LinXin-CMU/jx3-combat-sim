@@ -6,13 +6,13 @@ pub const PROVIDER_PROTOCOL_V1: &str = "agent-provider-protocol/v1";
 pub const MAX_INSTRUCTIONS_BYTES: usize = 32 * 1024;
 pub const MAX_MESSAGE_BYTES: usize = 64 * 1024;
 pub const MAX_TOOL_OUTPUT_BYTES: usize = 256 * 1024;
-pub const MAX_TOOLS: usize = 16;
+pub const MAX_TOOLS: usize = 17;
 pub const MAX_PROVIDER_TOOL_CALLS: usize = 8;
-pub const MAX_OUTPUT_TOKENS: u32 = 8192;
+pub const MAX_OUTPUT_TOKENS: u32 = 32768;
 /// Hard upper bound for the provider-neutral request before an adapter adds
 /// small transport fields such as the model name. Orchestrators must compact
 /// evidence before crossing this boundary.
-pub const MAX_MODEL_REQUEST_BYTES: usize = 72 * 1024;
+pub const MAX_MODEL_REQUEST_BYTES: usize = 128 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "role", rename_all = "snake_case", deny_unknown_fields)]
@@ -147,7 +147,7 @@ impl ModelRequest {
         if self.max_output_tokens == 0 || self.max_output_tokens > MAX_OUTPUT_TOKENS {
             return Err(protocol_error(
                 "invalid_output_budget",
-                "max_output_tokens must be 1..8192",
+                "max_output_tokens must be 1..32768",
             ));
         }
         if self.tools.len() > MAX_TOOLS {
@@ -384,7 +384,7 @@ mod tests {
     fn total_request_size_is_bounded_before_provider_dispatch() {
         let mut oversized = request();
         oversized.messages = vec![ModelMessage::User {
-            content: "证".repeat(30_000),
+            content: "证".repeat(MAX_MODEL_REQUEST_BYTES / 3 + 1),
         }];
         assert_eq!(
             oversized.validate().unwrap_err().code,

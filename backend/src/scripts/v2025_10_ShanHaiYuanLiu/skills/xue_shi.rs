@@ -11,7 +11,9 @@ use crate::*;
 pub fn rage_recipe(pre_rage: u32, has_recipe_3005: bool) -> Vec<u32> {
     let base = if has_recipe_3005 { 10 } else { 25 };
     let step = 10;
-    if pre_rage <= base { return Vec::new(); }
+    if pre_rage <= base {
+        return Vec::new();
+    }
     let tier = ((pre_rage - base) / step).min(4);
     match tier {
         1 => vec![99035],
@@ -24,13 +26,19 @@ pub fn rage_recipe(pre_rage: u32, has_recipe_3005: bool) -> Vec<u32> {
 
 pub fn try_trigger(player: &mut Player, em: &mut ScriptEmitter, t: f64) {
     // 需要奇穴
-    if !player.has_talent(32618) { return; }
+    if !player.has_talent(32618) {
+        return;
+    }
 
     // 需要血怒 buff（普通或惊涌）
-    if !player.has_buff(BUFF_XUE_NU) && !player.has_buff(BUFF_XUE_NU_JY) { return; }
+    if !player.has_buff(BUFF_XUE_NU) && !player.has_buff(BUFF_XUE_NU_JY) {
+        return;
+    }
 
     // 检查以血盟誓层数
-    let count = player.target_buffs.iter()
+    let count = player
+        .target_buffs
+        .iter()
         .find(|b| b.buff_id == BUFF_XUE_SHI_COUNT)
         .map(|b| b.stacks)
         .unwrap_or(0);
@@ -40,7 +48,11 @@ pub fn try_trigger(player: &mut Player, em: &mut ScriptEmitter, t: f64) {
         // 怒气加成 = 释放前怒气，按绝刀5档算法
         // 有秘籍3005：基准10/20/30/40/50，无秘籍：基准25/35/45/55/65
         let pre_rage = (player.rage + player.last_rage_cost as i32).min(100) as u32;
-        let base = if player.has_recipe(3005) { 10u32 } else { 25u32 };
+        let base = if player.has_recipe(3005) {
+            10u32
+        } else {
+            25u32
+        };
         let step = 10u32;
         let rage_val = base + ((pre_rage.saturating_sub(base)) / step).min(4) * step;
         let name = format!("血誓·{}怒", rage_val);

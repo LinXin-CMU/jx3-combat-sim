@@ -1,0 +1,25 @@
+{
+  "schema_version": "agent-terminology-eval/v1",
+  "current_season": "暗影千机（2026）",
+  "positive_cases": [
+    { "question": "斩绝绝怎么打", "expected": "斩绝绝" },
+    { "question": "14156适合什么循环", "expected": "14156" },
+    { "question": "206和14156怎么选", "expected": "206" },
+    { "question": "卡盾飞具体怎么操作", "expected": "卡盾飞" },
+    { "question": "飞击是什么", "expected": "卡盾飞" },
+    { "question": "飞压怎么卡", "expected": "卡盾飞" },
+    { "question": "斩击击后面怎么接", "expected": "斩击击" },
+    { "question": "白刀应该放在哪", "expected": "白刀" },
+    { "question": "卸云是什么意思", "expected": "卸云", "season": "雾海寻龙（2024）" },
+    { "question": "单走绝刀插在哪里", "expected": "单走绝刀" },
+    { "question": "斩业的收益", "expected": "斩业" },
+    { "question": "小橙武适合什么加速", "expected": "小橙武" },
+    { "question": "水特效怎么配装", "expected": "水特效" }
+  ],
+  "negative_cases": [
+    "今天吃什么",
+    "帮我随便看看这个",
+    "回答得详细一点",
+    "卸云是什么意思"
+  ]
+}

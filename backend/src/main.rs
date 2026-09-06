@@ -1,32 +1,36 @@
+use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
 use axum::{
     extract::{Json, State},
     http::Method,
     response::{IntoResponse, Response},
-    routing::{get, post, delete},
+    routing::{delete, get, post},
     Router,
 };
-use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
-use std::{collections::{HashMap, HashSet}, path::Path, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+    sync::Arc,
+};
 use tokio::sync::RwLock;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::ServeDir;
 
-mod auth;
-mod router;
 pub mod agent;
+mod auth;
 mod buffs;
-mod scripts;
 pub mod equip;
+pub mod equip_effects;
 pub mod expectation;
 pub mod macro_engine;
-pub mod macro_parser;
-pub mod optimizer;
 pub mod macro_eval;
 pub mod macro_gen;
+pub mod macro_parser;
 pub mod macro_prune;
+pub mod optimizer;
 pub mod rl;
-pub mod equip_effects;
+mod router;
+mod scripts;
 
 pub use buffs::*;
 pub use equip_effects::*;
@@ -40,9 +44,9 @@ pub use equip_effects::*;
 #[serde(rename_all = "snake_case")]
 pub enum DamageKind {
     #[default]
-    Physical,      // 普通外功
-    Magical,       // 普通内功
-    SurplusOnly,   // 纯破招段
+    Physical, // 普通外功
+    Magical,     // 普通内功
+    SurplusOnly, // 纯破招段
 }
 
 /// 角色属性面板输入
@@ -53,50 +57,63 @@ pub enum DamageKind {
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
 pub struct Attributes {
     // 主属性（130 级基础：体质 45，其余 44）
-    #[serde(default = "default_vitality")] pub vitality: f64,
-    #[serde(default = "default_major")]    pub li_dao:   f64,
-    #[serde(default = "default_major")]    pub gen_gu:   f64,
-    #[serde(default = "default_major")]    pub yuan_qi:  f64,
-    #[serde(default = "default_major")]    pub shen_fa:  f64,
+    #[serde(default = "default_vitality")]
+    pub vitality: f64,
+    #[serde(default = "default_major")]
+    pub li_dao: f64,
+    #[serde(default = "default_major")]
+    pub gen_gu: f64,
+    #[serde(default = "default_major")]
+    pub yuan_qi: f64,
+    #[serde(default = "default_major")]
+    pub shen_fa: f64,
 
     // 面板数值（已含心法+主属性转化）
-    pub base_attack:                          f64,
-    #[serde(default)] pub base_magical_attack:f64,
-    pub weapon_damage:                        f64,
-    #[serde(default)] pub surplus_value:      f64,
-    pub crit_level:                           f64,
-    pub crit_effect_level:                    f64,
-    pub overcome_level:                       f64,
-    pub strain_level:                         f64,
-    pub haste_level:                          f64,
+    pub base_attack: f64,
+    #[serde(default)]
+    pub base_magical_attack: f64,
+    pub weapon_damage: f64,
+    #[serde(default)]
+    pub surplus_value: f64,
+    pub crit_level: f64,
+    pub crit_effect_level: f64,
+    pub overcome_level: f64,
+    pub strain_level: f64,
+    pub haste_level: f64,
     /// 拆招值（铁骨衣防御向；寒甲奇穴计算用）
-    #[serde(default)] pub parry_value:        f64,
+    #[serde(default)]
+    pub parry_value: f64,
     /// 招架等级
-    #[serde(default)] pub parry_level:        f64,
+    #[serde(default)]
+    pub parry_level: f64,
 }
 
-fn default_vitality() -> f64 { 45.0 }
-fn default_major()    -> f64 { 44.0 }
+fn default_vitality() -> f64 {
+    45.0
+}
+fn default_major() -> f64 {
+    44.0
+}
 
 /// 计算后的战斗属性（含 buff/秘籍聚合后的最终值）
 #[derive(Debug, Serialize, Clone)]
 pub struct CombatStats {
-    pub shen_fa:       f64,
-    pub panel_attack:  f64,        // 最终外功面板攻击
-    pub magical_attack:f64,        // 最终内功面板攻击
-    pub base_attack:   f64,        // 用户输入的基础面板（不含 buff 加成）
-    pub shenfa_attack: f64,        // 显示用：身法转化攻击
-    pub crit_rate:     f64,        // 0~1
-    pub crit_effect:   f64,        // 1.75 + ...
-    pub overcome:      f64,        // 0~ 比例
-    pub strain:        f64,        // 0~ 比例
-    pub haste_rate:    f64,        // 0~1
-    pub surplus_value: f64,        // 最终破招值
-    pub parry_value:   f64,        // 最终拆招值
-    pub parry_level:   f64,        // 最终招架等级
-    pub parry_rate:    f64,        // 最终招架率（含基础 3% + 坚铁等加成，可 >1）
-    pub vitality:      f64,        // 最终体质（含活血百分比加成）
-    pub base_vitality: f64,        // 基础体质（不含百分比加成，振奋用）
+    pub shen_fa: f64,
+    pub panel_attack: f64,   // 最终外功面板攻击
+    pub magical_attack: f64, // 最终内功面板攻击
+    pub base_attack: f64,    // 用户输入的基础面板（不含 buff 加成）
+    pub shenfa_attack: f64,  // 显示用：身法转化攻击
+    pub crit_rate: f64,      // 0~1
+    pub crit_effect: f64,    // 1.75 + ...
+    pub overcome: f64,       // 0~ 比例
+    pub strain: f64,         // 0~ 比例
+    pub haste_rate: f64,     // 0~1
+    pub surplus_value: f64,  // 最终破招值
+    pub parry_value: f64,    // 最终拆招值
+    pub parry_level: f64,    // 最终招架等级
+    pub parry_rate: f64,     // 最终招架率（含基础 3% + 坚铁等加成，可 >1）
+    pub vitality: f64,       // 最终体质（含活血百分比加成）
+    pub base_vitality: f64,  // 基础体质（不含百分比加成，振奋用）
 }
 
 /// 目标配置
@@ -202,11 +219,11 @@ pub struct CdBinding {
 #[serde(rename_all = "snake_case")]
 pub enum Stance {
     #[default]
-    Any,      // 任意姿态均可施展
-    Shield,   // 擎盾
-    Blade,    // 擎刀
-    Wall,     // 盾墙
-    NotWall,  // 非盾墙（擎盾或擎刀均可）
+    Any, // 任意姿态均可施展
+    Shield,  // 擎盾
+    Blade,   // 擎刀
+    Wall,    // 盾墙
+    NotWall, // 非盾墙（擎盾或擎刀均可）
 }
 
 /// 连招跟随条目（宏/手动序列中主技能自动重定向到子技能）
@@ -387,17 +404,24 @@ pub struct ReloadResult {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ── 130级 副属性 SCALE 常量（已固化）──
-const LP_CRIT: f64     = 197_703.0;
-const LP_CRIT_EFF: f64 =  72_844.2;
-const LP_STRAIN: f64   = 133_333.2;
+const LP_CRIT: f64 = 197_703.0;
+const LP_CRIT_EFF: f64 = 72_844.2;
+const LP_STRAIN: f64 = 133_333.2;
 const LP_OVERCOME: f64 = 225_957.6;
-const LP_HASTE: f64    = 210_078.0;
-const LP_PARRY: f64    = 107_553.6;  // 130级招架等级 → 招架率 折算
+const LP_HASTE: f64 = 210_078.0;
+const LP_PARRY: f64 = 107_553.6; // 130级招架等级 → 招架率 折算
 
 // ── 心法 / 武学版本 枚举（Phase 0 抽象）──
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub enum Mount { FenShanJin, TieGuYi }
-impl Default for Mount { fn default() -> Self { Mount::FenShanJin } }
+pub enum Mount {
+    FenShanJin,
+    TieGuYi,
+}
+impl Default for Mount {
+    fn default() -> Self {
+        Mount::FenShanJin
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum GameVersion {
@@ -408,18 +432,22 @@ pub enum GameVersion {
     /// 暗影千机·测试服（基于 2026.04，独立目录供实验）
     AnYingQianJiTest,
 }
-impl Default for GameVersion { fn default() -> Self { GameVersion::AnYingQianJi } }
+impl Default for GameVersion {
+    fn default() -> Self {
+        GameVersion::AnYingQianJi
+    }
+}
 
 /// 心法常量：主属性 → 副属性转化系数（仅外功线 buff 加成时使用）
 /// 从 school.toml 注入 Player（Phase 2）；当前全部默认分山劲值
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct MountConstants {
-    pub shenfa_to_attack:  f64, // 身法 → 外功攻击
-    pub shenfa_to_crit:    f64, // 身法 → 外功会心等级
-    pub lidao_to_attack:   f64, // 力道 → 外功攻击
-    pub lidao_to_overcome: f64, // 力道 → 外功破防
-    pub yuanqi_to_attack:  f64, // 元气 → 内功攻击
-    pub vitality_to_attack: f64, // 体质 → 外功攻击（铁骨衣特化；分山劲为 0）
+    pub shenfa_to_attack: f64,        // 身法 → 外功攻击
+    pub shenfa_to_crit: f64,          // 身法 → 外功会心等级
+    pub lidao_to_attack: f64,         // 力道 → 外功攻击
+    pub lidao_to_overcome: f64,       // 力道 → 外功破防
+    pub yuanqi_to_attack: f64,        // 元气 → 内功攻击
+    pub vitality_to_attack: f64,      // 体质 → 外功攻击（铁骨衣特化；分山劲为 0）
     pub vitality_to_parry_value: f64, // 体质 → 拆招值（铁骨衣 2.25；分山劲为 0）
     pub vitality_to_parry_level: f64, // 体质 → 招架等级（铁骨衣 0.18；分山劲为 0）
     pub parry_base_rate: f64,         // 心法自带基础招架率（全心法 +3% = 0.03）
@@ -429,11 +457,11 @@ pub struct MountConstants {
 impl MountConstants {
     pub fn fenshanjin_default() -> Self {
         MountConstants {
-            shenfa_to_attack:  1.88,
-            shenfa_to_crit:    0.9,
-            lidao_to_attack:   0.163,
+            shenfa_to_attack: 1.88,
+            shenfa_to_crit: 0.9,
+            lidao_to_attack: 0.163,
             lidao_to_overcome: 0.3,
-            yuanqi_to_attack:  0.181,
+            yuanqi_to_attack: 0.181,
             vitality_to_attack: 0.0,
             vitality_to_parry_value: 0.0,
             vitality_to_parry_level: 0.0,
@@ -443,12 +471,12 @@ impl MountConstants {
     }
     pub fn tieguyi_default() -> Self {
         MountConstants {
-            shenfa_to_attack:  0.0,    // 铁骨衣身法不转外攻
-            shenfa_to_crit:    0.9,
-            lidao_to_attack:   0.163,
+            shenfa_to_attack: 0.0, // 铁骨衣身法不转外攻
+            shenfa_to_crit: 0.9,
+            lidao_to_attack: 0.163,
             lidao_to_overcome: 0.3,
-            yuanqi_to_attack:  0.181,
-            vitality_to_attack: 0.04,  // 铁骨衣每点体质 +0.04 外攻
+            yuanqi_to_attack: 0.181,
+            vitality_to_attack: 0.04,      // 铁骨衣每点体质 +0.04 外攻
             vitality_to_parry_value: 2.25, // 每点体质 +2.25 拆招值
             vitality_to_parry_level: 0.18, // 每点体质 +0.18 招架等级
             parry_base_rate: 0.03,         // 基础招架率（全心法自带）
@@ -458,13 +486,15 @@ impl MountConstants {
     pub fn for_mount(mount: Mount) -> Self {
         match mount {
             Mount::FenShanJin => Self::fenshanjin_default(),
-            Mount::TieGuYi    => Self::tieguyi_default(),
+            Mount::TieGuYi => Self::tieguyi_default(),
         }
     }
 }
 
 impl Default for MountConstants {
-    fn default() -> Self { Self::fenshanjin_default() }
+    fn default() -> Self {
+        Self::fenshanjin_default()
+    }
 }
 
 // ── school.toml 反序列化 ─────────────────────────────────────────
@@ -494,7 +524,9 @@ pub struct SchoolUi {
     pub talent_tiers: u32,
 }
 
-fn default_talent_tiers() -> u32 { 7 }
+fn default_talent_tiers() -> u32 {
+    7
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct WorkflowA {
@@ -506,11 +538,11 @@ pub struct WorkflowA {
 
 #[derive(Debug, Clone, Deserialize)]
 struct SchoolConstantsToml {
-    shenfa_to_attack:  f64,
-    shenfa_to_crit:    f64,
-    lidao_to_attack:   f64,
+    shenfa_to_attack: f64,
+    shenfa_to_crit: f64,
+    lidao_to_attack: f64,
     lidao_to_overcome: f64,
-    yuanqi_to_attack:  f64,
+    yuanqi_to_attack: f64,
     #[serde(default)]
     vitality_to_attack: f64,
     #[serde(default)]
@@ -523,16 +555,22 @@ struct SchoolConstantsToml {
     non_player_bonus: f64,
 }
 
-fn default_parry_base_rate() -> f64 { 0.03 }
-fn default_non_player_bonus() -> f64 { 358.0 }
+fn default_parry_base_rate() -> f64 {
+    0.03
+}
+fn default_non_player_bonus() -> f64 {
+    358.0
+}
 
 // 心法固定增益 / 心法转化 类型由 equip 模块定义（同名结构体，配装器内独享）
 pub use equip::{MountBaseStats, MountConversions};
 
 #[derive(Debug, Clone, Deserialize)]
 struct SchoolToml {
-    #[allow(dead_code)] name: String,
-    #[allow(dead_code)] class: String,
+    #[allow(dead_code)]
+    name: String,
+    #[allow(dead_code)]
+    class: String,
     constants: SchoolConstantsToml,
     #[serde(default)]
     base_stats: equip::MountBaseStats,
@@ -545,20 +583,28 @@ struct SchoolToml {
 }
 
 /// 加载 school.toml，返回 (constants, base_stats, conversions, ui, workflow_a)
-pub fn load_school_toml(version: GameVersion, mount: Mount)
-    -> Result<(MountConstants, equip::MountBaseStats, equip::MountConversions, SchoolUi, WorkflowA), String>
-{
+pub fn load_school_toml(
+    version: GameVersion,
+    mount: Mount,
+) -> Result<
+    (
+        MountConstants,
+        equip::MountBaseStats,
+        equip::MountConversions,
+        SchoolUi,
+        WorkflowA,
+    ),
+    String,
+> {
     let path = school_toml_path(version, mount);
-    let text = std::fs::read_to_string(&path)
-        .map_err(|e| format!("read {}: {}", path, e))?;
-    let s: SchoolToml = toml::from_str(&text)
-        .map_err(|e| format!("parse {}: {}", path, e))?;
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("read {}: {}", path, e))?;
+    let s: SchoolToml = toml::from_str(&text).map_err(|e| format!("parse {}: {}", path, e))?;
     let c = MountConstants {
-        shenfa_to_attack:  s.constants.shenfa_to_attack,
-        shenfa_to_crit:    s.constants.shenfa_to_crit,
-        lidao_to_attack:   s.constants.lidao_to_attack,
+        shenfa_to_attack: s.constants.shenfa_to_attack,
+        shenfa_to_crit: s.constants.shenfa_to_crit,
+        lidao_to_attack: s.constants.lidao_to_attack,
         lidao_to_overcome: s.constants.lidao_to_overcome,
-        yuanqi_to_attack:  s.constants.yuanqi_to_attack,
+        yuanqi_to_attack: s.constants.yuanqi_to_attack,
         vitality_to_attack: s.constants.vitality_to_attack,
         vitality_to_parry_value: s.constants.vitality_to_parry_value,
         vitality_to_parry_level: s.constants.vitality_to_parry_level,
@@ -570,12 +616,14 @@ pub fn load_school_toml(version: GameVersion, mount: Mount)
 
 // ── 伤害链常量 ──
 // 破招公式 = surplus_coeff × 破招值；TOML 里的 surplus_coeff 已含游戏内 7.421 常数
-const BASE_CRIT_POWER: f64     = 1.75;   // 基础会心效果（100% + 75%）
-const PLAYER_LEVEL: u32        = 130;
+const BASE_CRIT_POWER: f64 = 1.75; // 基础会心效果（100% + 75%）
+const PLAYER_LEVEL: u32 = 130;
 
 /// 自动检测数据目录：开发环境 ./skills，发布环境 backend/skills
 fn data_path(dev: &str, release: &str) -> &'static str {
-    if Path::new(dev).exists() { return Box::leak(dev.to_string().into_boxed_str()); }
+    if Path::new(dev).exists() {
+        return Box::leak(dev.to_string().into_boxed_str());
+    }
     Box::leak(release.to_string().into_boxed_str())
 }
 
@@ -592,7 +640,7 @@ pub fn version_dir_name(v: GameVersion) -> &'static str {
 pub fn mount_dir_name(m: Mount) -> &'static str {
     match m {
         Mount::FenShanJin => "分山劲",
-        Mount::TieGuYi    => "铁骨衣",
+        Mount::TieGuYi => "铁骨衣",
     }
 }
 
@@ -603,7 +651,12 @@ fn data_root() -> &'static str {
 
 /// 心法特有数据目录 data/{version}/{mount}
 fn mount_root(version: GameVersion, mount: Mount) -> String {
-    format!("{}/{}/{}", data_root(), version_dir_name(version), mount_dir_name(mount))
+    format!(
+        "{}/{}/{}",
+        data_root(),
+        version_dir_name(version),
+        mount_dir_name(mount)
+    )
 }
 
 /// 版本级共享数据目录 data/{version}
@@ -643,7 +696,9 @@ pub fn userdata_base() -> std::path::PathBuf {
     if let Ok(d) = std::env::var("JX3_USERDATA_DIR") {
         if !d.trim().is_empty() {
             let p = std::path::PathBuf::from(d);
-            if !p.exists() { let _ = std::fs::create_dir_all(&p); }
+            if !p.exists() {
+                let _ = std::fs::create_dir_all(&p);
+            }
             return p;
         }
     }
@@ -653,7 +708,9 @@ pub fn userdata_base() -> std::path::PathBuf {
         "backend/userdata"
     };
     let p = Path::new(dir).to_path_buf();
-    if !p.exists() { let _ = std::fs::create_dir_all(&p); }
+    if !p.exists() {
+        let _ = std::fs::create_dir_all(&p);
+    }
     p
 }
 
@@ -671,7 +728,9 @@ fn icon_cache_file(id: u32) -> std::path::PathBuf {
     if let Ok(d) = std::env::var("JX3_ICON_CACHE_DIR") {
         if !d.trim().is_empty() {
             let p = std::path::PathBuf::from(d);
-            if !p.exists() { let _ = std::fs::create_dir_all(&p); }
+            if !p.exists() {
+                let _ = std::fs::create_dir_all(&p);
+            }
             return p.join(format!("{}.png", id));
         }
     }
@@ -680,17 +739,24 @@ fn icon_cache_file(id: u32) -> std::path::PathBuf {
 
 fn sanitize_profile_name(s: &str) -> Option<String> {
     let s = s.trim();
-    if s.is_empty() { return None; }
+    if s.is_empty() {
+        return None;
+    }
     let mut out = String::new();
     for ch in s.chars() {
-        if ch.is_alphanumeric() || matches!(ch, '_' | '-' | ' ')
+        if ch.is_alphanumeric()
+            || matches!(ch, '_' | '-' | ' ')
             || ('\u{4e00}'..='\u{9fff}').contains(&ch)
         {
             out.push(ch);
         }
     }
     let out = out.trim().to_string();
-    if out.is_empty() || out.contains("..") { None } else { Some(out) }
+    if out.is_empty() || out.contains("..") {
+        None
+    } else {
+        Some(out)
+    }
 }
 
 const FRAMES_PER_SEC: u32 = 16;
@@ -743,7 +809,6 @@ fn frames_to_sec(frames: u32) -> f64 {
     frames as f64 / FRAMES_PER_SEC as f64
 }
 
-
 // ─────────────────────────────────────────────────────────────────────────────
 // 防御计算
 // ─────────────────────────────────────────────────────────────────────────────
@@ -755,7 +820,7 @@ fn target_base_defense(level: u32) -> f64 {
         132 => 46_901.0,
         133 => 79_721.0,
         134 => 83_679.0,
-        _   =>      0.0,
+        _ => 0.0,
     }
 }
 
@@ -767,7 +832,7 @@ fn defense_level_param(level: u32) -> f64 {
         132 => 140_708.04,
         133 => 148_058.46,
         134 => 155_408.88,
-        _   => 126_007.20,
+        _ => 126_007.20,
     }
 }
 
@@ -811,8 +876,13 @@ pub fn aggregate_buff_fields(player: &Player) -> AttribSlots {
     let mut slots: AttribSlots = HashMap::new();
     let t = player.current_time;
     for inst in &player.active_buffs {
-        if inst.expires_at != 0.0 && inst.expires_at <= t { continue; }
-        let def = match player.buff_def(inst.buff_id) { Some(d) => d, None => continue };
+        if inst.expires_at != 0.0 && inst.expires_at <= t {
+            continue;
+        }
+        let def = match player.buff_def(inst.buff_id) {
+            Some(d) => d,
+            None => continue,
+        };
         // 期望传播 buff 用 expected_stacks（连续浮点）作为乘数；常规 buff 用 stacks
         let mult = inst.expected_stacks.unwrap_or(inst.stacks as f64);
         for e in def.effects {
@@ -829,19 +899,28 @@ pub fn aggregate_buff_fields(player: &Player) -> AttribSlots {
     }
     // 奇穴 13124「活血」常驻 +10% 体质（atVitalityBasePercentAdd = 102/1024）
     if player.has_talent(13124) {
-        *slots.entry(AttribField::VitalityBasePercentAdd).or_insert(0.0) += 102.0;
+        *slots
+            .entry(AttribField::VitalityBasePercentAdd)
+            .or_insert(0.0) += 102.0;
     }
     // 奇穴 13366「从容」常驻（假设血量>60%）+10% 外功攻击 +15% 无双等级
     if player.has_talent(13366) {
-        *slots.entry(AttribField::PhysicsAttackPowerPercent).or_insert(0.0) += 102.0;
-        *slots.entry(AttribField::StrainBasePercentAdd).or_insert(0.0) += 154.0;
+        *slots
+            .entry(AttribField::PhysicsAttackPowerPercent)
+            .or_insert(0.0) += 102.0;
+        *slots
+            .entry(AttribField::StrainBasePercentAdd)
+            .or_insert(0.0) += 154.0;
     }
     // ── 装备特效 / 黄字特效 结算顺序 ──
     // 站立/进战类 buff 已在 simulate 入口通过 apply_combat_start_buffs 挂上 buff 实例，
     // 上面的 buff 实例聚合循环会自动叠到 slots，无需在这里硬编码。
     //
     // VitalityToParryValueCof → ParryValueBase：按"基础体质" × ∑cof / 1024 追加
-    let cof = slots.get(&AttribField::VitalityToParryValueCof).copied().unwrap_or(0.0);
+    let cof = slots
+        .get(&AttribField::VitalityToParryValueCof)
+        .copied()
+        .unwrap_or(0.0);
     if cof != 0.0 {
         let bonus = player.effective_base_vitality() * cof / 1024.0;
         *slots.entry(AttribField::ParryValueBase).or_insert(0.0) += bonus;
@@ -859,7 +938,10 @@ pub fn aggregate_buff_fields(player: &Player) -> AttribSlots {
     crate::equip_effects::apply_yellow_post_pass(player, &mut slots);
 
     let _ns = _t0.elapsed().as_nanos() as u64;
-    perf_add(|p| { p.aggregate_n += 1; p.aggregate_ns += _ns; });
+    perf_add(|p| {
+        p.aggregate_n += 1;
+        p.aggregate_ns += _ns;
+    });
     slots
 }
 
@@ -868,8 +950,13 @@ pub fn aggregate_target_buff_fields(player: &Player) -> AttribSlots {
     let mut slots: AttribSlots = HashMap::new();
     let t = player.current_time;
     for inst in &player.target_buffs {
-        if inst.expires_at != 0.0 && inst.expires_at <= t { continue; }
-        let def = match player.buff_def(inst.buff_id) { Some(d) => d, None => continue };
+        if inst.expires_at != 0.0 && inst.expires_at <= t {
+            continue;
+        }
+        let def = match player.buff_def(inst.buff_id) {
+            Some(d) => d,
+            None => continue,
+        };
         let mult = inst.expected_stacks.unwrap_or(inst.stacks as f64);
         for e in def.effects {
             *slots.entry(e.field).or_insert(0.0) += e.value * mult;
@@ -907,7 +994,8 @@ impl RecipeIndex {
             }
         }
         Self {
-            by_skill_id, by_skill_name,
+            by_skill_id,
+            by_skill_name,
             source_ptr: table.as_ptr() as usize,
             source_len: table.len(),
         }
@@ -953,27 +1041,43 @@ pub fn collect_recipes_indexed<'a>(
     // 1. 准备 cached active set（按 buff_generation 失效）
     ACTIVE_IDS.with(|cell| {
         let mut c = cell.borrow_mut();
-        let stale = c.as_ref().map(|(g, _)| *g != player.buff_generation).unwrap_or(true);
+        let stale = c
+            .as_ref()
+            .map(|(g, _)| *g != player.buff_generation)
+            .unwrap_or(true);
         if stale {
             let mut s = ahash::AHashSet::with_capacity(64);
             s.extend(player.active_recipes.iter().copied());
             s.extend(player.buff_recipes.keys().copied());
-            if player.has_talent(21281) { s.insert(99240); s.insert(99241); }
-            if player.has_talent(14838) { s.insert(99242); }
-            if player.has_talent(13317) { s.insert(99310); s.insert(99311); }
+            if player.has_talent(21281) {
+                s.insert(99240);
+                s.insert(99241);
+            }
+            if player.has_talent(14838) {
+                s.insert(99242);
+            }
+            if player.has_talent(13317) {
+                s.insert(99310);
+                s.insert(99311);
+            }
             // 天下宏愿（分山）主武器装备特效：盾飞 +5% / 斩刀 +5%
             if player.has_equip_in("PRIMARY_WEAPON", &TIANXIA_HONGYUAN_WEAPON_IDS) {
-                s.insert(99260); s.insert(99261);
+                s.insert(99260);
+                s.insert(99261);
             }
             // 幽烽蝶语·式微（外功小橙武）：盾刀会心+5% / 斩刀会心+5%
             if player.has_equip_in("PRIMARY_WEAPON", YOU_FENG_DIE_YU_SHI_WEI_IDS) {
-                s.insert(99262); s.insert(99263);
+                s.insert(99262);
+                s.insert(99263);
             }
             // 苍云外功 T 套 4 件套：绝刀+10% / 盾压+10%（5936 / 6481 / 6782 任意一套凑齐 4 件）
             if player.count_equip_in(CY_DPS_T_SET_IDS) >= 4 {
-                s.insert(99270); s.insert(99271);
+                s.insert(99270);
+                s.insert(99271);
             }
-            s.insert(99341); s.insert(99342); s.insert(99343);
+            s.insert(99341);
+            s.insert(99342);
+            s.insert(99343);
             *c = Some((player.buff_generation, s));
         }
     });
@@ -985,7 +1089,9 @@ pub fn collect_recipes_indexed<'a>(
 
         RECIPE_INDEX.with(|ri_cell| {
             let ri_ref = ri_cell.borrow();
-            let index = ri_ref.as_ref().expect("ensure_recipe_index() must be called before");
+            let index = ri_ref
+                .as_ref()
+                .expect("ensure_recipe_index() must be called before");
 
             let is_active = |rid: u32| -> bool {
                 active.contains(&rid) || runtime_extra.iter().any(|&x| x == rid)
@@ -995,12 +1101,16 @@ pub fn collect_recipes_indexed<'a>(
             let mut hit_indices: smallvec::SmallVec<[usize; 16]> = smallvec::SmallVec::new();
             if let Some(list) = index.by_skill_id.get(&skill_id) {
                 for &i in list {
-                    if is_active(recipes_table[i].id) { hit_indices.push(i); }
+                    if is_active(recipes_table[i].id) {
+                        hit_indices.push(i);
+                    }
                 }
             }
             if let Some(list) = index.by_skill_name.get(skill_base_name) {
                 for &i in list {
-                    if is_active(recipes_table[i].id) { hit_indices.push(i); }
+                    if is_active(recipes_table[i].id) {
+                        hit_indices.push(i);
+                    }
                 }
             }
             hit_indices.sort_unstable();
@@ -1008,7 +1118,10 @@ pub fn collect_recipes_indexed<'a>(
         })
     });
     let _ns = _t0.elapsed().as_nanos() as u64;
-    perf_add(|p| { p.collect_recipes_n += 1; p.collect_recipes_ns += _ns; });
+    perf_add(|p| {
+        p.collect_recipes_n += 1;
+        p.collect_recipes_ns += _ns;
+    });
     out
 }
 
@@ -1048,27 +1161,35 @@ pub fn collect_recipes<'a>(
     ids.insert(99341); // 麟光甲寒·非侠士+150%
     ids.insert(99342); // 阵云结晦系列·非侠士+200%
     ids.insert(99343); // 阵云·雾海寻龙·非侠士+60%
-    let out: Vec<&RecipeEntry> = recipes_table.iter()
+    let out: Vec<&RecipeEntry> = recipes_table
+        .iter()
         .filter(|r| ids.contains(&r.id))
         .filter(|r| r.applies_to(skill_id, skill_base_name))
         .collect();
     let _ns = _t0.elapsed().as_nanos() as u64;
-    perf_add(|p| { p.collect_recipes_n += 1; p.collect_recipes_ns += _ns; });
+    perf_add(|p| {
+        p.collect_recipes_n += 1;
+        p.collect_recipes_ns += _ns;
+    });
     out
 }
 
 /// 由 Attributes + buff 字段 + 心法常量 推出最终战斗属性面板
-pub fn build_runtime_stats(attr: &Attributes, slots: &AttribSlots, constants: &MountConstants) -> CombatStats {
+pub fn build_runtime_stats(
+    attr: &Attributes,
+    slots: &AttribSlots,
+    constants: &MountConstants,
+) -> CombatStats {
     // 主属性增量重算（仅用于 buff 加主属性时）
     // 用户输入的面板已含基础主属性的转化，所以这里只算"buff 多给的主属性"带来的增量
-    let extra_strength = slot(slots, AttribField::StrengthBase)
-                       + slot(slots, AttribField::BasePotentialAdd);
-    let extra_shenfa   = slot(slots, AttribField::AgilityBase)
-                       + slot(slots, AttribField::BasePotentialAdd);
-    let extra_yuanqi   = slot(slots, AttribField::SpunkBase)
-                       + slot(slots, AttribField::BasePotentialAdd);
-    let extra_vitality_raw = slot(slots, AttribField::VitalityBase)
-                           + slot(slots, AttribField::BasePotentialAdd);
+    let extra_strength =
+        slot(slots, AttribField::StrengthBase) + slot(slots, AttribField::BasePotentialAdd);
+    let extra_shenfa =
+        slot(slots, AttribField::AgilityBase) + slot(slots, AttribField::BasePotentialAdd);
+    let extra_yuanqi =
+        slot(slots, AttribField::SpunkBase) + slot(slots, AttribField::BasePotentialAdd);
+    let extra_vitality_raw =
+        slot(slots, AttribField::VitalityBase) + slot(slots, AttribField::BasePotentialAdd);
     // 体质百分比加成（活血奇穴 etc.）：(面板 + 加算增量) × (1 + N/1024) - 面板 = 最终增量
     let vitality_pct = slot(slots, AttribField::VitalityBasePercentAdd);
     let extra_vitality = if vitality_pct != 0.0 {
@@ -1087,25 +1208,27 @@ pub fn build_runtime_stats(attr: &Attributes, slots: &AttribSlots, constants: &M
         + (extra_strength * constants.lidao_to_attack).floor();
     // 铁骨气劲：体质→攻击（0.198 或 0.594）
     let vta = slot(slots, AttribField::VitalityToAttackCof);
-    if vta != 0.0 { panel_attack += (final_vitality * vta).floor(); }
+    if vta != 0.0 {
+        panel_attack += (final_vitality * vta).floor();
+    }
     let pct = slot(slots, AttribField::PhysicsAttackPowerPercent);
     if pct != 0.0 {
         panel_attack += (panel_attack * pct / 1024.0).floor();
     }
 
     // 内功攻击（同理）
-    let magical_attack = attr.base_magical_attack
-        + (extra_yuanqi * constants.yuanqi_to_attack).floor();
+    let magical_attack =
+        attr.base_magical_attack + (extra_yuanqi * constants.yuanqi_to_attack).floor();
 
     // 会心等级：面板 + buff 加算 + 主属性增量
     let crit_level = attr.crit_level
         + slot(slots, AttribField::PhysicsCriticalStrike)
         + (extra_shenfa * constants.shenfa_to_crit).floor();
-    let crit_rate  = (crit_level / LP_CRIT).clamp(0.0, 1.0);
+    let crit_rate = (crit_level / LP_CRIT).clamp(0.0, 1.0);
 
     // 会心效果等级
-    let crit_eff_level = attr.crit_effect_level
-        + slot(slots, AttribField::PhysicsCriticalDamagePowerBase);
+    let crit_eff_level =
+        attr.crit_effect_level + slot(slots, AttribField::PhysicsCriticalDamagePowerBase);
     let crit_effect = BASE_CRIT_POWER + crit_eff_level / LP_CRIT_EFF;
 
     // 破防等级：面板 + buff 加算 + 力道增量
@@ -1114,7 +1237,9 @@ pub fn build_runtime_stats(attr: &Attributes, slots: &AttribSlots, constants: &M
         + (extra_strength * constants.lidao_to_overcome).floor();
     // 铁骨气劲：体质→破防（0.152 或 0.456）
     let vto = slot(slots, AttribField::VitalityToOvercomeCof);
-    if vto != 0.0 { overcome_level += (final_vitality * vto).floor(); }
+    if vto != 0.0 {
+        overcome_level += (final_vitality * vto).floor();
+    }
     let opct = slot(slots, AttribField::PhysicsOvercomePercent);
     if opct != 0.0 {
         overcome_level += (overcome_level * opct / 1024.0).floor();
@@ -1136,9 +1261,9 @@ pub fn build_runtime_stats(attr: &Attributes, slots: &AttribSlots, constants: &M
 
     // 加速：从加速等级换算的加速率封顶 25%；UnlimitedAdditionalHastePercent 绕过封顶
     let haste_level = attr.haste_level + slot(slots, AttribField::HasteBase);
-    let base_haste  = (haste_level / LP_HASTE).clamp(0.0, 0.25);
+    let base_haste = (haste_level / LP_HASTE).clamp(0.0, 0.25);
     let extra_haste = slot(slots, AttribField::UnlimitedAdditionalHastePercent) / 1024.0;
-    let haste_rate  = (base_haste + extra_haste).clamp(0.0, 1.0);
+    let haste_rate = (base_haste + extra_haste).clamp(0.0, 1.0);
 
     // 破招值
     let surplus_value = attr.surplus_value + slot(slots, AttribField::SurplusValueBase);
@@ -1155,17 +1280,25 @@ pub fn build_runtime_stats(attr: &Attributes, slots: &AttribSlots, constants: &M
 
     // 招架率：level / (level + LP_PARRY) + 心法基础 + 直接加成 (ParryValuePercent/10000)
     let parry_direct = slot(slots, AttribField::ParryValuePercent) / 10000.0;
-    let parry_rate = (parry_level / (parry_level + LP_PARRY)) + constants.parry_base_rate + parry_direct;
+    let parry_rate =
+        (parry_level / (parry_level + LP_PARRY)) + constants.parry_base_rate + parry_direct;
     // 不 clamp：坚铁满层可超过 100%
 
     CombatStats {
-        shen_fa:       attr.shen_fa,
+        shen_fa: attr.shen_fa,
         panel_attack,
         magical_attack,
-        base_attack:   attr.base_attack,
+        base_attack: attr.base_attack,
         shenfa_attack: attr.shen_fa * constants.shenfa_to_attack,
-        crit_rate, crit_effect, overcome, strain, haste_rate, surplus_value,
-        parry_value, parry_level, parry_rate,
+        crit_rate,
+        crit_effect,
+        overcome,
+        strain,
+        haste_rate,
+        surplus_value,
+        parry_value,
+        parry_level,
+        parry_rate,
         vitality: final_vitality,
         base_vitality: attr.vitality + extra_vitality_raw,
     }
@@ -1184,20 +1317,28 @@ pub fn calc_damage(
     non_player_bonus: f64,
 ) -> SkillResult {
     let _t0 = std::time::Instant::now();
-    let _guard = scopeguard_perf(|ns| perf_add(|p| { p.calc_damage_n += 1; p.calc_damage_ns += ns; }), _t0);
+    let _guard = scopeguard_perf(
+        |ns| {
+            perf_add(|p| {
+                p.calc_damage_n += 1;
+                p.calc_damage_ns += ns;
+            })
+        },
+        _t0,
+    );
     let is_surplus = matches!(spec.damage_kind, DamageKind::SurplusOnly);
 
     // ── 字段聚合 ──
-    let damage_pct  = recipes.iter().map(|r| r.damage_pct).sum::<f64>();
-    let crit_pct    = recipes.iter().map(|r| r.critical_pct).sum::<f64>();
-    let crit_eff    = recipes.iter().map(|r| r.crit_eff_pct).sum::<f64>();
+    let damage_pct = recipes.iter().map(|r| r.damage_pct).sum::<f64>();
+    let crit_pct = recipes.iter().map(|r| r.critical_pct).sum::<f64>();
+    let crit_eff = recipes.iter().map(|r| r.crit_eff_pct).sum::<f64>();
     let surplus_pct = recipes.iter().map(|r| r.surplus_pct).sum::<f64>()
-                    + slot(buff_slots, AttribField::SurplusPercent) / 1024.0;
-    let shield_ig   = recipes.iter().map(|r| r.shield_ignore).sum::<f64>()
-                      + slot(buff_slots, AttribField::AllShieldIgnorePercent);
+        + slot(buff_slots, AttribField::SurplusPercent) / 1024.0;
+    let shield_ig = recipes.iter().map(|r| r.shield_ignore).sum::<f64>()
+        + slot(buff_slots, AttribField::AllShieldIgnorePercent);
     let all_dmg_add = slot(buff_slots, AttribField::AllDamageAddPercent) / 1024.0;
-    let pve_extra   = slot(buff_slots, AttribField::PveAddition) / 1024.0;
-    let recipe_pve  = recipes.iter().map(|r| r.pve_addition).sum::<f64>();
+    let pve_extra = slot(buff_slots, AttribField::PveAddition) / 1024.0;
+    let recipe_pve = recipes.iter().map(|r| r.pve_addition).sum::<f64>();
     let pve_addition = non_player_bonus / 1024.0 + pve_extra + recipe_pve;
 
     // ── Step 1: 基础伤害 ──
@@ -1206,8 +1347,7 @@ pub fn calc_damage(
     let coefficient_damage: f64;
     let mut damage: i64 = if is_surplus {
         // 破招段：surplus_coeff 已含 7.421 常数
-        let surplus_v = rt.surplus_value
-            + (rt.surplus_value * surplus_pct).floor();
+        let surplus_v = rt.surplus_value + (rt.surplus_value * surplus_pct).floor();
         let v = (spec.surplus_coeff * surplus_v).floor();
         coefficient_damage = v;
         v as i64
@@ -1217,12 +1357,10 @@ pub fn calc_damage(
             _ => rt.panel_attack,
         };
         // 武器伤害含团队增益加算（瑰栗粽/梅花糕/春节·升景）
-        let weapon_dmg = attr.weapon_damage
-            + slot(buff_slots, AttribField::WeaponDamageBase);
+        let weapon_dmg = attr.weapon_damage + slot(buff_slots, AttribField::WeaponDamageBase);
         coefficient_damage = (spec.attack_coeff * attack_pow).floor();
-        (spec.base_damage
-            + spec.attack_coeff * attack_pow
-            + spec.weapon_coeff * weapon_dmg).floor() as i64
+        (spec.base_damage + spec.attack_coeff * attack_pow + spec.weapon_coeff * weapon_dmg).floor()
+            as i64
     };
 
     // ── Step 2: 秘籍增伤（仅普通伤害；真实伤害跳过）──
@@ -1245,9 +1383,13 @@ pub fn calc_damage(
         0.0
     } else {
         let target_shield_base = slot(target_slots, AttribField::TargetPhysicsShieldBase);
-        let target_shield_pct  = slot(target_slots, AttribField::TargetPhysicsShieldPercent);
+        let target_shield_pct = slot(target_slots, AttribField::TargetPhysicsShieldPercent);
         let r = calc_defense_rate_with_ignore(
-            target, spec.defense_ignore, shield_ig, target_shield_base, target_shield_pct,
+            target,
+            spec.defense_ignore,
+            shield_ig,
+            target_shield_base,
+            target_shield_pct,
         );
         if r > 0.0 {
             damage = ((damage as f64) * (1.0 - r)).floor() as i64;
@@ -1268,8 +1410,8 @@ pub fn calc_damage(
     }
 
     // ── Step 7: 易伤（含目标 debuff 团辅：戒火/龙吟·悟/战锋·悟/劲风/破甲等）──
-    let damage_cof = target.damage_cof
-        + slot(target_slots, AttribField::TargetDamageBonusPercent) / 1024.0;
+    let damage_cof =
+        target.damage_cof + slot(target_slots, AttribField::TargetDamageBonusPercent) / 1024.0;
     if damage_cof != 0.0 {
         damage = damage + ((damage as f64) * damage_cof).floor() as i64;
     }
@@ -1281,15 +1423,26 @@ pub fn calc_damage(
 
     // ── Step 9: 会心会效（最后；影响全部）──
     // true_damage=true（jx3 真实伤害，如腕鞋大附魔）：跳过会心，强制 normal=expected
-    let crit_rate  = if spec.true_damage { 0.0 } else {
-        (rt.crit_rate + crit_pct + slot(buff_slots, AttribField::PhysicsCriticalStrikePercent) / 1024.0).clamp(0.0, 1.0)
+    let crit_rate = if spec.true_damage {
+        0.0
+    } else {
+        (rt.crit_rate
+            + crit_pct
+            + slot(buff_slots, AttribField::PhysicsCriticalStrikePercent) / 1024.0)
+            .clamp(0.0, 1.0)
     };
-    let crit_power = if spec.true_damage { 1.0 } else {
-        rt.crit_effect + crit_eff + slot(buff_slots, AttribField::PhysicsCriticalDamagePowerPercent) / 1024.0
+    let crit_power = if spec.true_damage {
+        1.0
+    } else {
+        rt.crit_effect
+            + crit_eff
+            + slot(buff_slots, AttribField::PhysicsCriticalDamagePowerPercent) / 1024.0
     };
-    let normal     = damage as f64;
-    let crit       = (normal * crit_power).floor();
-    let expected   = if spec.true_damage { normal } else {
+    let normal = damage as f64;
+    let crit = (normal * crit_power).floor();
+    let expected = if spec.true_damage {
+        normal
+    } else {
         (crit * crit_rate + normal * (1.0 - crit_rate)).floor()
     };
 
@@ -1297,12 +1450,12 @@ pub fn calc_damage(
         name: spec.name.clone(),
         coefficient_damage,
         normal_damage: normal,
-        crit_damage:   crit,
+        crit_damage: crit,
         expected_damage: expected,
-        defense_rate:  def_rate,
-        crit_rate:     crit_rate * 100.0,
-        overcome:      rt.overcome * 100.0,
-        strain:        rt.strain  * 100.0,
+        defense_rate: def_rate,
+        crit_rate: crit_rate * 100.0,
+        overcome: rt.overcome * 100.0,
+        strain: rt.strain * 100.0,
     }
 }
 
@@ -1328,29 +1481,60 @@ pub fn calc_event_damage(
     } else {
         spec
     };
-    let base_name = effective_spec.name.split('·').next().unwrap_or(&effective_spec.name);
-    let recipes = collect_recipes_indexed(player, effective_spec.skill_id, base_name, runtime_recipes, recipes_table);
-    let r = calc_damage(effective_spec, attr, target, &rt, &recipes, &buff_slots, &target_slots, player.constants.non_player_bonus);
+    let base_name = effective_spec
+        .name
+        .split('·')
+        .next()
+        .unwrap_or(&effective_spec.name);
+    let recipes = collect_recipes_indexed(
+        player,
+        effective_spec.skill_id,
+        base_name,
+        runtime_recipes,
+        recipes_table,
+    );
+    let r = calc_damage(
+        effective_spec,
+        attr,
+        target,
+        &rt,
+        &recipes,
+        &buff_slots,
+        &target_slots,
+        player.constants.non_player_bonus,
+    );
     let total = r.expected_damage * channel_ticks.max(1) as f64;
     (r, total, rt)
 }
 
 /// 带缓存的属性计算：buff_generation 没变就复用上次结果
-fn calc_stats_cached(player: &Player, attr: &Attributes) -> (AttribSlots, AttribSlots, CombatStats) {
+fn calc_stats_cached(
+    player: &Player,
+    attr: &Attributes,
+) -> (AttribSlots, AttribSlots, CombatStats) {
     {
         let cache = player.buff_cache.borrow();
         if let Some((gen, ref bs, ref ts, ref rt)) = *cache {
             if gen == player.buff_generation {
-                perf_add(|p| { p.cache_hit += 1; });
+                perf_add(|p| {
+                    p.cache_hit += 1;
+                });
                 return (bs.clone(), ts.clone(), rt.clone());
             }
         }
     }
-    perf_add(|p| { p.cache_miss += 1; });
+    perf_add(|p| {
+        p.cache_miss += 1;
+    });
     let buff_slots = aggregate_buff_fields(player);
     let rt = build_runtime_stats(attr, &buff_slots, &player.constants);
     let target_slots = aggregate_target_buff_fields(player);
-    *player.buff_cache.borrow_mut() = Some((player.buff_generation, buff_slots.clone(), target_slots.clone(), rt.clone()));
+    *player.buff_cache.borrow_mut() = Some((
+        player.buff_generation,
+        buff_slots.clone(),
+        target_slots.clone(),
+        rt.clone(),
+    ));
     (buff_slots, target_slots, rt)
 }
 
@@ -1375,15 +1559,26 @@ pub fn capture_dot_snapshot(
 ) -> DotSnapshot {
     let buff_slots = aggregate_buff_fields(player);
     let rt = build_runtime_stats(attr, &buff_slots, &player.constants);
-    let recipes = collect_recipes_indexed(player, parent_skill_id, parent_base_name, &[], recipes_table);
+    let recipes = collect_recipes_indexed(
+        player,
+        parent_skill_id,
+        parent_base_name,
+        &[],
+        recipes_table,
+    );
     let crit_pct = recipes.iter().map(|r| r.critical_pct).sum::<f64>();
     let crit_eff = recipes.iter().map(|r| r.crit_eff_pct).sum::<f64>();
     let all_dmg_add = slot(&buff_slots, AttribField::AllDamageAddPercent) / 1024.0;
     DotSnapshot {
         panel_attack: rt.panel_attack,
-        crit_rate:  (rt.crit_rate + crit_pct + slot(&buff_slots, AttribField::PhysicsCriticalStrikePercent) / 1024.0).clamp(0.0, 1.0),
-        crit_power: rt.crit_effect + crit_eff + slot(&buff_slots, AttribField::PhysicsCriticalDamagePowerPercent) / 1024.0,
-        strain:     rt.strain,
+        crit_rate: (rt.crit_rate
+            + crit_pct
+            + slot(&buff_slots, AttribField::PhysicsCriticalStrikePercent) / 1024.0)
+            .clamp(0.0, 1.0),
+        crit_power: rt.crit_effect
+            + crit_eff
+            + slot(&buff_slots, AttribField::PhysicsCriticalDamagePowerPercent) / 1024.0,
+        strain: rt.strain,
         all_dmg_add,
     }
 }
@@ -1400,25 +1595,24 @@ fn calc_damage_with_snapshot(
     recipes_table: &[RecipeEntry],
 ) -> SkillResult {
     let buff_slots_live = aggregate_buff_fields(player);
-    let target_slots    = aggregate_target_buff_fields(player);
-    let rt_live         = build_runtime_stats(attr, &buff_slots_live, &player.constants);
+    let target_slots = aggregate_target_buff_fields(player);
+    let rt_live = build_runtime_stats(attr, &buff_slots_live, &player.constants);
     let base_name = spec.name.split('·').next().unwrap_or(&spec.name);
-    let recipes   = collect_recipes_indexed(player, spec.skill_id, base_name, &[], recipes_table);
+    let recipes = collect_recipes_indexed(player, spec.skill_id, base_name, &[], recipes_table);
 
     let shield_ig = recipes.iter().map(|r| r.shield_ignore).sum::<f64>()
-                  + slot(&buff_slots_live, AttribField::AllShieldIgnorePercent);
+        + slot(&buff_slots_live, AttribField::AllShieldIgnorePercent);
     let recipe_pve = recipes.iter().map(|r| r.pve_addition).sum::<f64>();
-    let pve_extra  = slot(&buff_slots_live, AttribField::PveAddition) / 1024.0;
+    let pve_extra = slot(&buff_slots_live, AttribField::PveAddition) / 1024.0;
     let pve_addition = player.constants.non_player_bonus / 1024.0 + pve_extra + recipe_pve;
     let target_shield_base = slot(&target_slots, AttribField::TargetPhysicsShieldBase);
-    let target_shield_pct  = slot(&target_slots, AttribField::TargetPhysicsShieldPercent);
+    let target_shield_pct = slot(&target_slots, AttribField::TargetPhysicsShieldPercent);
 
     // Step 1: 攻击用快照；武器伤害实时含团辅加算
-    let weapon_dmg = attr.weapon_damage
-        + slot(&buff_slots_live, AttribField::WeaponDamageBase);
-    let mut damage = (spec.base_damage
-        + spec.attack_coeff * snap.panel_attack
-        + spec.weapon_coeff * weapon_dmg).floor() as i64;
+    let weapon_dmg = attr.weapon_damage + slot(&buff_slots_live, AttribField::WeaponDamageBase);
+    let mut damage =
+        (spec.base_damage + spec.attack_coeff * snap.panel_attack + spec.weapon_coeff * weapon_dmg)
+            .floor() as i64;
 
     // Step 2: 流血无秘籍增伤（spec.skill_id=8249 不在任何秘籍 skill_filter）
     // Step 3: 破防实时、无双快照
@@ -1430,7 +1624,12 @@ fn calc_damage_with_snapshot(
     }
     // Step 4: 防御实时
     let def_rate = calc_defense_rate_with_ignore(
-        target, spec.defense_ignore, shield_ig, target_shield_base, target_shield_pct);
+        target,
+        spec.defense_ignore,
+        shield_ig,
+        target_shield_base,
+        target_shield_pct,
+    );
     if def_rate > 0.0 {
         damage = ((damage as f64) * (1.0 - def_rate)).floor() as i64;
     }
@@ -1444,8 +1643,8 @@ fn calc_damage_with_snapshot(
         damage = damage + ((damage as f64) * pve_addition).floor() as i64;
     }
     // Step 7: 易伤实时（含目标 debuff 团辅）
-    let damage_cof = target.damage_cof
-        + slot(&target_slots, AttribField::TargetDamageBonusPercent) / 1024.0;
+    let damage_cof =
+        target.damage_cof + slot(&target_slots, AttribField::TargetDamageBonusPercent) / 1024.0;
     if damage_cof != 0.0 {
         damage = damage + ((damage as f64) * damage_cof).floor() as i64;
     }
@@ -1455,19 +1654,19 @@ fn calc_damage_with_snapshot(
     }
     // Step 9: 会心会效快照
     let normal = damage as f64;
-    let crit   = (normal * snap.crit_power).floor();
+    let crit = (normal * snap.crit_power).floor();
     let expected = (crit * snap.crit_rate + normal * (1.0 - snap.crit_rate)).floor();
 
     SkillResult {
         name: spec.name.clone(),
         coefficient_damage: (spec.attack_coeff * snap.panel_attack).floor(),
         normal_damage: normal,
-        crit_damage:   crit,
+        crit_damage: crit,
         expected_damage: expected,
-        defense_rate:  def_rate,
-        crit_rate:     snap.crit_rate * 100.0,
-        overcome:      rt_live.overcome * 100.0,
-        strain:        snap.strain * 100.0,
+        defense_rate: def_rate,
+        crit_rate: snap.crit_rate * 100.0,
+        overcome: rt_live.overcome * 100.0,
+        strain: snap.strain * 100.0,
     }
 }
 
@@ -1482,28 +1681,45 @@ pub fn fill_event_damage(
     parent_runtime_recipes: &[u32],
 ) {
     let _t0 = std::time::Instant::now();
-    let _guard = scopeguard_perf(|ns| perf_add(|p| { p.fill_event_n += 1; p.fill_event_ns += ns; }), _t0);
-    let (a, t) = match dmg_ctx { Some(c) => c, None => return };
-    let spec = match skill_by_id.get(&ev.skill_id) { Some(s) => s, None => return };
+    let _guard = scopeguard_perf(
+        |ns| {
+            perf_add(|p| {
+                p.fill_event_n += 1;
+                p.fill_event_ns += ns;
+            })
+        },
+        _t0,
+    );
+    let (a, t) = match dmg_ctx {
+        Some(c) => c,
+        None => return,
+    };
+    let spec = match skill_by_id.get(&ev.skill_id) {
+        Some(s) => s,
+        None => return,
+    };
     let ticks = ev.channel_ticks.unwrap_or(1).max(1);
 
     // DoT 快照路径（流血每跳 8249）：按斩刀释放时记录的快照算伤害
     if ev.skill_id == 8249 {
-        if let Some(snap) = player.target_buffs.iter()
+        if let Some(snap) = player
+            .target_buffs
+            .iter()
             .find(|b| b.buff_id == BUFF_LIU_XUE)
             .and_then(|b| b.snapshot.as_ref())
         {
             let r = calc_damage_with_snapshot(spec, a, t, snap, player, recipes_table);
             ev.damage = Some(r.expected_damage);
             ev.damage_normal = Some(r.normal_damage);
-            ev.damage_crit   = Some(r.crit_damage);
+            ev.damage_crit = Some(r.crit_damage);
             ev.damage_total = Some(r.expected_damage * ticks as f64);
             // rt 只为 hover 详情准备 — lite 模式（含 ΔDPS 预览）跳过，省一次 current_stats
             if !player.lite_mode {
                 ev.runtime_stats = Some(player.current_stats());
                 // 秘籍来源（供前端 log hover 显示）— 与 calc_damage_with_snapshot 内部 collect 同语义
                 let base_name = spec.name.split('·').next().unwrap_or(&spec.name);
-                let applied = collect_recipes_indexed(player, spec.skill_id, base_name, &[], recipes_table);
+                let applied =
+                    collect_recipes_indexed(player, spec.skill_id, base_name, &[], recipes_table);
                 ev.applied_recipes = applied.iter().map(|r| r.id).collect();
             }
             return;
@@ -1525,13 +1741,14 @@ pub fn fill_event_damage(
     };
     ev.damage = Some(r.expected_damage);
     ev.damage_normal = Some(r.normal_damage);
-    ev.damage_crit   = Some(r.crit_damage);
+    ev.damage_crit = Some(r.crit_damage);
     ev.damage_total = Some(dt);
     if !player.lite_mode {
         ev.runtime_stats = Some(rt);
         // 抓激活的秘籍 ID 列表（供前端 log hover 显示增伤来源）
         let base_name = spec.name.split('·').next().unwrap_or(&spec.name);
-        let applied = collect_recipes_indexed(player, spec.skill_id, base_name, recipes, recipes_table);
+        let applied =
+            collect_recipes_indexed(player, spec.skill_id, base_name, recipes, recipes_table);
         ev.applied_recipes = applied.iter().map(|r| r.id).collect();
     }
 }
@@ -1545,7 +1762,15 @@ pub fn fill_tick_events(
     player: &Player,
 ) {
     let _t0 = std::time::Instant::now();
-    let _guard = scopeguard_perf(|ns| perf_add(|p| { p.fill_tick_n += 1; p.fill_tick_ns += ns; }), _t0);
+    let _guard = scopeguard_perf(
+        |ns| {
+            perf_add(|p| {
+                p.fill_tick_n += 1;
+                p.fill_tick_ns += ns;
+            })
+        },
+        _t0,
+    );
     for ev in events {
         fill_event_damage(ev, skill_by_id, dmg_ctx, recipes_table, player, &[]);
     }
@@ -1561,10 +1786,10 @@ pub fn fill_tick_events(
 /// 防御率 = 最终防御 / (最终防御 + param)
 fn calc_defense_rate_with_ignore(
     target: &TargetConfig,
-    skill_defense_ignore: f64,       // B 类：小数 0~1
-    buff_shield_ignore_1024: f64,    // A 类：1024 制
-    target_shield_base: f64,         // 目标 debuff 防御等级数值加成（正值=增防）
-    target_shield_pct_1024: f64,     // 目标 debuff 防御百分比（负值=减防，等价 B 类无视）
+    skill_defense_ignore: f64,    // B 类：小数 0~1
+    buff_shield_ignore_1024: f64, // A 类：1024 制
+    target_shield_base: f64,      // 目标 debuff 防御等级数值加成（正值=增防）
+    target_shield_pct_1024: f64,  // 目标 debuff 防御百分比（负值=减防，等价 B 类无视）
 ) -> f64 {
     let base = target_base_defense(target.level);
     // 基础防御（目标自身加成 + 数值 debuff）
@@ -1576,14 +1801,18 @@ fn calc_defense_rate_with_ignore(
     // B 类无视：技能自身 + 虚弱（负向 pct 取绝对值）
     let weakness_ignore = if target_shield_pct_1024 < 0.0 {
         -target_shield_pct_1024 / 1024.0
-    } else { 0.0 };
+    } else {
+        0.0
+    };
     let b_sum = skill_defense_ignore + weakness_ignore;
     // A 类无视：全局/秘籍
     let a_sum = buff_shield_ignore_1024 / 1024.0;
     // 最终无视 = 1 − (1 − B) × (1 − A)，然后作用于防御等级
     let total_ignore = 1.0 - (1.0 - b_sum) * (1.0 - a_sum);
     let final_shield = (shield * (1.0 - total_ignore)).max(0.0);
-    if final_shield <= 0.0 { return 0.0; }
+    if final_shield <= 0.0 {
+        return 0.0;
+    }
     let param = defense_level_param(target.level);
     (final_shield / (final_shield + param)).min(1.0)
 }
@@ -1595,24 +1824,41 @@ fn calc_defense_rate_with_ignore(
 fn load_skills(dir: &Path) -> Vec<SkillSpec> {
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
-        Err(e) => { eprintln!("[skills] 无法读取目录 {:?}: {e}", dir); return Vec::new(); }
+        Err(e) => {
+            eprintln!("[skills] 无法读取目录 {:?}: {e}", dir);
+            return Vec::new();
+        }
     };
 
     let mut specs = Vec::new();
 
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("toml") { continue; }
+        if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+            continue;
+        }
         // 跳过 _template.toml 等下划线开头的文件
-        if path.file_name().and_then(|n| n.to_str()).map_or(false, |n| n.starts_with('_')) { continue; }
+        if path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map_or(false, |n| n.starts_with('_'))
+        {
+            continue;
+        }
 
         let content = match std::fs::read_to_string(&path) {
             Ok(c) => c,
-            Err(e) => { eprintln!("[skills] 读取 {:?} 失败: {e}", path); continue; }
+            Err(e) => {
+                eprintln!("[skills] 读取 {:?} 失败: {e}", path);
+                continue;
+            }
         };
         let config: SkillFileConfig = match toml::from_str(&content) {
             Ok(c) => c,
-            Err(e) => { eprintln!("[skills] 解析 {:?} 失败: {e}", path); continue; }
+            Err(e) => {
+                eprintln!("[skills] 解析 {:?} 失败: {e}", path);
+                continue;
+            }
         };
 
         if config.skip {
@@ -1621,42 +1867,49 @@ fn load_skills(dir: &Path) -> Vec<SkillSpec> {
         }
 
         for rank in &config.ranks {
-            let name = rank.name.clone().unwrap_or_else(|| {
-                format!("{}·{}级", config.name, rank.rank)
-            });
-            let effective_cooldowns = rank.cooldowns.clone()
+            let name = rank
+                .name
+                .clone()
+                .unwrap_or_else(|| format!("{}·{}级", config.name, rank.rank));
+            let effective_cooldowns = rank
+                .cooldowns
+                .clone()
                 .unwrap_or_else(|| config.cooldowns.clone());
             specs.push(SkillSpec {
-                skill_id:         config.id,
+                skill_id: config.id,
                 name,
-                description:      config.description.clone(),
-                icon:             rank.icon.clone().unwrap_or_else(|| config.icon.clone()),
-                damage_kind:      config.damage_kind,
-                base_damage:      rank.base_damage,
-                attack_coeff:     rank.attack_coeff,
-                weapon_coeff:     rank.weapon_coeff,
-                defense_ignore:   rank.defense_ignore,
-                surplus_coeff:    rank.surplus_coeff,
-                cooldowns:        effective_cooldowns,
-                channel_frame:    config.channel_frame,
+                description: config.description.clone(),
+                icon: rank.icon.clone().unwrap_or_else(|| config.icon.clone()),
+                damage_kind: config.damage_kind,
+                base_damage: rank.base_damage,
+                attack_coeff: rank.attack_coeff,
+                weapon_coeff: rank.weapon_coeff,
+                defense_ignore: rank.defense_ignore,
+                surplus_coeff: rank.surplus_coeff,
+                cooldowns: effective_cooldowns,
+                channel_frame: config.channel_frame,
                 channel_interval: config.channel_interval,
                 first_tick_frame: config.first_tick_frame,
-                stance:           config.stance,
-                rage_cost:        rank.rage_cost.unwrap_or(config.rage_cost),
-                rage_gain:        rank.rage_gain.unwrap_or(config.rage_gain),
-                stance_change:    config.stance_change,
-                requires_talent:  config.requires_talent,
-                requires_combo:   rank.requires_combo.clone(),
-                grants_combo:     rank.grants_combo.clone(),
-                combo_duration:   rank.combo_duration,
-                max_charges:      config.max_charges,
-                charge_cd:        config.charge_cd,
-                passive:          config.passive,
-                true_damage:      config.true_damage,
-                combo_follow:     config.combo_follow.clone(),
+                stance: config.stance,
+                rage_cost: rank.rage_cost.unwrap_or(config.rage_cost),
+                rage_gain: rank.rage_gain.unwrap_or(config.rage_gain),
+                stance_change: config.stance_change,
+                requires_talent: config.requires_talent,
+                requires_combo: rank.requires_combo.clone(),
+                grants_combo: rank.grants_combo.clone(),
+                combo_duration: rank.combo_duration,
+                max_charges: config.max_charges,
+                charge_cd: config.charge_cd,
+                passive: config.passive,
+                true_damage: config.true_damage,
+                combo_follow: config.combo_follow.clone(),
             });
         }
-        println!("[skills] 已加载: {} ({} 个品级)", config.name, config.ranks.len());
+        println!(
+            "[skills] 已加载: {} ({} 个品级)",
+            config.name,
+            config.ranks.len()
+        );
     }
 
     println!("[skills] 共加载 {} 条技能规格", specs.len());
@@ -1772,11 +2025,16 @@ pub struct PreReleaseSpec {
     pub time_before: f64,
 }
 
-fn default_tiegu_mode() -> u8 { 2 } // 默认主T
+fn default_tiegu_mode() -> u8 {
+    2
+} // 默认主T
 
 /// 单次技能释放事件
 #[derive(Debug, Serialize, Clone)]
 pub struct CastEvent {
+    /// Original manual input position; independent of skipped or triggered events.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sequence_index: Option<usize>,
     pub name: String,
     pub skill_id: u32,
     pub cast_time: f64,
@@ -1809,12 +2067,33 @@ pub struct CastEvent {
     /// 宏释放
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub is_macro: bool,
+    /// One-based macro page and statement position that selected this cast.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub macro_page: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub macro_line: Option<usize>,
     /// 释放后的怒气值（最终值，含脚本修改）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rage_after: Option<i32>,
     /// 怒气净变化量
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rage_delta: Option<i32>,
+    /// 本次主动技能结算中因 100 怒上限被截断的实际怒气。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rage_overflow: Option<u32>,
+    /// Deterministic causes of capped rage gain during this active cast.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub rage_overflow_sources: Vec<RageOverflowCause>,
+    /// Ordered rage mutations performed while resolving this active cast.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub rage_transactions: Vec<RageTransaction>,
+    /// Rage accounting inside this cast, including script-side refunds/gains.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rage_generated: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rage_gained: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rage_spent: Option<u32>,
     /// 技能实际扣除的怒气（apply_cast_effects 里的消耗，不含脚本返还）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rage_cost: Option<u32>,
@@ -1849,6 +2128,22 @@ pub struct CastEvent {
     /// 战斗记录 log hover 时显示"已吃 99270 T套+10%"等增伤来源
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub applied_recipes: Vec<u32>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct RageOverflowCause {
+    pub source: String,
+    pub amount: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct RageTransaction {
+    pub source: String,
+    pub requested_delta: i32,
+    pub applied_delta: i32,
+    pub rage_before: i32,
+    pub rage_after: i32,
+    pub overflow: u32,
 }
 
 /// 事件时刻的玩家状态快照
@@ -1911,7 +2206,7 @@ pub struct BuffSnapshot {
 }
 
 /// 模拟响应
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct SimulateResponse {
     pub fight_time: f64,
     pub skill_count: usize,
@@ -1976,6 +2271,8 @@ pub struct SimulateResponse {
     /// 宏调试信息
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub macro_debug: Vec<macro_eval::MacroStepDebug>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub macro_line_stats: Vec<macro_eval::MacroLineExecutionStats>,
     /// 宏单步模式：下一个应释放的技能名
     #[serde(skip_serializing_if = "Option::is_none")]
     pub macro_next_skill: Option<String>,
@@ -1997,7 +2294,7 @@ pub struct SimulateResponse {
 }
 
 /// 坚铁/寒甲 期望末态（前端 hover/状态面板显示用）
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct ExpectationSnapshot {
     pub boss_attack_interval: f64,
     pub h_per_frame: f64,
@@ -2036,7 +2333,7 @@ impl ExpectationSnapshot {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct SkillEffective {
     pub max_charges: u32,
     pub charge_cd: f64,
@@ -2044,7 +2341,7 @@ pub struct SkillEffective {
 }
 
 /// 单个 buff 的时间轴轨道
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct BuffTimelineTrack {
     pub buff_id: u32,
     pub name: String,
@@ -2054,7 +2351,7 @@ pub struct BuffTimelineTrack {
 }
 
 /// buff 时间轴事件类型
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct BuffTimelineEvent {
     pub time: f64,
     /// "gain" = 获得, "expire" = 到期, "tick" = 每跳, "remove" = 被动移除
@@ -2067,13 +2364,12 @@ pub struct BuffTimelineEvent {
 // ── 姿态 / 连招 Buff ID ────────────────────────────────────────────
 // 姿态和连招统一通过 buff 系统管理，duration_frames=0 表示永久
 
-
 /// 姿态枚举 → 对应的 Buff ID
 fn stance_buff_id(stance: Stance) -> Option<u32> {
     match stance {
         Stance::Shield => Some(BUFF_STANCE_SHIELD),
-        Stance::Blade  => Some(BUFF_STANCE_BLADE),
-        Stance::Wall   => Some(BUFF_STANCE_WALL),
+        Stance::Blade => Some(BUFF_STANCE_BLADE),
+        Stance::Wall => Some(BUFF_STANCE_WALL),
         Stance::Any | Stance::NotWall => None,
     }
 }
@@ -2081,7 +2377,9 @@ fn stance_buff_id(stance: Stance) -> Option<u32> {
 /// 连招名称 → 确定性 Buff ID（高位避免与游戏 ID 冲突）
 pub(crate) fn combo_buff_id(name: &str) -> u32 {
     let mut h: u32 = 0xE0_00_00_00;
-    for b in name.bytes() { h = h.wrapping_mul(31).wrapping_add(b as u32); }
+    for b in name.bytes() {
+        h = h.wrapping_mul(31).wrapping_add(b as u32);
+    }
     h | 0xE0_00_00_00
 }
 
@@ -2112,6 +2410,14 @@ pub struct Player {
     target_buffs: Vec<BuffInstance>,
     /// 当前怒气 (0~100)
     pub rage: i32,
+    /// 自模拟开始以来因怒气上限被截断的累计值，仅用于诊断。
+    pub rage_overflow_total: u32,
+    /// Per-active-cast diagnostic attribution, cleared before each cast.
+    pub rage_overflow_sources_current: std::collections::BTreeMap<String, u32>,
+    pub rage_transactions_current: Vec<RageTransaction>,
+    pub rage_generated_current: u32,
+    pub rage_gained_current: u32,
+    pub rage_spent_current: u32,
     /// 当前格挡值 (0~100)（铁骨衣资源；寒啸千军等消耗）
     pub block_value: i32,
     /// 肃驾累积消耗怒气余量（每满 11 兑 1 格挡值）
@@ -2258,13 +2564,24 @@ impl ExpectationState {
 impl Player {
     /// 兼容调用：默认 分山劲 + 暗影千机 + 分山劲常量
     pub fn new(haste_level: u32, talents: Vec<u32>, recipes: Vec<u32>) -> Self {
-        Self::with_mount(Mount::FenShanJin, GameVersion::AnYingQianJi,
-                         MountConstants::fenshanjin_default(),
-                         haste_level, talents, recipes)
+        Self::with_mount(
+            Mount::FenShanJin,
+            GameVersion::AnYingQianJi,
+            MountConstants::fenshanjin_default(),
+            haste_level,
+            talents,
+            recipes,
+        )
     }
 
-    pub fn with_mount(mount: Mount, version: GameVersion, constants: MountConstants,
-                      haste_level: u32, talents: Vec<u32>, recipes: Vec<u32>) -> Self {
+    pub fn with_mount(
+        mount: Mount,
+        version: GameVersion,
+        constants: MountConstants,
+        haste_level: u32,
+        talents: Vec<u32>,
+        recipes: Vec<u32>,
+    ) -> Self {
         let mut p = Player {
             mount,
             version,
@@ -2283,6 +2600,12 @@ impl Player {
             active_buffs: Vec::new(),
             target_buffs: Vec::new(),
             rage: 0,
+            rage_overflow_total: 0,
+            rage_overflow_sources_current: std::collections::BTreeMap::new(),
+            rage_transactions_current: Vec::new(),
+            rage_generated_current: 0,
+            rage_gained_current: 0,
+            rage_spent_current: 0,
             block_value: 100,
             rage_spent_accumulator: 0,
             pending_advance: 0.0,
@@ -2323,7 +2646,11 @@ impl Player {
     /// 格挡值上限（铁骨衣基础 100，奇穴 13363「坚韧」+100 → 200）
     pub fn max_block_value(&self) -> i32 {
         let base = 100;
-        if self.has_talent(13363) { base + 100 } else { base }
+        if self.has_talent(13363) {
+            base + 100
+        } else {
+            base
+        }
     }
 
     /// 通用装备查询：返回 position 上的 equip_id（未装备 = 0）。
@@ -2341,7 +2668,10 @@ impl Player {
     /// 全身装备里有几件在 `ids` 列表里（用于套装 N 件套判定）
     /// 用法：`if player.count_equip_in(&CY_T_SET_6782_IDS) >= 4 { /* 4 件套激活 */ }`
     pub fn count_equip_in(&self, ids: &[u32]) -> u32 {
-        self.equipped.values().filter(|&&eid| eid != 0 && ids.contains(&eid)).count() as u32
+        self.equipped
+            .values()
+            .filter(|&&eid| eid != 0 && ids.contains(&eid))
+            .count() as u32
     }
 
     /// 大附魔查询：复用 Player.equipped；前端约定 key 为 ENCHANT_HAT / ENCHANT_JACKET /
@@ -2387,31 +2717,45 @@ impl Player {
     /// （process_buff_ticks 已清理）。返回 Ref，借用期间持有 RefCell 的不可变锁。
     pub fn buff_idx_lookup(&self) -> std::cell::Ref<'_, ahash::AHashMap<u32, usize>> {
         let gen = self.buff_generation;
-        let needs_rebuild = self.buff_idx_cache.borrow()
-            .as_ref().map_or(true, |(g, _)| *g != gen);
+        let needs_rebuild = self
+            .buff_idx_cache
+            .borrow()
+            .as_ref()
+            .map_or(true, |(g, _)| *g != gen);
         if needs_rebuild {
-            let m: ahash::AHashMap<u32, usize> = self.active_buffs.iter().enumerate()
+            let m: ahash::AHashMap<u32, usize> = self
+                .active_buffs
+                .iter()
+                .enumerate()
                 .map(|(i, b)| (b.buff_id, i))
                 .collect();
             *self.buff_idx_cache.borrow_mut() = Some((gen, m));
         }
-        std::cell::Ref::map(self.buff_idx_cache.borrow(),
-            |c| &c.as_ref().expect("buff_idx_cache initialized above").1)
+        std::cell::Ref::map(self.buff_idx_cache.borrow(), |c| {
+            &c.as_ref().expect("buff_idx_cache initialized above").1
+        })
     }
 
     /// 同 buff_idx_lookup，针对 target_buffs。
     pub fn target_idx_lookup(&self) -> std::cell::Ref<'_, ahash::AHashMap<u32, usize>> {
         let gen = self.buff_generation;
-        let needs_rebuild = self.target_idx_cache.borrow()
-            .as_ref().map_or(true, |(g, _)| *g != gen);
+        let needs_rebuild = self
+            .target_idx_cache
+            .borrow()
+            .as_ref()
+            .map_or(true, |(g, _)| *g != gen);
         if needs_rebuild {
-            let m: ahash::AHashMap<u32, usize> = self.target_buffs.iter().enumerate()
+            let m: ahash::AHashMap<u32, usize> = self
+                .target_buffs
+                .iter()
+                .enumerate()
                 .map(|(i, b)| (b.buff_id, i))
                 .collect();
             *self.target_idx_cache.borrow_mut() = Some((gen, m));
         }
-        std::cell::Ref::map(self.target_idx_cache.borrow(),
-            |c| &c.as_ref().expect("target_idx_cache initialized above").1)
+        std::cell::Ref::map(self.target_idx_cache.borrow(), |c| {
+            &c.as_ref().expect("target_idx_cache initialized above").1
+        })
     }
 
     /// debug-only 健康检查：所有不变量（仅 debug build 跑，release 编译消除）。
@@ -2419,17 +2763,27 @@ impl Player {
     #[cfg(debug_assertions)]
     #[allow(dead_code)]
     fn check_invariants(&self) {
-        assert!(self.rage >= 0 && self.rage <= 100, "rage 越界: {}", self.rage);
+        assert!(
+            self.rage >= 0 && self.rage <= 100,
+            "rage 越界: {}",
+            self.rage
+        );
         let max_bv = self.max_block_value();
-        assert!(self.block_value >= 0 && self.block_value <= max_bv,
-            "block_value 越界: {} max={}", self.block_value, max_bv);
+        assert!(
+            self.block_value >= 0 && self.block_value <= max_bv,
+            "block_value 越界: {} max={}",
+            self.block_value,
+            max_bv
+        );
         for (cd, &v) in &self.active_cds {
-            assert!(v >= 0.0 && v.is_finite(),
-                "active_cds[{}] 非法: {}", cd, v);
+            assert!(v >= 0.0 && v.is_finite(), "active_cds[{}] 非法: {}", cd, v);
         }
         for inst in &self.active_buffs {
-            assert!(inst.stacks > 0 || inst.expected_stacks.is_some(),
-                "active_buff stacks=0 还在表里: id={}", inst.buff_id);
+            assert!(
+                inst.stacks > 0 || inst.expected_stacks.is_some(),
+                "active_buff stacks=0 还在表里: id={}",
+                inst.buff_id
+            );
         }
     }
     #[cfg(not(debug_assertions))]
@@ -2446,7 +2800,9 @@ impl Player {
         let cur = self.current_time;
         let mut next = f64::INFINITY;
         let consider = |next: &mut f64, t: f64| {
-            if t > cur && t < *next { *next = t; }
+            if t > cur && t < *next {
+                *next = t;
+            }
         };
 
         // 1. 所有 active_cds 的到期时刻
@@ -2472,8 +2828,11 @@ impl Player {
             }
             if inst.tick_interval_frames > 0 {
                 let tick_sec = frames_to_sec(inst.tick_interval_frames);
-                let buff_start = if inst.expires_at == 0.0 { 0.0 }
-                    else { inst.expires_at - frames_to_sec(inst.duration_frames) };
+                let buff_start = if inst.expires_at == 0.0 {
+                    0.0
+                } else {
+                    inst.expires_at - frames_to_sec(inst.duration_frames)
+                };
                 let elapsed = cur - buff_start;
                 if elapsed >= 0.0 && tick_sec > 0.0 {
                     let next_tick = buff_start + ((elapsed / tick_sec).floor() + 1.0) * tick_sec;
@@ -2491,8 +2850,11 @@ impl Player {
             }
             if inst.tick_interval_frames > 0 {
                 let tick_sec = frames_to_sec(inst.tick_interval_frames);
-                let buff_start = if inst.expires_at == 0.0 { 0.0 }
-                    else { inst.expires_at - frames_to_sec(inst.duration_frames) };
+                let buff_start = if inst.expires_at == 0.0 {
+                    0.0
+                } else {
+                    inst.expires_at - frames_to_sec(inst.duration_frames)
+                };
                 let elapsed = cur - buff_start;
                 if elapsed >= 0.0 && tick_sec > 0.0 {
                     let next_tick = buff_start + ((elapsed / tick_sec).floor() + 1.0) * tick_sec;
@@ -2517,7 +2879,11 @@ impl Player {
 
         // 8. bufftime 阈值翻转：buff_X 剩余时长穿过 N 秒的那一刻
         for &(buff_id, threshold_sec, is_target) in bufftime_thresholds {
-            let buffs = if is_target { &self.target_buffs } else { &self.active_buffs };
+            let buffs = if is_target {
+                &self.target_buffs
+            } else {
+                &self.active_buffs
+            };
             for inst in buffs {
                 if inst.buff_id == buff_id && inst.expires_at != 0.0 {
                     let flip_t = inst.expires_at - threshold_sec;
@@ -2535,12 +2901,55 @@ impl Player {
     pub fn set_rage(&mut self, v: i32) {
         self.rage = v.clamp(0, 100);
         self.bump_decision_gen();
-        debug_assert!(self.rage >= 0 && self.rage <= 100, "rage out of range: {}", self.rage);
+        debug_assert!(
+            self.rage >= 0 && self.rage <= 100,
+            "rage out of range: {}",
+            self.rage
+        );
     }
     /// 怒气增减（自动 clamp 0~100 + bump）。负数为消耗。
     #[inline]
     pub fn add_rage(&mut self, delta: i32) {
-        self.set_rage(self.rage + delta);
+        self.add_rage_from(delta, "未标注怒气来源");
+    }
+
+    #[inline]
+    pub fn add_rage_from(&mut self, delta: i32, source: &str) {
+        let rage_before = self.rage;
+        let rage_after = (rage_before + delta).clamp(0, 100);
+        let applied_delta = rage_after - rage_before;
+        let overflow = if delta > 0 {
+            delta.saturating_sub(applied_delta).max(0) as u32
+        } else {
+            0
+        };
+        if delta > 0 {
+            self.rage_generated_current = self.rage_generated_current.saturating_add(delta as u32);
+            self.rage_gained_current = self
+                .rage_gained_current
+                .saturating_add(applied_delta.max(0) as u32);
+            self.rage_overflow_total = self.rage_overflow_total.saturating_add(overflow);
+            if overflow > 0 {
+                let entry = self
+                    .rage_overflow_sources_current
+                    .entry(source.to_string())
+                    .or_default();
+                *entry = entry.saturating_add(overflow);
+            }
+        } else if delta < 0 {
+            self.rage_spent_current = self
+                .rage_spent_current
+                .saturating_add((-applied_delta).max(0) as u32);
+        }
+        self.rage_transactions_current.push(RageTransaction {
+            source: source.to_string(),
+            requested_delta: delta,
+            applied_delta,
+            rage_before,
+            rage_after,
+            overflow,
+        });
+        self.set_rage(rage_after);
     }
     /// 设置 buff 实例当前层数（自动 bump）。
     /// 用于脚本里需要直接覆盖层数的场景（如业火麟光给 9 层）。
@@ -2563,8 +2972,12 @@ impl Player {
         let max_bv = self.max_block_value();
         self.block_value = v.clamp(0, max_bv);
         self.bump_decision_gen();
-        debug_assert!(self.block_value >= 0 && self.block_value <= max_bv,
-            "block_value out of range: {} (max={})", self.block_value, max_bv);
+        debug_assert!(
+            self.block_value >= 0 && self.block_value <= max_bv,
+            "block_value out of range: {} (max={})",
+            self.block_value,
+            max_bv
+        );
     }
     #[inline]
     pub fn add_block_value(&mut self, delta: i32) {
@@ -2580,8 +2993,7 @@ impl Player {
 
     /// 是否激活了某秘籍（用户配 OR buff 激活）
     pub fn recipe_active(&self, recipe_id: u32) -> bool {
-        self.active_recipes.contains(&recipe_id)
-            || self.buff_recipes.contains_key(&recipe_id)
+        self.active_recipes.contains(&recipe_id) || self.buff_recipes.contains_key(&recipe_id)
     }
 
     /// buff 激活时主动激活其 activate_recipes（仅在 buff 首次添加时调用）
@@ -2595,8 +3007,11 @@ impl Player {
     fn buff_deactivate_recipes(&mut self, ids: &[u32]) {
         for &rid in ids {
             if let Some(cnt) = self.buff_recipes.get_mut(&rid) {
-                if *cnt > 1 { *cnt -= 1; }
-                else { self.buff_recipes.remove(&rid); }
+                if *cnt > 1 {
+                    *cnt -= 1;
+                } else {
+                    self.buff_recipes.remove(&rid);
+                }
             }
         }
     }
@@ -2615,8 +3030,7 @@ impl Player {
 
     pub fn has_target_buff(&self, buff_id: u32) -> bool {
         self.target_buffs.iter().any(|b| {
-            b.buff_id == buff_id &&
-            (b.expires_at == 0.0 || b.expires_at > self.current_time)
+            b.buff_id == buff_id && (b.expires_at == 0.0 || b.expires_at > self.current_time)
         })
     }
 
@@ -2624,7 +3038,8 @@ impl Player {
         let spec = spec.into();
         self.buff_generation += 1;
         self.bump_decision_gen();
-        let def = self.buff_def(spec.buff_id)
+        let def = self
+            .buff_def(spec.buff_id)
             .unwrap_or_else(|| panic!("add_target_buff: unknown buff_id {}", spec.buff_id));
         self.add_target_buff_impl(def, spec.level);
     }
@@ -2632,7 +3047,11 @@ impl Player {
     fn add_target_buff_impl(&mut self, def: &BuffDef, level: u32) {
         let is_new = !self.target_buffs.iter().any(|b| b.buff_id == def.buff_id);
         let eff_haste = self.effective_haste_level();
-        if let Some(inst) = self.target_buffs.iter_mut().find(|b| b.buff_id == def.buff_id) {
+        if let Some(inst) = self
+            .target_buffs
+            .iter_mut()
+            .find(|b| b.buff_id == def.buff_id)
+        {
             if def.haste_scaled && def.tick_interval > 0 && inst.tick_interval_frames > 0 {
                 // 刷新快照：保留"下一跳"时刻（按旧 interval 算），之后按新 interval 重新布局
                 let total_ticks = def.duration_frames / def.tick_interval;
@@ -2653,8 +3072,11 @@ impl Player {
                 inst.expires_at = new_expires;
             } else {
                 // 非加速型：原逻辑，保留 tick 节奏，延长 expires_at
-                let expires = if def.duration_frames == 0 { 0.0 }
-                    else { self.current_time + frames_to_sec(def.duration_frames) };
+                let expires = if def.duration_frames == 0 {
+                    0.0
+                } else {
+                    self.current_time + frames_to_sec(def.duration_frames)
+                };
                 let original_start = inst.expires_at - frames_to_sec(inst.duration_frames);
                 inst.expires_at = expires;
                 inst.duration_frames = sec_to_frames(expires - original_start);
@@ -2672,11 +3094,17 @@ impl Player {
             } else {
                 (def.tick_interval, def.duration_frames)
             };
-            let expires = if actual_dur == 0 { 0.0 }
-                else { self.current_time + frames_to_sec(actual_dur) };
+            let expires = if actual_dur == 0 {
+                0.0
+            } else {
+                self.current_time + frames_to_sec(actual_dur)
+            };
             self.target_buffs.push(BuffInstance {
-                buff_id: def.buff_id, stacks: 1,
-                duration_frames: actual_dur, expires_at: expires, tick_elapsed: 0,
+                buff_id: def.buff_id,
+                stacks: 1,
+                duration_frames: actual_dur,
+                expires_at: expires,
+                tick_elapsed: 0,
                 tick_interval_frames: actual_tick,
                 snapshot: None,
                 level,
@@ -2685,7 +3113,9 @@ impl Player {
                 stack_distribution: None,
             });
         }
-        if is_new { self.record_buff_event(def.buff_id, "gain"); }
+        if is_new {
+            self.record_buff_event(def.buff_id, "gain");
+        }
     }
 
     pub fn remove_target_buff(&mut self, buff_id: u32) {
@@ -2699,8 +3129,7 @@ impl Player {
 
     pub fn has_buff(&self, buff_id: u32) -> bool {
         self.active_buffs.iter().any(|b| {
-            b.buff_id == buff_id &&
-            (b.expires_at == 0.0 || b.expires_at > self.current_time)
+            b.buff_id == buff_id && (b.expires_at == 0.0 || b.expires_at > self.current_time)
         })
     }
 
@@ -2709,15 +3138,24 @@ impl Player {
         let t = self.current_time;
         let mut total = 0.0;
         for inst in self.active_buffs.iter().chain(self.target_buffs.iter()) {
-            if inst.expires_at != 0.0 && inst.expires_at <= t { continue; }
-            let def = match self.buff_def(inst.buff_id) { Some(d) => d, None => continue };
+            if inst.expires_at != 0.0 && inst.expires_at <= t {
+                continue;
+            }
+            let def = match self.buff_def(inst.buff_id) {
+                Some(d) => d,
+                None => continue,
+            };
             let mult = inst.expected_stacks.unwrap_or(inst.stacks as f64);
             for e in def.effects {
-                if e.field == field { total += e.value * mult; }
+                if e.field == field {
+                    total += e.value * mult;
+                }
             }
             // 实例级动态 effects
             for e in &inst.extra_effects {
-                if e.field == field { total += e.value * mult; }
+                if e.field == field {
+                    total += e.value * mult;
+                }
             }
         }
         // 跨字段换算：查 ParryValueBase 时追加"基础体质" × ∑cof / 1024
@@ -2737,16 +3175,21 @@ impl Player {
             let cache = self.buff_cache.borrow();
             if let Some((gen, _, _, ref rt)) = *cache {
                 if gen == self.buff_generation {
-                    perf_add(|p| { p.cache_hit += 1; });
+                    perf_add(|p| {
+                        p.cache_hit += 1;
+                    });
                     return rt.clone();
                 }
             }
         }
-        perf_add(|p| { p.cache_miss += 1; });
+        perf_add(|p| {
+            p.cache_miss += 1;
+        });
         let buff_slots = aggregate_buff_fields(self);
         let target_slots = aggregate_target_buff_fields(self);
         let rt = build_runtime_stats(&self.base_attrs, &buff_slots, &self.constants);
-        *self.buff_cache.borrow_mut() = Some((self.buff_generation, buff_slots, target_slots, rt.clone()));
+        *self.buff_cache.borrow_mut() =
+            Some((self.buff_generation, buff_slots, target_slots, rt.clone()));
         rt
     }
 
@@ -2761,32 +3204,56 @@ impl Player {
 
     /// 自身 buff 层数（不存在返回 0）
     pub fn buff_stacks(&self, buff_id: u32) -> u32 {
-        self.active_buffs.iter()
-            .find(|b| b.buff_id == buff_id && (b.expires_at == 0.0 || b.expires_at > self.current_time))
+        self.active_buffs
+            .iter()
+            .find(|b| {
+                b.buff_id == buff_id && (b.expires_at == 0.0 || b.expires_at > self.current_time)
+            })
             .map(|b| b.stacks)
             .unwrap_or(0)
     }
 
     /// 目标 buff 层数
     pub fn target_buff_stacks(&self, buff_id: u32) -> u32 {
-        self.target_buffs.iter()
-            .find(|b| b.buff_id == buff_id && (b.expires_at == 0.0 || b.expires_at > self.current_time))
+        self.target_buffs
+            .iter()
+            .find(|b| {
+                b.buff_id == buff_id && (b.expires_at == 0.0 || b.expires_at > self.current_time)
+            })
             .map(|b| b.stacks)
             .unwrap_or(0)
     }
 
     /// 自身 buff 剩余秒数（不存在返回 None）
     pub fn buff_remaining(&self, buff_id: u32) -> Option<f64> {
-        self.active_buffs.iter()
-            .find(|b| b.buff_id == buff_id && (b.expires_at == 0.0 || b.expires_at > self.current_time))
-            .map(|b| if b.expires_at == 0.0 { f64::MAX } else { (b.expires_at - self.current_time).max(0.0) })
+        self.active_buffs
+            .iter()
+            .find(|b| {
+                b.buff_id == buff_id && (b.expires_at == 0.0 || b.expires_at > self.current_time)
+            })
+            .map(|b| {
+                if b.expires_at == 0.0 {
+                    f64::MAX
+                } else {
+                    (b.expires_at - self.current_time).max(0.0)
+                }
+            })
     }
 
     /// 目标 buff 剩余秒数
     pub fn target_buff_remaining(&self, buff_id: u32) -> Option<f64> {
-        self.target_buffs.iter()
-            .find(|b| b.buff_id == buff_id && (b.expires_at == 0.0 || b.expires_at > self.current_time))
-            .map(|b| if b.expires_at == 0.0 { f64::MAX } else { (b.expires_at - self.current_time).max(0.0) })
+        self.target_buffs
+            .iter()
+            .find(|b| {
+                b.buff_id == buff_id && (b.expires_at == 0.0 || b.expires_at > self.current_time)
+            })
+            .map(|b| {
+                if b.expires_at == 0.0 {
+                    f64::MAX
+                } else {
+                    (b.expires_at - self.current_time).max(0.0)
+                }
+            })
     }
 
     /// 技能是否不在 CD 中（宏 skill_notin_cd 条件）
@@ -2794,14 +3261,20 @@ impl Player {
     pub fn is_skill_not_in_cd(&self, skill: &SkillSpec) -> bool {
         // 1. 检查独立 CD（非 GCD）
         for cd in &skill.cooldowns {
-            if cd.cd_id.starts_with("gcd_") { continue; }
-            if cd.cd_id.starts_with("protect_") { continue; }
+            if cd.cd_id.starts_with("gcd_") {
+                continue;
+            }
+            if cd.cd_id.starts_with("protect_") {
+                continue;
+            }
             if let Some(&expires) = self.active_cds.get(&cd.cd_id) {
                 if expires > self.current_time + 0.001 {
                     // 有独立 CD 在冷却中，但如果是充能技能且有层数则视为无 CD
                     if skill.max_charges > 0 {
                         if let Some(ch) = self.get_charges(skill) {
-                            if ch >= 1 { continue; } // 有充能层数，跳过此 CD
+                            if ch >= 1 {
+                                continue;
+                            } // 有充能层数，跳过此 CD
                         }
                     }
                     return false; // 独立 CD 冷却中
@@ -2810,7 +3283,9 @@ impl Player {
         }
         // 2. 检查 GCD
         for cd in &skill.cooldowns {
-            if !cd.cd_id.starts_with("gcd_") { continue; }
+            if !cd.cd_id.starts_with("gcd_") {
+                continue;
+            }
             if let Some(&expires) = self.active_cds.get(&cd.cd_id) {
                 if expires > self.current_time + 0.001 {
                     return false; // GCD 冷却中
@@ -2826,13 +3301,18 @@ impl Player {
     }
 
     fn record_buff_event(&mut self, buff_id: u32, event_type: &str) {
-        if self.lite_mode { return; }
+        if self.lite_mode {
+            return;
+        }
         // 所有 buff 都记录到 buff_events（含 show_on_timeline=false 的，如神兵·无双气劲）；
         // 战斗记录 log（buff_log）需要全部，timeline 渲染（buff_timeline）在生成时按 show_on_timeline 过滤
         if let Some(_def) = self.buff_def(buff_id) {
             let state = snapshot_event_state(self);
-            self.buff_events.entry(buff_id).or_default()
-                .push((self.current_time, event_type.to_string(), state));
+            self.buff_events.entry(buff_id).or_default().push((
+                self.current_time,
+                event_type.to_string(),
+                state,
+            ));
         }
     }
 
@@ -2841,7 +3321,8 @@ impl Player {
     /// **若已存在更高 level，则不刷新**（低等级不能顶高等级）。
     pub fn add_buff_extended<T: Into<BuffSpec>>(&mut self, spec: T, extra_frames: u32) {
         let s: BuffSpec = spec.into();
-        let def = self.buff_def(s.buff_id)
+        let def = self
+            .buff_def(s.buff_id)
             .unwrap_or_else(|| panic!("add_buff_extended: unknown buff_id {}", s.buff_id));
         self.add_buff_extended_impl(def, s.level, extra_frames);
     }
@@ -2851,22 +3332,36 @@ impl Player {
         self.bump_decision_gen();
         let is_new = !self.active_buffs.iter().any(|b| b.buff_id == def.buff_id);
         let total = def.duration_frames + extra_frames;
-        let expires = if total == 0 { 0.0 }
-            else { self.current_time + frames_to_sec(total) };
-        if let Some(inst) = self.active_buffs.iter_mut().find(|b| b.buff_id == def.buff_id) {
+        let expires = if total == 0 {
+            0.0
+        } else {
+            self.current_time + frames_to_sec(total)
+        };
+        if let Some(inst) = self
+            .active_buffs
+            .iter_mut()
+            .find(|b| b.buff_id == def.buff_id)
+        {
             // 低等级不能顶高等级（level=0 视为无等级概念，正常刷新）
-            if level > 0 && inst.level > level { return; }
+            if level > 0 && inst.level > level {
+                return;
+            }
             inst.expires_at = expires;
             inst.duration_frames = total;
-            if level > 0 { inst.level = level; }
+            if level > 0 {
+                inst.level = level;
+            }
             if inst.stacks < def.max_stacks {
                 inst.stacks += 1;
                 self.record_buff_event(def.buff_id, "stack");
             }
         } else {
             self.active_buffs.push(BuffInstance {
-                buff_id: def.buff_id, stacks: 1,
-                duration_frames: total, expires_at: expires, tick_elapsed: 0,
+                buff_id: def.buff_id,
+                stacks: 1,
+                duration_frames: total,
+                expires_at: expires,
+                tick_elapsed: 0,
                 tick_interval_frames: def.tick_interval,
                 snapshot: None,
                 level,
@@ -2879,7 +3374,9 @@ impl Player {
             self.record_buff_event(def.buff_id, "gain");
             // 仅首次添加时激活其秘籍
             let ids: Vec<u32> = def.activate_recipes.to_vec();
-            if !ids.is_empty() { self.buff_activate_recipes(&ids); }
+            if !ids.is_empty() {
+                self.buff_activate_recipes(&ids);
+            }
         }
     }
 
@@ -2890,7 +3387,12 @@ impl Player {
 
     /// 团队增益专用：一次性挂指定层数 + 自定义 duration（0 = 永久）
     /// duration_frames_override = 0 表示永久；其他覆盖 BuffDef.duration_frames
-    pub fn add_buff_with_stacks<T: Into<BuffSpec>>(&mut self, spec: T, stacks: u32, duration_frames_override: u32) {
+    pub fn add_buff_with_stacks<T: Into<BuffSpec>>(
+        &mut self,
+        spec: T,
+        stacks: u32,
+        duration_frames_override: u32,
+    ) {
         let s: BuffSpec = spec.into();
         let def = match self.buff_def(s.buff_id) {
             Some(d) => d,
@@ -2899,21 +3401,36 @@ impl Player {
         self.buff_generation += 1;
         self.bump_decision_gen();
         let dur = duration_frames_override;
-        let expires = if dur == 0 { 0.0 } else { self.current_time + frames_to_sec(dur) };
+        let expires = if dur == 0 {
+            0.0
+        } else {
+            self.current_time + frames_to_sec(dur)
+        };
         let max_stacks = def.max_stacks.max(1);
         let stacks_clamped = stacks.clamp(1, max_stacks);
         let is_new = !self.active_buffs.iter().any(|b| b.buff_id == s.buff_id);
-        if let Some(inst) = self.active_buffs.iter_mut().find(|b| b.buff_id == s.buff_id) {
-            if s.level > 0 && inst.level > s.level { return; }
+        if let Some(inst) = self
+            .active_buffs
+            .iter_mut()
+            .find(|b| b.buff_id == s.buff_id)
+        {
+            if s.level > 0 && inst.level > s.level {
+                return;
+            }
             inst.expires_at = expires;
             inst.duration_frames = dur;
-            if s.level > 0 { inst.level = s.level; }
+            if s.level > 0 {
+                inst.level = s.level;
+            }
             inst.stacks = stacks_clamped;
             self.record_buff_event(s.buff_id, "stack");
         } else {
             self.active_buffs.push(BuffInstance {
-                buff_id: s.buff_id, stacks: stacks_clamped,
-                duration_frames: dur, expires_at: expires, tick_elapsed: 0,
+                buff_id: s.buff_id,
+                stacks: stacks_clamped,
+                duration_frames: dur,
+                expires_at: expires,
+                tick_elapsed: 0,
                 tick_interval_frames: def.tick_interval,
                 snapshot: None,
                 level: s.level,
@@ -2925,12 +3442,19 @@ impl Player {
         if is_new {
             self.record_buff_event(s.buff_id, "gain");
             let ids: Vec<u32> = def.activate_recipes.to_vec();
-            if !ids.is_empty() { self.buff_activate_recipes(&ids); }
+            if !ids.is_empty() {
+                self.buff_activate_recipes(&ids);
+            }
         }
     }
 
     /// 团队增益（debuff）专用：挂目标 buff 指定层数 + 自定义 duration
-    pub fn add_target_buff_with_stacks<T: Into<BuffSpec>>(&mut self, spec: T, stacks: u32, duration_frames_override: u32) {
+    pub fn add_target_buff_with_stacks<T: Into<BuffSpec>>(
+        &mut self,
+        spec: T,
+        stacks: u32,
+        duration_frames_override: u32,
+    ) {
         let s: BuffSpec = spec.into();
         let def = match self.buff_def(s.buff_id) {
             Some(d) => d,
@@ -2939,21 +3463,36 @@ impl Player {
         self.buff_generation += 1;
         self.bump_decision_gen();
         let dur = duration_frames_override;
-        let expires = if dur == 0 { 0.0 } else { self.current_time + frames_to_sec(dur) };
+        let expires = if dur == 0 {
+            0.0
+        } else {
+            self.current_time + frames_to_sec(dur)
+        };
         let max_stacks = def.max_stacks.max(1);
         let stacks_clamped = stacks.clamp(1, max_stacks);
         let is_new = !self.target_buffs.iter().any(|b| b.buff_id == s.buff_id);
-        if let Some(inst) = self.target_buffs.iter_mut().find(|b| b.buff_id == s.buff_id) {
-            if s.level > 0 && inst.level > s.level { return; }
+        if let Some(inst) = self
+            .target_buffs
+            .iter_mut()
+            .find(|b| b.buff_id == s.buff_id)
+        {
+            if s.level > 0 && inst.level > s.level {
+                return;
+            }
             inst.expires_at = expires;
             inst.duration_frames = dur;
-            if s.level > 0 { inst.level = s.level; }
+            if s.level > 0 {
+                inst.level = s.level;
+            }
             inst.stacks = stacks_clamped;
             self.record_buff_event(s.buff_id, "stack");
         } else {
             self.target_buffs.push(BuffInstance {
-                buff_id: s.buff_id, stacks: stacks_clamped,
-                duration_frames: dur, expires_at: expires, tick_elapsed: 0,
+                buff_id: s.buff_id,
+                stacks: stacks_clamped,
+                duration_frames: dur,
+                expires_at: expires,
+                tick_elapsed: 0,
                 tick_interval_frames: def.tick_interval,
                 snapshot: None,
                 level: s.level,
@@ -2962,15 +3501,22 @@ impl Player {
                 stack_distribution: None,
             });
         }
-        if is_new { self.record_buff_event(s.buff_id, "gain"); }
+        if is_new {
+            self.record_buff_event(s.buff_id, "gain");
+        }
     }
 
     /// 排队团队增益：在 release_at 时刻挂 buff（process_buff_ticks 内消费）
     /// 队列按 release_at 升序保持
     pub fn schedule_team_buff(&mut self, p: PendingTeamBuff) {
-        let pos = self.pending_team_buffs.binary_search_by(|x|
-            x.release_at.partial_cmp(&p.release_at).unwrap_or(std::cmp::Ordering::Equal)
-        ).unwrap_or_else(|e| e);
+        let pos = self
+            .pending_team_buffs
+            .binary_search_by(|x| {
+                x.release_at
+                    .partial_cmp(&p.release_at)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .unwrap_or_else(|e| e);
         self.pending_team_buffs.insert(pos, p);
     }
 
@@ -2996,23 +3542,30 @@ impl Player {
     pub fn add_buff_accumulate(&mut self, buff_id: u32) {
         self.buff_generation += 1;
         self.bump_decision_gen();
-        let def = self.buff_def(buff_id)
+        let def = self
+            .buff_def(buff_id)
             .unwrap_or_else(|| panic!("add_buff_accumulate: unknown buff_id {}", buff_id));
         self.add_buff_accumulate_impl(def);
     }
 
     fn add_buff_accumulate_impl(&mut self, def: &BuffDef) {
         let dur_sec = frames_to_sec(def.duration_frames);
-        if let Some(inst) = self.active_buffs.iter_mut().find(|b| b.buff_id == def.buff_id) {
+        if let Some(inst) = self
+            .active_buffs
+            .iter_mut()
+            .find(|b| b.buff_id == def.buff_id)
+        {
             // 累加时间
             let remaining = (inst.expires_at - self.current_time).max(0.0);
             inst.expires_at = self.current_time + remaining + dur_sec;
             inst.duration_frames = sec_to_frames(remaining + dur_sec);
         } else {
             self.active_buffs.push(BuffInstance {
-                buff_id: def.buff_id, stacks: 1,
+                buff_id: def.buff_id,
+                stacks: 1,
                 duration_frames: def.duration_frames,
-                expires_at: self.current_time + dur_sec, tick_elapsed: 0,
+                expires_at: self.current_time + dur_sec,
+                tick_elapsed: 0,
                 tick_interval_frames: def.tick_interval,
                 snapshot: None,
                 level: 0,
@@ -3026,14 +3579,21 @@ impl Player {
     pub fn add_state_buff(&mut self, buff_id: u32, duration_frames: u32) {
         self.buff_generation += 1;
         self.bump_decision_gen();
-        let expires = if duration_frames == 0 { 0.0 }
-            else { self.current_time + frames_to_sec(duration_frames) };
+        let expires = if duration_frames == 0 {
+            0.0
+        } else {
+            self.current_time + frames_to_sec(duration_frames)
+        };
         if let Some(inst) = self.active_buffs.iter_mut().find(|b| b.buff_id == buff_id) {
             inst.expires_at = expires;
             inst.duration_frames = duration_frames;
         } else {
             self.active_buffs.push(BuffInstance {
-                buff_id, stacks: 1, duration_frames, expires_at: expires, tick_elapsed: 0,
+                buff_id,
+                stacks: 1,
+                duration_frames,
+                expires_at: expires,
+                tick_elapsed: 0,
                 tick_interval_frames: 0,
                 snapshot: None,
                 level: 0,
@@ -3056,7 +3616,9 @@ impl Player {
         if existed {
             if let Some(def) = self.buff_def(buff_id) {
                 let ids: Vec<u32> = def.activate_recipes.to_vec();
-                if !ids.is_empty() { self.buff_deactivate_recipes(&ids); }
+                if !ids.is_empty() {
+                    self.buff_deactivate_recipes(&ids);
+                }
             }
         }
     }
@@ -3065,7 +3627,9 @@ impl Player {
     pub fn remove_buff_stack(&mut self, buff_id: u32) {
         self.buff_generation += 1;
         self.bump_decision_gen();
-        let will_remove = self.active_buffs.iter()
+        let will_remove = self
+            .active_buffs
+            .iter()
             .find(|b| b.buff_id == buff_id)
             .map_or(false, |b| b.stacks <= 1);
         if !will_remove {
@@ -3073,26 +3637,42 @@ impl Player {
         }
         let mut should_remove = false;
         if let Some(inst) = self.active_buffs.iter_mut().find(|b| b.buff_id == buff_id) {
-            if inst.stacks > 1 { inst.stacks -= 1; } else { should_remove = true; }
+            if inst.stacks > 1 {
+                inst.stacks -= 1;
+            } else {
+                should_remove = true;
+            }
         }
-        if should_remove { self.remove_buff(buff_id); }
+        if should_remove {
+            self.remove_buff(buff_id);
+        }
     }
 
     // ── 姿态（通过 Buff 管理）──
 
     /// 获取当前实际姿态
     pub fn stance(&self) -> Stance {
-        if self.has_buff(BUFF_STANCE_WALL)   { Stance::Wall }
-        else if self.has_buff(BUFF_STANCE_BLADE)  { Stance::Blade }
-        else { Stance::Shield }
+        if self.has_buff(BUFF_STANCE_WALL) {
+            Stance::Wall
+        } else if self.has_buff(BUFF_STANCE_BLADE) {
+            Stance::Blade
+        } else {
+            Stance::Shield
+        }
     }
 
     /// 获取预判姿态：如果 GCD 能覆盖盾飞延迟，预判为擎刀
     pub fn predicted_stance(&self) -> Stance {
-        if let Some(inst) = self.active_buffs.iter().find(|b| b.buff_id == BUFF_DUN_FEI_DELAY) {
+        if let Some(inst) = self
+            .active_buffs
+            .iter()
+            .find(|b| b.buff_id == BUFF_DUN_FEI_DELAY)
+        {
             if inst.expires_at > self.current_time {
                 // GCD 覆盖延迟 → 预判擎刀（下个技能必定在延迟结束后释放）
-                let gcd_covers = self.active_cds.iter()
+                let gcd_covers = self
+                    .active_cds
+                    .iter()
                     .filter(|(k, _)| k.starts_with("gcd_"))
                     .any(|(_, &expires)| expires >= inst.expires_at);
                 if gcd_covers {
@@ -3126,7 +3706,9 @@ impl Player {
 
     /// 获取技能当前充能层数（非充能技能返回 None）
     fn get_charges(&self, skill: &SkillSpec) -> Option<u32> {
-        if skill.max_charges == 0 { return None; }
+        if skill.max_charges == 0 {
+            return None;
+        }
         let max_ch = self.effective_max_charges(skill);
         let cd = self.effective_charge_cd(skill);
         match self.charges.get(&skill.skill_id) {
@@ -3145,11 +3727,16 @@ impl Player {
 
     /// 消耗一层充能，更新恢复计时
     fn consume_charge(&mut self, skill: &SkillSpec, cast_time: f64) {
-        if skill.max_charges == 0 { return; }
+        if skill.max_charges == 0 {
+            return;
+        }
         let max_ch = self.effective_max_charges(skill);
         let cd = self.effective_charge_cd(skill);
-        let (mut ch, mut next_t) = self.charges.get(&skill.skill_id)
-            .copied().unwrap_or((max_ch, 0.0));
+        let (mut ch, mut next_t) = self
+            .charges
+            .get(&skill.skill_id)
+            .copied()
+            .unwrap_or((max_ch, 0.0));
         while ch < max_ch && next_t <= cast_time {
             ch += 1;
             next_t += cd;
@@ -3157,7 +3744,9 @@ impl Player {
         if ch > 0 {
             let was_full = ch >= max_ch;
             ch -= 1;
-            if was_full { next_t = cast_time + cd; }
+            if was_full {
+                next_t = cast_time + cd;
+            }
             self.charges.insert(skill.skill_id, (ch, next_t));
         }
     }
@@ -3203,8 +3792,13 @@ impl Player {
         let t = self.current_time;
         let mut extra_pct = 0.0f64;
         for inst in &self.active_buffs {
-            if inst.expires_at != 0.0 && inst.expires_at <= t { continue; }
-            let def = match self.buff_def(inst.buff_id) { Some(d) => d, None => continue };
+            if inst.expires_at != 0.0 && inst.expires_at <= t {
+                continue;
+            }
+            let def = match self.buff_def(inst.buff_id) {
+                Some(d) => d,
+                None => continue,
+            };
             for e in def.effects {
                 if e.field == AttribField::UnlimitedAdditionalHastePercent {
                     extra_pct += e.value;
@@ -3232,7 +3826,6 @@ impl Player {
         self.bump_decision_gen();
     }
 
-
     /// 减少指定技能的充能恢复时间（秒）
     pub fn reduce_charge_cd(&mut self, skill_id: u32, seconds: f64) {
         if let Some((_ch, next_t)) = self.charges.get_mut(&skill_id) {
@@ -3243,7 +3836,9 @@ impl Player {
 
     /// 充能技能下一层恢复的剩余秒数（满层返回 0）
     fn charge_remaining(&self, skill: &SkillSpec) -> f64 {
-        if skill.max_charges == 0 { return 0.0; }
+        if skill.max_charges == 0 {
+            return 0.0;
+        }
         let max_ch = self.effective_max_charges(skill);
         let cd = self.effective_charge_cd(skill);
         match self.charges.get(&skill.skill_id) {
@@ -3254,8 +3849,11 @@ impl Player {
                     ch += 1;
                     t += cd;
                 }
-                if ch >= max_ch { 0.0 }
-                else { (t - self.current_time).max(0.0) }
+                if ch >= max_ch {
+                    0.0
+                } else {
+                    (t - self.current_time).max(0.0)
+                }
             }
             None => 0.0,
         }
@@ -3263,7 +3861,9 @@ impl Player {
 
     /// 充能技能的最早可用时间（有层数则立即，无层数则等下一层恢复）
     fn charge_ready_time(&self, skill: &SkillSpec) -> f64 {
-        if skill.max_charges == 0 { return self.current_time; }
+        if skill.max_charges == 0 {
+            return self.current_time;
+        }
         let max_ch = self.effective_max_charges(skill);
         let cd = self.effective_charge_cd(skill);
         match self.charges.get(&skill.skill_id) {
@@ -3274,7 +3874,11 @@ impl Player {
                     ch += 1;
                     t += cd;
                 }
-                if ch > 0 { self.current_time } else { t }
+                if ch > 0 {
+                    self.current_time
+                } else {
+                    t
+                }
             }
             None => self.current_time,
         }
@@ -3288,7 +3892,10 @@ impl Player {
         match skill.skill_id {
             13047 => {
                 if self.has_talent(36058) {
-                    if matches!(self.version, GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest) {
+                    if matches!(
+                        self.version,
+                        GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest
+                    ) {
                         return 999; // 2026+: 无充能
                     }
                     charges += 1; // 2025: +1层
@@ -3305,7 +3912,10 @@ impl Player {
         match skill.skill_id {
             13047 => {
                 if self.has_talent(36058) {
-                    if matches!(self.version, GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest) {
+                    if matches!(
+                        self.version,
+                        GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest
+                    ) {
                         return 0.001; // 2026+: 无CD
                     }
                     cd -= 1.0; // 2025: -1秒
@@ -3328,9 +3938,13 @@ impl Player {
         match skill.skill_id {
             13055 => scripts::jue_dao_effective_rage_cost(self, skill),
             13391 => scripts::dun_dang_effective_rage_cost(self),
-            13052 => { // 劫刀：秘籍1007 -5怒
-                if self.has_recipe(1007) { skill.rage_cost.saturating_sub(5) }
-                else { skill.rage_cost }
+            13052 => {
+                // 劫刀：秘籍1007 -5怒
+                if self.has_recipe(1007) {
+                    skill.rage_cost.saturating_sub(5)
+                } else {
+                    skill.rage_cost
+                }
             }
             _ => skill.rage_cost,
         }
@@ -3343,34 +3957,46 @@ impl Player {
         // 移除气劲：需要有可移除的自身 buff
         if skill.skill_id == 90001 {
             let has_removable = self.active_buffs.iter().any(|b| {
-                if b.expires_at != 0.0 && b.expires_at <= self.current_time { return false; }
+                if b.expires_at != 0.0 && b.expires_at <= self.current_time {
+                    return false;
+                }
                 self.buff_def(b.buff_id).map_or(false, |d| !d.is_debuff)
             });
-            if !has_removable { return false; }
+            if !has_removable {
+                return false;
+            }
         }
         // 奇穴检查
         if let Some(tid) = skill.requires_talent {
-            if !self.has_talent(tid) { return false; }
+            if !self.has_talent(tid) {
+                return false;
+            }
         }
         // 姿态检查（含延迟预判）
         let cur = self.predicted_stance();
         let ok = match skill.stance {
-            Stance::Any     => true,
+            Stance::Any => true,
             Stance::NotWall => cur != Stance::Wall,
-            other           => other == cur,
+            other => other == cur,
         };
-        if !ok { return false; }
+        if !ok {
+            return false;
+        }
         // 战绝：只能释放苍雪刀招式（斩/绝/劫/闪刀）+ 特殊技能（移除气劲/天下宏愿）
         if self.has_buff(BUFF_ZHAN_JUE) && !is_zhan_jue_allowed(skill.skill_id) {
             return false;
         }
         // 阵云结晦·雾海（90010）：需要长驱万里 ≥6 层
         if skill.skill_id == 90010 {
-            let stacks = self.active_buffs.iter()
+            let stacks = self
+                .active_buffs
+                .iter()
                 .find(|b| b.buff_id == BUFF_CHANG_QU)
                 .map(|b| b.stacks)
                 .unwrap_or(0);
-            if stacks < 6 { return false; }
+            if stacks < 6 {
+                return false;
+            }
         }
         // 格挡值检查（寒啸千军消耗 20 格挡值）
         if skill.skill_id == 15072 && self.block_value < 20 {
@@ -3402,33 +4028,47 @@ impl Player {
     pub fn reject_reason(&self, skill: &SkillSpec) -> Option<String> {
         if skill.skill_id == 90001 {
             let has = self.active_buffs.iter().any(|b| {
-                if b.expires_at != 0.0 && b.expires_at <= self.current_time { return false; }
+                if b.expires_at != 0.0 && b.expires_at <= self.current_time {
+                    return false;
+                }
                 self.buff_def(b.buff_id).map_or(false, |d| !d.is_debuff)
             });
-            if !has { return Some("无可移除的气劲".into()); }
+            if !has {
+                return Some("无可移除的气劲".into());
+            }
         }
         if let Some(tid) = skill.requires_talent {
-            if !self.has_talent(tid) { return Some(format!("需要奇穴 {}", tid)); }
+            if !self.has_talent(tid) {
+                return Some(format!("需要奇穴 {}", tid));
+            }
         }
         let cur = self.predicted_stance();
         let stance_ok = match skill.stance {
-            Stance::Any     => true,
+            Stance::Any => true,
             Stance::NotWall => cur != Stance::Wall,
-            other           => other == cur,
+            other => other == cur,
         };
         if !stance_ok {
             let need = match skill.stance {
-                Stance::Shield => "擎盾", Stance::Blade => "擎刀",
-                Stance::Wall => "盾墙", Stance::NotWall => "非盾墙", _ => "任意",
+                Stance::Shield => "擎盾",
+                Stance::Blade => "擎刀",
+                Stance::Wall => "盾墙",
+                Stance::NotWall => "非盾墙",
+                _ => "任意",
             };
             let have = match cur {
-                Stance::Shield => "擎盾", Stance::Blade => "擎刀",
-                Stance::Wall => "盾墙", _ => "未知",
+                Stance::Shield => "擎盾",
+                Stance::Blade => "擎刀",
+                Stance::Wall => "盾墙",
+                _ => "未知",
             };
             return Some(format!("需要{}体态（当前{}）", need, have));
         }
         if self.has_buff(BUFF_ZHAN_JUE)
-            && !matches!(skill.skill_id, 13052 | 13053 | 13054 | 13055 | 90001 | 90002)
+            && !matches!(
+                skill.skill_id,
+                13052 | 13053 | 13054 | 13055 | 90001 | 90002
+            )
         {
             return Some("战绝：仅可释放苍雪刀招式".into());
         }
@@ -3437,7 +4077,12 @@ impl Player {
         }
         let eff_cost = self.effective_rage_cost(skill);
         if (self.rage as u32) < eff_cost {
-            return Some(format!("怒气不足（需要{}，当前{}，狂绝={}）", eff_cost, self.rage, self.has_buff(BUFF_KUANG_JUE)));
+            return Some(format!(
+                "怒气不足（需要{}，当前{}，狂绝={}）",
+                eff_cost,
+                self.rage,
+                self.has_buff(BUFF_KUANG_JUE)
+            ));
         }
         if let Some(ref req) = skill.requires_combo {
             if !self.has_buff(combo_buff_id(req)) {
@@ -3457,11 +4102,17 @@ impl Player {
     /// 从同名多品级中选出可施展的（优先连招后续段）
     pub fn pick_rank<'a>(&self, ranks: &[&'a SkillSpec]) -> Option<&'a SkillSpec> {
         // 优先连招后续段
-        let combo = ranks.iter().rev()
+        let combo = ranks
+            .iter()
+            .rev()
             .find(|s| s.requires_combo.is_some() && self.can_cast(s));
-        if let Some(s) = combo { return Some(s); }
+        if let Some(s) = combo {
+            return Some(s);
+        }
         // 起手段（倒序选最高可用 rank，如绝刀按怒气选最高档）
-        ranks.iter().rev()
+        ranks
+            .iter()
+            .rev()
             .find(|s| s.requires_combo.is_none() && self.can_cast(s))
             .copied()
     }
@@ -3472,7 +4123,15 @@ impl Player {
         // 怒气
         let eff_cost = self.effective_rage_cost(skill);
         self.last_rage_cost = eff_cost;
-        self.set_rage(self.rage - eff_cost as i32 + skill.rage_gain as i32);
+        if eff_cost > 0 {
+            self.add_rage_from(-(eff_cost as i32), &format!("技能消耗：{}", skill.name));
+        }
+        if skill.rage_gain > 0 {
+            self.add_rage_from(
+                skill.rage_gain as i32,
+                &format!("技能基础回怒：{}", skill.name),
+            );
+        }
         // 肃驾（14840）：每消耗 11 怒回复 1 格挡值（铁骨衣专属）
         if eff_cost > 0 && self.mount == Mount::TieGuYi && self.has_talent(14840) {
             self.rage_spent_accumulator += eff_cost;
@@ -3505,7 +4164,9 @@ impl Player {
 
     /// 消费 pending_advance，推进时间并处理区间内的 buff ticks
     pub fn flush_advance(&mut self) -> Vec<CastEvent> {
-        if self.pending_advance <= 0.0 { return Vec::new(); }
+        if self.pending_advance <= 0.0 {
+            return Vec::new();
+        }
         let from = self.current_time;
         let to = from + self.pending_advance;
         self.pending_advance = 0.0;
@@ -3522,7 +4183,9 @@ impl Player {
         // 先消费 pending_team_buffs：把 release_at ∈ (from_time, to_time] 的项依次挂上
         // 队列已按 release_at 升序，依次 pop_front 即可
         while let Some(p) = self.pending_team_buffs.first().cloned() {
-            if p.release_at > to_time { break; }
+            if p.release_at > to_time {
+                break;
+            }
             self.pending_team_buffs.remove(0);
             let saved_time = self.current_time;
             self.current_time = p.release_at.max(0.0);
@@ -3536,10 +4199,13 @@ impl Player {
 
         // 先收集需要处理的 tick 时间和到期 buff（避免借用冲突）
         let mut tick_schedule: Vec<(u32, f64)> = Vec::new(); // (buff_id, tick_time)
-        let mut expired: Vec<(u32, f64)> = Vec::new();       // (buff_id, expire_time)
+        let mut expired: Vec<(u32, f64)> = Vec::new(); // (buff_id, expire_time)
 
-        let all_buffs: Vec<&BuffInstance> = self.active_buffs.iter()
-            .chain(self.target_buffs.iter()).collect();
+        let all_buffs: Vec<&BuffInstance> = self
+            .active_buffs
+            .iter()
+            .chain(self.target_buffs.iter())
+            .collect();
         for inst in all_buffs {
             let def = match self.buff_def(inst.buff_id) {
                 Some(d) => d,
@@ -3553,7 +4219,9 @@ impl Player {
                 let tick_sec = frames_to_sec(tick_interval_frames);
                 let buff_start = if inst.expires_at != 0.0 {
                     inst.expires_at - frames_to_sec(inst.duration_frames)
-                } else { 0.0 };
+                } else {
+                    0.0
+                };
 
                 let mut t = buff_start + tick_sec;
                 while t <= to_time {
@@ -3580,7 +4248,10 @@ impl Player {
                 if let Some(def) = self.buff_def(bid) {
                     if def.show_on_timeline {
                         let state = snapshot_event_state(self);
-                        self.buff_events.entry(bid).or_default().push((t, "tick".into(), state));
+                        self.buff_events
+                            .entry(bid)
+                            .or_default()
+                            .push((t, "tick".into(), state));
                     }
                 }
             }
@@ -3596,7 +4267,11 @@ impl Player {
                 if let Some(def) = self.buff_def(*bid) {
                     if def.show_on_timeline {
                         let state = snapshot_event_state(self);
-                        self.buff_events.entry(*bid).or_default().push((*t, "expire".into(), state));
+                        self.buff_events.entry(*bid).or_default().push((
+                            *t,
+                            "expire".into(),
+                            state,
+                        ));
                     }
                 }
             }
@@ -3606,17 +4281,23 @@ impl Player {
         }
 
         // 移除到期 buff（自身 + 目标）— 不调用 remove_buff 以避免重复记录 remove 事件
-        if !expired.is_empty() { self.buff_generation += 1; self.bump_decision_gen(); }
+        if !expired.is_empty() {
+            self.buff_generation += 1;
+            self.bump_decision_gen();
+        }
         let expired_ids: Vec<u32> = expired.iter().map(|(bid, _)| *bid).collect();
         for bid in &expired_ids {
             let was_self = self.active_buffs.iter().any(|b| b.buff_id == *bid);
             self.active_buffs.retain(|b| b.buff_id != *bid);
-            self.target_buffs.retain(|b| b.buff_id != *bid || b.expires_at > to_time);
+            self.target_buffs
+                .retain(|b| b.buff_id != *bid || b.expires_at > to_time);
             // 自身 buff 到期：撤销其激活的秘籍
             if was_self {
                 if let Some(def) = self.buff_def(*bid) {
                     let ids: Vec<u32> = def.activate_recipes.to_vec();
-                    if !ids.is_empty() { self.buff_deactivate_recipes(&ids); }
+                    if !ids.is_empty() {
+                        self.buff_deactivate_recipes(&ids);
+                    }
                 }
             }
         }
@@ -3625,7 +4306,9 @@ impl Player {
 
         // Boss 周期受击：在 [from_time, to_time] 内触发受击事件
         while let Some(hit_time) = self.next_boss_attack {
-            if hit_time > to_time { break; }
+            if hit_time > to_time {
+                break;
+            }
             if hit_time >= from_time {
                 self.current_time = hit_time;
                 let hit_events = scripts::on_player_hit(self, hit_time);
@@ -3641,7 +4324,10 @@ impl Player {
         // 盾压 CD 期望重置
         self.advance_dunya_cd();
         let _ns = _t0.elapsed().as_nanos() as u64;
-        crate::perf_add(|p| { p.buff_ticks_n += 1; p.buff_ticks_ns += _ns; });
+        crate::perf_add(|p| {
+            p.buff_ticks_n += 1;
+            p.buff_ticks_ns += _ns;
+        });
         events
     }
 
@@ -3651,24 +4337,30 @@ impl Player {
     /// 同步到 `BUFF_HAN_JIA_SMALL/LARGE` 的 expected_stacks 字段。
     /// 仅当 `self.expectation = Some(_)` 时生效。
     pub fn advance_expectation(&mut self) {
-        if self.expectation.is_none() { return; }
+        if self.expectation.is_none() {
+            return;
+        }
         let target_frame = (self.current_time * FRAMES_PER_SEC as f64).round() as u32;
         let from_frame = self.expectation.as_ref().unwrap().last_frame;
-        if target_frame <= from_frame { return; }
+        if target_frame <= from_frame {
+            return;
+        }
 
         // p_0：当前面板招架率 **扣除坚铁自身贡献**（算法内部已用 p(k) = p_0 + 0.06×k）
         // cz：当前拆招值（含动态 buff 加成，如盾挡）
         let buff_slots = aggregate_buff_fields(self);
         let stats = build_runtime_stats(&self.base_attrs, &buff_slots, &self.constants);
         // 坚铁 buff 的 ParryValuePercent 贡献已被 aggregate 计入 stats.parry_rate，要减掉
-        let jiantie_parry = self.active_buffs.iter()
+        let jiantie_parry = self
+            .active_buffs
+            .iter()
             .find(|b| b.buff_id == BUFF_JIAN_TIE)
             .map_or(0.0, |b| {
                 let mult = b.expected_stacks.unwrap_or(b.stacks as f64);
-                mult * 600.0 / 10000.0   // 每层 6% = 600/10000
+                mult * 600.0 / 10000.0 // 每层 6% = 600/10000
             });
         let p_0 = (stats.parry_rate - jiantie_parry).max(0.0);
-        let cz  = stats.parry_value;
+        let cz = stats.parry_value;
 
         let exp = self.expectation.as_mut().unwrap();
         let h = exp.h_per_frame;
@@ -3677,7 +4369,7 @@ impl Player {
             let jt = exp.jiantie.tick(p_0, h);
             let hj = exp.hanjia.tick(jt.q, cz);
             exp.last_jiantie = jt;
-            exp.last_hanjia  = hj;
+            exp.last_hanjia = hj;
         }
         exp.last_frame = target_frame;
 
@@ -3690,11 +4382,15 @@ impl Player {
     /// 盾压 CD 期望重置：每帧推进小数 CD + 可用性信用。
     /// 当 avail_credit >= 1 时直接 reset_cd("cd_盾压") 并扣信用。
     pub fn advance_dunya_cd(&mut self) {
-        if self.dunya_cd.is_none() { return; }
+        if self.dunya_cd.is_none() {
+            return;
+        }
 
         let target_frame = (self.current_time * FRAMES_PER_SEC as f64).round() as u32;
         let from_frame = self.dunya_cd.as_ref().unwrap().last_frame;
-        if target_frame <= from_frame { return; }
+        if target_frame <= from_frame {
+            return;
+        }
         let elapsed = target_frame - from_frame;
 
         const EPS: f64 = 1e-9;
@@ -3713,7 +4409,9 @@ impl Player {
             let level_base = x / (x + LP_PARRY);
             let direct = stats.parry_rate - level_base - self.constants.parry_base_rate;
             base + self.constants.parry_base_rate + direct.max(0.0)
-        } else { 0.0 };
+        } else {
+            0.0
+        };
         self.last_cast_shield_non_dunya = false;
 
         let dunya = self.dunya_cd.as_mut().unwrap();
@@ -3743,7 +4441,9 @@ impl Player {
         // (3) 信用满 → 重置实际 CD
         if dunya.avail_credit >= 1.0 - EPS {
             dunya.avail_credit -= 1.0;
-            if dunya.avail_credit < 0.0 { dunya.avail_credit = 0.0; }
+            if dunya.avail_credit < 0.0 {
+                dunya.avail_credit = 0.0;
+            }
             self.active_cds.remove("cd_盾压");
         }
     }
@@ -3762,16 +4462,22 @@ impl Player {
     /// 来失效 `buff_cache` / `buff_idx_cache` / `target_idx_cache`。
     /// `mutated` 在任何会改变 active_buffs 成员或 stacks/distribution/expected_stacks 时置 true。
     fn sync_expectation_buffs(&mut self) {
-        let (e_a, e_b, p_alive, jt_e_stacks, jt_probs, hanjia_exp) = match self.expectation.as_ref() {
+        let (e_a, e_b, p_alive, jt_e_stacks, jt_probs, hanjia_exp) = match self.expectation.as_ref()
+        {
             Some(e) => (
-                e.last_hanjia.e_a, e.last_hanjia.e_b, e.last_hanjia.p_alive,
-                e.last_jiantie.e_stacks, e.last_jiantie.stack_probs,
+                e.last_hanjia.e_a,
+                e.last_hanjia.e_b,
+                e.last_hanjia.p_alive,
+                e.last_jiantie.e_stacks,
+                e.last_jiantie.stack_probs,
                 e.hanjia_expectation,
             ),
             None => return,
         };
 
-        let argmax = jt_probs.iter().enumerate()
+        let argmax = jt_probs
+            .iter()
+            .enumerate()
             .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .map_or(0, |(k, _)| k as u32);
 
@@ -3784,18 +4490,24 @@ impl Player {
         if self.has_talent(13138) {
             let exists = self.active_buffs.iter().any(|b| b.buff_id == BUFF_JIAN_TIE);
             if !exists && argmax > 0 {
-                self.add_buff(BUFF_JIAN_TIE);   // add_buff 内部已 bump
+                self.add_buff(BUFF_JIAN_TIE); // add_buff 内部已 bump
             }
-            if let Some(inst) = self.active_buffs.iter_mut().find(|b| b.buff_id == BUFF_JIAN_TIE) {
+            if let Some(inst) = self
+                .active_buffs
+                .iter_mut()
+                .find(|b| b.buff_id == BUFF_JIAN_TIE)
+            {
                 inst.stacks = argmax;
                 inst.stack_distribution = Some(jt_probs.to_vec());
                 inst.expected_stacks = if hanjia_exp { Some(jt_e_stacks) } else { None };
-                mutated = true;   // stacks 改了 → aggregate cache 必须失效
+                mutated = true; // stacks 改了 → aggregate cache 必须失效
             }
         } else {
             let len_before = self.active_buffs.len();
             self.active_buffs.retain(|b| b.buff_id != BUFF_JIAN_TIE);
-            if self.active_buffs.len() != len_before { mutated = true; }
+            if self.active_buffs.len() != len_before {
+                mutated = true;
+            }
         }
 
         // ── 寒甲：仅期望传播模式 ──
@@ -3807,12 +4519,18 @@ impl Player {
             // 大/小：同坚铁逻辑，用 set_synthetic_layer
             if p_alive < 1e-6 {
                 let len_before = self.active_buffs.len();
-                self.active_buffs.retain(|b|
-                    b.buff_id != BUFF_HAN_JIA_SMALL && b.buff_id != BUFF_HAN_JIA_LARGE);
-                if self.active_buffs.len() != len_before { mutated = true; }
+                self.active_buffs
+                    .retain(|b| b.buff_id != BUFF_HAN_JIA_SMALL && b.buff_id != BUFF_HAN_JIA_LARGE);
+                if self.active_buffs.len() != len_before {
+                    mutated = true;
+                }
             } else {
-                if Self::set_synthetic_layer(&mut self.active_buffs, BUFF_HAN_JIA_LARGE, e_a) { mutated = true; }
-                if Self::set_synthetic_layer(&mut self.active_buffs, BUFF_HAN_JIA_SMALL, e_b) { mutated = true; }
+                if Self::set_synthetic_layer(&mut self.active_buffs, BUFF_HAN_JIA_LARGE, e_a) {
+                    mutated = true;
+                }
+                if Self::set_synthetic_layer(&mut self.active_buffs, BUFF_HAN_JIA_SMALL, e_b) {
+                    mutated = true;
+                }
             }
         }
 
@@ -3830,15 +4548,18 @@ impl Player {
         if let Some(inst) = buffs.iter_mut().find(|b| b.buff_id == buff_id) {
             // 仅当真有变化才返 true（避免无谓的 generation bump）
             let changed = inst.stacks != int_stacks
-                || inst.expected_stacks.map_or(true, |old| (old - e_stacks).abs() > 1e-12);
+                || inst
+                    .expected_stacks
+                    .map_or(true, |old| (old - e_stacks).abs() > 1e-12);
             inst.expected_stacks = Some(e_stacks);
             inst.stacks = int_stacks;
             changed
         } else {
             buffs.push(BuffInstance {
-                buff_id, stacks: int_stacks,
+                buff_id,
+                stacks: int_stacks,
                 duration_frames: 0,
-                expires_at: 0.0,           // 永久（由 expectation 管理）
+                expires_at: 0.0, // 永久（由 expectation 管理）
                 tick_elapsed: 0,
                 tick_interval_frames: 0,
                 level: 0,
@@ -3854,8 +4575,12 @@ impl Player {
     // ── GCD 时间推进 ──
 
     /// 预估技能释放时间（不修改状态，含偏移和延迟）
-    pub fn estimate_cast_time(&self, skill: &SkillSpec, timing_offset: Option<f64>,
-                              network_delay: f64) -> f64 {
+    pub fn estimate_cast_time(
+        &self,
+        skill: &SkillSpec,
+        timing_offset: Option<f64>,
+        network_delay: f64,
+    ) -> f64 {
         let base = self.next_cast_time(skill);
         match timing_offset {
             Some(off) if off > 0.001 => base + off,
@@ -3868,7 +4593,11 @@ impl Player {
         let mut earliest = f64::max(self.current_time, self.channel_end);
         // 需要擎刀姿态的技能：如果盾飞延迟切换还没完成，等它结束
         if skill.stance == Stance::Blade {
-            if let Some(inst) = self.active_buffs.iter().find(|b| b.buff_id == BUFF_DUN_FEI_DELAY) {
+            if let Some(inst) = self
+                .active_buffs
+                .iter()
+                .find(|b| b.buff_id == BUFF_DUN_FEI_DELAY)
+            {
                 if inst.expires_at > earliest {
                     earliest = inst.expires_at;
                 }
@@ -3877,12 +4606,18 @@ impl Player {
         // 充能技能：等充能恢复，不看技能 CD（充能替代了技能CD）
         if skill.max_charges > 0 {
             let charge_t = self.charge_ready_time(skill);
-            if charge_t > earliest { earliest = charge_t; }
+            if charge_t > earliest {
+                earliest = charge_t;
+            }
             // 仍需检查 GCD 和保护 CD
             for cd in &skill.cooldowns {
-                if cd.cd_id.starts_with("cd_") { continue; } // 跳过技能 CD
+                if cd.cd_id.starts_with("cd_") {
+                    continue;
+                } // 跳过技能 CD
                 if let Some(&expires) = self.active_cds.get(&cd.cd_id) {
-                    if expires > earliest { earliest = expires; }
+                    if expires > earliest {
+                        earliest = expires;
+                    }
                 }
             }
         } else {
@@ -3892,12 +4627,16 @@ impl Player {
                 if cd.cd_id == "cd_盾压" {
                     if let Some(ref d) = self.dunya_cd {
                         let dunya_ready = self.current_time + d.cd_remain / FRAMES_PER_SEC as f64;
-                        if dunya_ready > earliest { earliest = dunya_ready; }
+                        if dunya_ready > earliest {
+                            earliest = dunya_ready;
+                        }
                         continue;
                     }
                 }
                 if let Some(&expires) = self.active_cds.get(&cd.cd_id) {
-                    if expires > earliest { earliest = expires; }
+                    if expires > earliest {
+                        earliest = expires;
+                    }
                 }
             }
         }
@@ -3907,16 +4646,35 @@ impl Player {
     /// 释放技能：先检查释放条件，再 GCD 推进 + 状态机更新
     /// `network_delay`: 网络延迟（秒），仅对 is_main 且非首个技能生效
     /// 返回 (cast_time, cd_wait, ticks, max_ticks, ch_dur, applied_offset, max_offset) 或 None
-    pub fn cast_skill(&mut self, skill: &SkillSpec, override_ticks: Option<u32>,
-                      timing_offset: Option<f64>, max_offset: f64, network_delay: f64)
-        -> Option<(f64, f64, Option<u32>, Option<u32>, Option<f64>, Option<f64>, Option<f64>)>
-    {
+    pub fn cast_skill(
+        &mut self,
+        skill: &SkillSpec,
+        override_ticks: Option<u32>,
+        timing_offset: Option<f64>,
+        max_offset: f64,
+        network_delay: f64,
+    ) -> Option<(
+        f64,
+        f64,
+        Option<u32>,
+        Option<u32>,
+        Option<f64>,
+        Option<f64>,
+        Option<f64>,
+    )> {
         let _t0 = std::time::Instant::now();
         let _guard = crate::scopeguard_perf(
-            |ns| crate::perf_add(|p| { p.cast_skill_n += 1; p.cast_skill_ns += ns; }),
-            _t0
+            |ns| {
+                crate::perf_add(|p| {
+                    p.cast_skill_n += 1;
+                    p.cast_skill_ns += ns;
+                })
+            },
+            _t0,
         );
-        if !self.can_cast(skill) { return None; }
+        if !self.can_cast(skill) {
+            return None;
+        }
 
         // base_time：不考虑技能CD时最早能释放的时间点
         // = max(channel_end, 全局 GCD/保护 CD, 上次主动施放时刻)
@@ -3925,22 +4683,27 @@ impl Player {
         // last_cast_time 作为下限：无 GCD 的技能（如无惧）连续施放时以上次施放时刻为基线
         let mut base_time = self.channel_end.max(self.last_cast_time);
         for (cd_id, &expires) in &self.active_cds {
-            if cd_id.starts_with("cd_") { continue; } // 跳过技能 CD
-            if expires > base_time { base_time = expires; }
+            if cd_id.starts_with("cd_") {
+                continue;
+            } // 跳过技能 CD
+            if expires > base_time {
+                base_time = expires;
+            }
         }
 
         let earliest = self.next_cast_time(skill);
         let cd_wait = (earliest - base_time).max(0.0);
 
         // 非主GCD技能：应用释放偏移；主GCD技能：应用网络延迟
-        let (cast_time, applied_offset, ret_max_offset) = if !skill_is_main(skill) && max_offset > 0.01 {
-            let offset = timing_offset.unwrap_or(0.0).clamp(0.0, max_offset);
-            (earliest + offset, Some(offset), Some(max_offset))
-        } else if skill_is_main(skill) && network_delay > 0.0 {
-            (earliest + network_delay, None, None)
-        } else {
-            (earliest, None, None)
-        };
+        let (cast_time, applied_offset, ret_max_offset) =
+            if !skill_is_main(skill) && max_offset > 0.01 {
+                let offset = timing_offset.unwrap_or(0.0).clamp(0.0, max_offset);
+                (earliest + offset, Some(offset), Some(max_offset))
+            } else if skill_is_main(skill) && network_delay > 0.0 {
+                (earliest + network_delay, None, None)
+            } else {
+                (earliest, None, None)
+            };
 
         // 充能技能：消耗一层（不触发技能 CD，由充能管理）
         if skill.max_charges > 0 {
@@ -3949,13 +4712,20 @@ impl Player {
 
         // 触发 CD（充能技能跳过 cd_ 前缀）
         for cd in &skill.cooldowns {
-            if cd.mode != CdMode::CheckAndTrigger { continue; }
-            if skill.max_charges > 0 && cd.cd_id.starts_with("cd_") { continue; }
+            if cd.mode != CdMode::CheckAndTrigger {
+                continue;
+            }
+            if skill.max_charges > 0 && cd.cd_id.starts_with("cd_") {
+                continue;
+            }
             let frames = sec_to_frames(cd.duration);
             let actual = if cd.haste {
                 get_actual_frames(frames, self.effective_haste_level())
-            } else { frames };
-            self.active_cds.insert(cd.cd_id.clone(), cast_time + frames_to_sec(actual));
+            } else {
+                frames
+            };
+            self.active_cds
+                .insert(cd.cd_id.clone(), cast_time + frames_to_sec(actual));
             // 盾压 CD 期望重置：同步 cd_remain 并重置信用
             if cd.cd_id == "cd_盾压" {
                 if let Some(ref mut d) = self.dunya_cd {
@@ -3973,29 +4743,42 @@ impl Player {
         if let (Some(cf), Some(ci)) = (skill.channel_frame, skill.channel_interval) {
             // 秘籍加成引导时长
             let extra_channel = match skill.skill_id {
-                13048 => { // 盾舞
+                13048 => {
+                    // 盾舞
                     self.has_recipe(8007) as u32 * 16   // +1秒=16帧
-                  + self.has_recipe(8008) as u32 * 32   // +2秒=32帧
+                  + self.has_recipe(8008) as u32 * 32 // +2秒=32帧
                 }
                 _ => 0,
             };
             let actual_frame = get_actual_frames(cf + extra_channel, self.effective_haste_level());
             let actual_interval = get_actual_frames(ci, self.effective_haste_level());
-            let total = if actual_interval > 0 { actual_frame / actual_interval } else { 0 };
+            let total = if actual_interval > 0 {
+                actual_frame / actual_interval
+            } else {
+                0
+            };
             max_ticks = Some(total);
 
             // 默认按 GCD 时长引导（GCD 内能完成的跳数），手动覆盖时按指定跳数
-            let gcd_frames = skill.cooldowns.iter()
+            let gcd_frames = skill
+                .cooldowns
+                .iter()
                 .filter(|cd| cd.cd_id.starts_with("gcd_") && cd.mode == CdMode::CheckAndTrigger)
                 .map(|cd| {
                     let f = sec_to_frames(cd.duration);
-                    if cd.haste { get_actual_frames(f, self.effective_haste_level()) } else { f }
+                    if cd.haste {
+                        get_actual_frames(f, self.effective_haste_level())
+                    } else {
+                        f
+                    }
                 })
                 .max()
                 .unwrap_or(0);
             let default_ticks = if gcd_frames > 0 && actual_interval > 0 {
                 (gcd_frames / actual_interval).min(total).max(1)
-            } else { total };
+            } else {
+                total
+            };
 
             let ticks = match override_ticks {
                 Some(t) if t > 0 => t.min(total),
@@ -4005,10 +4788,13 @@ impl Player {
 
             // 引导时长 = 首跳延迟 + (ticks-1) * interval
             let first_frame = skill.first_tick_frame.unwrap_or(actual_interval);
-            let actual_first = if first_frame == 0 { 0 }
-                else if skill.first_tick_frame.is_some() {
-                    get_actual_frames(first_frame, self.effective_haste_level())
-                } else { actual_interval };
+            let actual_first = if first_frame == 0 {
+                0
+            } else if skill.first_tick_frame.is_some() {
+                get_actual_frames(first_frame, self.effective_haste_level())
+            } else {
+                actual_interval
+            };
             let channel_dur = if ticks <= 1 {
                 frames_to_sec(actual_first)
             } else {
@@ -4038,9 +4824,13 @@ impl Player {
             let weapon_id = self.equip_id_at("PRIMARY_WEAPON");
             if let Some((level, strain)) = shen_bing_wu_shuang_for(weapon_id) {
                 self.add_buff((BUFF_SHEN_BING_WU_SHUANG, level));
-                self.bind_buff_effects(BUFF_SHEN_BING_WU_SHUANG, vec![
-                    EffectEntry { field: AttribField::StrainBase, value: strain },
-                ]);
+                self.bind_buff_effects(
+                    BUFF_SHEN_BING_WU_SHUANG,
+                    vec![EffectEntry {
+                        field: AttribField::StrainBase,
+                        value: strain,
+                    }],
+                );
             }
         }
 
@@ -4048,17 +4838,27 @@ impl Player {
         // 仿奇穴范式：cast_skill 主路径插完 CD 后，按装备件数 reduce_cd
         match skill.skill_id {
             // 无惧：威望套 4 件套 → CD-2s
-            13042 if self.count_equip_in(crate::equip_effects::CY_WEI_WANG_SET_IDS) >= 4 =>
-                self.reduce_cd("cd_无惧", 2.0),
+            13042 if self.count_equip_in(crate::equip_effects::CY_WEI_WANG_SET_IDS) >= 4 => {
+                self.reduce_cd("cd_无惧", 2.0)
+            }
             // 盾壁：守护 T 套 4 件套 → CD-10s
-            13070 if self.count_equip_in(crate::equip_effects::CY_GUARDIAN_T_SET_IDS) >= 4 =>
-                self.reduce_cd("cd_盾壁", 10.0),
+            13070 if self.count_equip_in(crate::equip_effects::CY_GUARDIAN_T_SET_IDS) >= 4 => {
+                self.reduce_cd("cd_盾壁", 10.0)
+            }
             _ => {}
         }
 
         // cast 边界 bump：cd / charge / channel_end / rage 全部可能变
         self.bump_decision_gen();
-        Some((cast_time, cd_wait, actual_ticks, max_ticks, ch_duration, applied_offset, ret_max_offset))
+        Some((
+            cast_time,
+            cd_wait,
+            actual_ticks,
+            max_ticks,
+            ch_duration,
+            applied_offset,
+            ret_max_offset,
+        ))
     }
 
     /// 战斗结束时间 = 最后一次技能释放时间（由外部记录传入）
@@ -4072,8 +4872,6 @@ impl Player {
         }
     }
 }
-
-
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 奇穴系统
@@ -4104,11 +4902,17 @@ pub struct TalentEntry {
 fn load_talents(path: &Path) -> Vec<TalentEntry> {
     let content = match std::fs::read_to_string(path) {
         Ok(c) => c,
-        Err(e) => { eprintln!("[talents] 读取 {:?} 失败: {e}", path); return Vec::new(); }
+        Err(e) => {
+            eprintln!("[talents] 读取 {:?} 失败: {e}", path);
+            return Vec::new();
+        }
     };
     let config: TalentFileConfig = match toml::from_str(&content) {
         Ok(c) => c,
-        Err(e) => { eprintln!("[talents] 解析 {:?} 失败: {e}", path); return Vec::new(); }
+        Err(e) => {
+            eprintln!("[talents] 解析 {:?} 失败: {e}", path);
+            return Vec::new();
+        }
     };
     println!("[talents] 已加载 {} 个奇穴", config.talents.len());
     config.talents
@@ -4176,11 +4980,17 @@ impl RecipeEntry {
 fn load_recipes(path: &Path) -> Vec<RecipeEntry> {
     let content = match std::fs::read_to_string(path) {
         Ok(c) => c,
-        Err(e) => { eprintln!("[recipes] 读取 {:?} 失败: {e}", path); return Vec::new(); }
+        Err(e) => {
+            eprintln!("[recipes] 读取 {:?} 失败: {e}", path);
+            return Vec::new();
+        }
     };
     let config: RecipeFileConfig = match toml::from_str(&content) {
         Ok(c) => c,
-        Err(e) => { eprintln!("[recipes] 解析 {:?} 失败: {e}", path); return Vec::new(); }
+        Err(e) => {
+            eprintln!("[recipes] 解析 {:?} 失败: {e}", path);
+            return Vec::new();
+        }
     };
     println!("[recipes] 已加载 {} 个秘籍", config.recipes.len());
     config.recipes
@@ -4233,7 +5043,9 @@ pub struct TeamBuffEntry {
     pub conflicts: Vec<String>,
 }
 
-fn default_one_u32() -> u32 { 1 }
+fn default_one_u32() -> u32 {
+    1
+}
 
 #[derive(Debug, Deserialize)]
 struct TeamBuffFileConfig {
@@ -4265,31 +5077,55 @@ fn team_buffs_file(version: GameVersion) -> String {
 fn load_team_buffs(path: &Path) -> Vec<TeamBuffEntry> {
     let content = match std::fs::read_to_string(path) {
         Ok(c) => c,
-        Err(e) => { eprintln!("[team_buffs] 读取 {:?} 失败: {e}", path); return Vec::new(); }
+        Err(e) => {
+            eprintln!("[team_buffs] 读取 {:?} 失败: {e}", path);
+            return Vec::new();
+        }
     };
     let config: TeamBuffFileConfig = match toml::from_str(&content) {
         Ok(c) => c,
-        Err(e) => { eprintln!("[team_buffs] 解析 {:?} 失败: {e}", path); return Vec::new(); }
+        Err(e) => {
+            eprintln!("[team_buffs] 解析 {:?} 失败: {e}", path);
+            return Vec::new();
+        }
     };
-    println!("[team_buffs] 已加载 {} 个团队增益条目", config.entries.len());
+    println!(
+        "[team_buffs] 已加载 {} 个团队增益条目",
+        config.entries.len()
+    );
     config.entries
 }
 
 /// 把 TeamBuffSelection 列表排程到 player（用于 simulate_core，按时间挂）
 /// total_duration: 模拟时长（秒），决定周期型 buff 排程到何时
-pub fn apply_team_buffs_for_simulate(player: &mut Player, sels: &[TeamBuffSelection],
-                                       table: &[TeamBuffEntry], total_duration: f64) {
+pub fn apply_team_buffs_for_simulate(
+    player: &mut Player,
+    sels: &[TeamBuffSelection],
+    table: &[TeamBuffEntry],
+    total_duration: f64,
+) {
     for sel in sels {
-        if !sel.enabled { continue; }
+        if !sel.enabled {
+            continue;
+        }
         let entry = match table.iter().find(|e| e.key == sel.key) {
-            Some(e) => e, None => continue,
+            Some(e) => e,
+            None => continue,
         };
-        let dur_frames = if sel.duration > 0.0 { sec_to_frames(sel.duration) } else { 0 };
+        let dur_frames = if sel.duration > 0.0 {
+            sec_to_frames(sel.duration)
+        } else {
+            0
+        };
         // 优先：用户在时间轴独立调过的每次释放时间数组
         if let Some(times) = sel.release_times.as_ref().filter(|t| !t.is_empty()) {
-            if sel.duration <= 0.0 { continue; }
+            if sel.duration <= 0.0 {
+                continue;
+            }
             for &t in times {
-                if t < 0.0 || t >= total_duration { continue; }
+                if t < 0.0 || t >= total_duration {
+                    continue;
+                }
                 player.schedule_team_buff(PendingTeamBuff {
                     release_at: t,
                     buff_id: entry.buff_id,
@@ -4315,7 +5151,9 @@ pub fn apply_team_buffs_for_simulate(player: &mut Player, sels: &[TeamBuffSelect
             // 周期：first_release + N×period 排程，直到 total_duration
             let mut t = sel.first_release.max(0.0);
             // 防御：周期或持续时间为 0 时不排
-            if sel.period <= 0.0 || sel.duration <= 0.0 { continue; }
+            if sel.period <= 0.0 || sel.duration <= 0.0 {
+                continue;
+            }
             // 上限：3600s + period=1s 极端配置下 3600 项（保护，避免 period 微小时死循环）
             let max_count = 4096;
             let mut count = 0;
@@ -4337,15 +5175,25 @@ pub fn apply_team_buffs_for_simulate(player: &mut Player, sels: &[TeamBuffSelect
 
 /// 把 TeamBuffSelection 列表应用到 player（用于 /api/skill_damage 和 /api/calculate）
 /// 没有时间维度，永久型直接挂；周期型按平均覆盖率折算 stacks 永久挂
-pub fn apply_team_buffs_for_static(player: &mut Player, sels: &[TeamBuffSelection],
-                                     table: &[TeamBuffEntry]) {
+pub fn apply_team_buffs_for_static(
+    player: &mut Player,
+    sels: &[TeamBuffSelection],
+    table: &[TeamBuffEntry],
+) {
     for sel in sels {
-        if !sel.enabled { continue; }
+        if !sel.enabled {
+            continue;
+        }
         let entry = match table.iter().find(|e| e.key == sel.key) {
-            Some(e) => e, None => continue,
+            Some(e) => e,
+            None => continue,
         };
         // 优先用 release_times 估算覆盖率（按 N 次平均 period 折算）
-        let stacks = if let Some(times) = sel.release_times.as_ref().filter(|t| t.len() >= 2 && sel.duration > 0.0) {
+        let stacks = if let Some(times) = sel
+            .release_times
+            .as_ref()
+            .filter(|t| t.len() >= 2 && sel.duration > 0.0)
+        {
             let lo = times.iter().cloned().fold(f64::INFINITY, f64::min);
             let hi = times.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
             let avg_period = ((hi - lo) / (times.len() as f64 - 1.0)).max(0.1);
@@ -4357,7 +5205,9 @@ pub fn apply_team_buffs_for_static(player: &mut Player, sels: &[TeamBuffSelectio
         } else {
             sel.stacks
         };
-        if stacks == 0 { continue; }
+        if stacks == 0 {
+            continue;
+        }
         if entry.is_target_buff {
             player.add_target_buff_with_stacks((entry.buff_id, 0u32), stacks, 0);
         } else {
@@ -4426,11 +5276,17 @@ fn formations_file(version: GameVersion) -> String {
 fn load_formations(path: &Path) -> Vec<FormationEntry> {
     let content = match std::fs::read_to_string(path) {
         Ok(c) => c,
-        Err(e) => { eprintln!("[formations] 读取 {:?} 失败: {e}", path); return Vec::new(); }
+        Err(e) => {
+            eprintln!("[formations] 读取 {:?} 失败: {e}", path);
+            return Vec::new();
+        }
     };
     let config: FormationFileConfig = match toml::from_str(&content) {
         Ok(c) => c,
-        Err(e) => { eprintln!("[formations] 解析 {:?} 失败: {e}", path); return Vec::new(); }
+        Err(e) => {
+            eprintln!("[formations] 解析 {:?} 失败: {e}", path);
+            return Vec::new();
+        }
     };
     println!("[formations] 已加载 {} 个阵法条目", config.formations.len());
     config.formations
@@ -4472,9 +5328,12 @@ pub fn formation_permanent_effects(
     table: &[FormationEntry],
 ) -> AttribSlots {
     let mut slots: AttribSlots = HashMap::new();
-    let Some(sel) = sel.as_ref() else { return slots; };
+    let Some(sel) = sel.as_ref() else {
+        return slots;
+    };
     let entry = match table.iter().find(|e| e.key == sel.key) {
-        Some(e) => e, None => return slots,
+        Some(e) => e,
+        None => return slots,
     };
     let effects = match entry.applicable_when.as_str() {
         "self" | "any" => &entry.permanent_effects,
@@ -4485,7 +5344,10 @@ pub fn formation_permanent_effects(
         if let Some(f) = parse_attrib_field_for_formation(field_name) {
             *slots.entry(f).or_insert(0.0) += *value;
         } else {
-            eprintln!("[formations] 未知 AttribField: {} (entry={})", field_name, entry.key);
+            eprintln!(
+                "[formations] 未知 AttribField: {} (entry={})",
+                field_name, entry.key
+            );
         }
     }
     slots
@@ -4519,7 +5381,9 @@ pub fn resolve_formation_self_id(
 
 /// 计算技能触发的最大 GCD（check_and_trigger 的最大 duration）
 fn skill_gcd(skill: &SkillSpec) -> f64 {
-    skill.cooldowns.iter()
+    skill
+        .cooldowns
+        .iter()
         .filter(|cd| cd.cd_id.starts_with("gcd_") && cd.mode == CdMode::CheckAndTrigger)
         .map(|cd| cd.duration)
         .fold(0.0_f64, f64::max)
@@ -4528,9 +5392,10 @@ fn skill_gcd(skill: &SkillSpec) -> f64 {
 /// 判断技能是否占主 GCD 位：触发了 gcd_1.0（check_and_trigger）
 /// 仅触发 gcd_1.5 的技能（业火、盾挡等）可插在 1s GCD 间隙，不算主技能
 fn skill_is_main(skill: &SkillSpec) -> bool {
-    skill.cooldowns.iter().any(|cd| {
-        cd.mode == CdMode::CheckAndTrigger && cd.cd_id == "gcd_1.0"
-    })
+    skill
+        .cooldowns
+        .iter()
+        .any(|cd| cd.mode == CdMode::CheckAndTrigger && cd.cd_id == "gcd_1.0")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4545,7 +5410,12 @@ pub struct ScriptEmitter {
 }
 
 impl ScriptEmitter {
-    pub fn new() -> Self { ScriptEmitter { events: Vec::new(), primary_override: None } }
+    pub fn new() -> Self {
+        ScriptEmitter {
+            events: Vec::new(),
+            primary_override: None,
+        }
+    }
 
     /// 将主事件重定向到子技能（名称 + skill_id 用于重算伤害）
     pub fn override_primary(&mut self, name: &str, skill_id: u32) {
@@ -4553,14 +5423,39 @@ impl ScriptEmitter {
     }
 
     pub fn emit(&mut self, name: &str, skill_id: u32, cast_time: f64) {
-        self.events.push(CastEvent {
-            name: name.into(), skill_id, cast_time,
-            triggered: true, gcd: 0.0, is_main: false, cd_wait: 0.0,
-            channel_ticks: None, max_channel_ticks: None, channel_duration: None,
-            timing_offset: None, max_timing_offset: None, available_buffs: None,
-            is_macro: false, rage_after: None, rage_delta: None, rage_cost: None,
-            state_before: None, state_after: None,
-            damage: None, damage_normal: None, damage_crit: None, damage_total: None,
+       self.events.push(CastEvent {
+            sequence_index: None,
+           name: name.into(),
+            skill_id,
+            cast_time,
+            triggered: true,
+            gcd: 0.0,
+            is_main: false,
+            cd_wait: 0.0,
+            channel_ticks: None,
+            max_channel_ticks: None,
+            channel_duration: None,
+            timing_offset: None,
+            max_timing_offset: None,
+            available_buffs: None,
+            is_macro: false,
+            macro_page: None,
+            macro_line: None,
+            rage_after: None,
+            rage_delta: None,
+            rage_overflow: None,
+            rage_overflow_sources: Vec::new(),
+            rage_transactions: Vec::new(),
+            rage_generated: None,
+            rage_gained: None,
+            rage_spent: None,
+            rage_cost: None,
+            state_before: None,
+            state_after: None,
+            damage: None,
+            damage_normal: None,
+            damage_crit: None,
+            damage_total: None,
             runtime_recipes: Vec::new(),
             runtime_stats: None,
             override_attack_coeff: None,
@@ -4570,14 +5465,39 @@ impl ScriptEmitter {
 
     /// emit 一个带跳数的事件（破招段跟随主体引导跳数）
     pub fn emit_with_ticks(&mut self, name: &str, skill_id: u32, cast_time: f64, ticks: u32) {
-        let mut ev = CastEvent {
-            name: name.into(), skill_id, cast_time,
-            triggered: true, gcd: 0.0, is_main: false, cd_wait: 0.0,
-            channel_ticks: Some(ticks), max_channel_ticks: Some(ticks), channel_duration: None,
-            timing_offset: None, max_timing_offset: None, available_buffs: None,
-            is_macro: false, rage_after: None, rage_delta: None, rage_cost: None,
-            state_before: None, state_after: None,
-            damage: None, damage_normal: None, damage_crit: None, damage_total: None,
+       let mut ev = CastEvent {
+            sequence_index: None,
+           name: name.into(),
+            skill_id,
+            cast_time,
+            triggered: true,
+            gcd: 0.0,
+            is_main: false,
+            cd_wait: 0.0,
+            channel_ticks: Some(ticks),
+            max_channel_ticks: Some(ticks),
+            channel_duration: None,
+            timing_offset: None,
+            max_timing_offset: None,
+            available_buffs: None,
+            is_macro: false,
+            macro_page: None,
+            macro_line: None,
+            rage_after: None,
+            rage_delta: None,
+            rage_overflow: None,
+            rage_overflow_sources: Vec::new(),
+            rage_transactions: Vec::new(),
+            rage_generated: None,
+            rage_gained: None,
+            rage_spent: None,
+            rage_cost: None,
+            state_before: None,
+            state_after: None,
+            damage: None,
+            damage_normal: None,
+            damage_crit: None,
+            damage_total: None,
             runtime_recipes: Vec::new(),
             runtime_stats: None,
             override_attack_coeff: None,
@@ -4591,15 +5511,46 @@ impl ScriptEmitter {
     }
 
     /// emit 时覆盖 attack_coeff（绝国按层数动态变化）
-    pub fn emit_with_coeff(&mut self, name: &str, skill_id: u32, cast_time: f64, attack_coeff: f64) {
-        self.events.push(CastEvent {
-            name: name.into(), skill_id, cast_time,
-            triggered: true, gcd: 0.0, is_main: false, cd_wait: 0.0,
-            channel_ticks: None, max_channel_ticks: None, channel_duration: None,
-            timing_offset: None, max_timing_offset: None, available_buffs: None,
-            is_macro: false, rage_after: None, rage_delta: None, rage_cost: None,
-            state_before: None, state_after: None,
-            damage: None, damage_normal: None, damage_crit: None, damage_total: None,
+    pub fn emit_with_coeff(
+        &mut self,
+        name: &str,
+        skill_id: u32,
+        cast_time: f64,
+        attack_coeff: f64,
+    ) {
+       self.events.push(CastEvent {
+            sequence_index: None,
+           name: name.into(),
+            skill_id,
+            cast_time,
+            triggered: true,
+            gcd: 0.0,
+            is_main: false,
+            cd_wait: 0.0,
+            channel_ticks: None,
+            max_channel_ticks: None,
+            channel_duration: None,
+            timing_offset: None,
+            max_timing_offset: None,
+            available_buffs: None,
+            is_macro: false,
+            macro_page: None,
+            macro_line: None,
+            rage_after: None,
+            rage_delta: None,
+            rage_overflow: None,
+            rage_overflow_sources: Vec::new(),
+            rage_transactions: Vec::new(),
+            rage_generated: None,
+            rage_gained: None,
+            rage_spent: None,
+            rage_cost: None,
+            state_before: None,
+            state_after: None,
+            damage: None,
+            damage_normal: None,
+            damage_crit: None,
+            damage_total: None,
             runtime_recipes: Vec::new(),
             runtime_stats: None,
             override_attack_coeff: Some(attack_coeff),
@@ -4608,15 +5559,46 @@ impl ScriptEmitter {
     }
 
     /// emit 时附带运行时秘籍（如血誓怒气段）
-    pub fn emit_with_recipes(&mut self, name: &str, skill_id: u32, cast_time: f64, recipes: Vec<u32>) {
-        self.events.push(CastEvent {
-            name: name.into(), skill_id, cast_time,
-            triggered: true, gcd: 0.0, is_main: false, cd_wait: 0.0,
-            channel_ticks: None, max_channel_ticks: None, channel_duration: None,
-            timing_offset: None, max_timing_offset: None, available_buffs: None,
-            is_macro: false, rage_after: None, rage_delta: None, rage_cost: None,
-            state_before: None, state_after: None,
-            damage: None, damage_normal: None, damage_crit: None, damage_total: None,
+    pub fn emit_with_recipes(
+        &mut self,
+        name: &str,
+        skill_id: u32,
+        cast_time: f64,
+        recipes: Vec<u32>,
+    ) {
+       self.events.push(CastEvent {
+            sequence_index: None,
+           name: name.into(),
+            skill_id,
+            cast_time,
+            triggered: true,
+            gcd: 0.0,
+            is_main: false,
+            cd_wait: 0.0,
+            channel_ticks: None,
+            max_channel_ticks: None,
+            channel_duration: None,
+            timing_offset: None,
+            max_timing_offset: None,
+            available_buffs: None,
+            is_macro: false,
+            macro_page: None,
+            macro_line: None,
+            rage_after: None,
+            rage_delta: None,
+            rage_overflow: None,
+            rage_overflow_sources: Vec::new(),
+            rage_transactions: Vec::new(),
+            rage_generated: None,
+            rage_gained: None,
+            rage_spent: None,
+            rage_cost: None,
+            state_before: None,
+            state_after: None,
+            damage: None,
+            damage_normal: None,
+            damage_crit: None,
+            damage_total: None,
             runtime_recipes: recipes,
             runtime_stats: None,
             override_attack_coeff: None,
@@ -4625,29 +5607,40 @@ impl ScriptEmitter {
     }
 }
 
-
-fn snapshot_buff_list(list: &[BuffInstance], current_time: f64, is_target: bool, version: GameVersion) -> Vec<BuffSnapshot> {
-    list.iter().filter_map(|inst| {
-        if inst.expires_at != 0.0 && inst.expires_at <= current_time { return None; }
-        let def = scripts::get_buff_def_by_version(version, inst.buff_id)?;
-        let remaining = if inst.expires_at == 0.0 { 0.0 }
-            else { (inst.expires_at - current_time).max(0.0) };
-        Some(BuffSnapshot {
-            buff_id:       inst.buff_id,
-            name:          def.name.to_string(),
-            description:   def.description.to_string(),
-            stacks:        inst.stacks,
-            max_stacks:    def.max_stacks,
-            remaining_sec: remaining,
-            duration_sec:  frames_to_sec(inst.duration_frames),
-            is_debuff:     def.is_debuff,
-            is_target:     is_target,
-            level:         inst.level,
-            expected_stacks:    inst.expected_stacks,
-            stack_distribution: inst.stack_distribution.clone(),
-            icon:          def.icon.to_string(),
+fn snapshot_buff_list(
+    list: &[BuffInstance],
+    current_time: f64,
+    is_target: bool,
+    version: GameVersion,
+) -> Vec<BuffSnapshot> {
+    list.iter()
+        .filter_map(|inst| {
+            if inst.expires_at != 0.0 && inst.expires_at <= current_time {
+                return None;
+            }
+            let def = scripts::get_buff_def_by_version(version, inst.buff_id)?;
+            let remaining = if inst.expires_at == 0.0 {
+                0.0
+            } else {
+                (inst.expires_at - current_time).max(0.0)
+            };
+            Some(BuffSnapshot {
+                buff_id: inst.buff_id,
+                name: def.name.to_string(),
+                description: def.description.to_string(),
+                stacks: inst.stacks,
+                max_stacks: def.max_stacks,
+                remaining_sec: remaining,
+                duration_sec: frames_to_sec(inst.duration_frames),
+                is_debuff: def.is_debuff,
+                is_target: is_target,
+                level: inst.level,
+                expected_stacks: inst.expected_stacks,
+                stack_distribution: inst.stack_distribution.clone(),
+                icon: def.icon.to_string(),
+            })
         })
-    }).collect()
+        .collect()
 }
 
 /// 时间轴指纹：对一组 timeline 事件计算确定性 64-bit hash。
@@ -4657,22 +5650,32 @@ fn snapshot_buff_list(list: &[BuffInstance], current_time: f64, is_target: bool,
 fn fnv1a_u64(state: &mut u64, bytes: &[u8]) {
     for &b in bytes {
         *state ^= b as u64;
-        *state = state.wrapping_mul(0x100000001b3);  // FNV prime
+        *state = state.wrapping_mul(0x100000001b3); // FNV prime
     }
 }
 pub fn compute_fingerprint(timeline: &[CastEvent]) -> u64 {
-    let mut h: u64 = 0xcbf29ce484222325;  // FNV offset basis
+    let mut h: u64 = 0xcbf29ce484222325; // FNV offset basis
     for ev in timeline {
         fnv1a_u64(&mut h, &ev.cast_time.to_bits().to_le_bytes());
         fnv1a_u64(&mut h, &ev.skill_id.to_le_bytes());
         match ev.damage_total {
-            Some(d) => { fnv1a_u64(&mut h, &[1]); fnv1a_u64(&mut h, &d.to_bits().to_le_bytes()); }
-            None    => { fnv1a_u64(&mut h, &[0]); }
+            Some(d) => {
+                fnv1a_u64(&mut h, &[1]);
+                fnv1a_u64(&mut h, &d.to_bits().to_le_bytes());
+            }
+            None => {
+                fnv1a_u64(&mut h, &[0]);
+            }
         }
         fnv1a_u64(&mut h, &[ev.triggered as u8, ev.is_main as u8]);
         match ev.channel_ticks {
-            Some(t) => { fnv1a_u64(&mut h, &[1]); fnv1a_u64(&mut h, &t.to_le_bytes()); }
-            None    => { fnv1a_u64(&mut h, &[0]); }
+            Some(t) => {
+                fnv1a_u64(&mut h, &[1]);
+                fnv1a_u64(&mut h, &t.to_le_bytes());
+            }
+            None => {
+                fnv1a_u64(&mut h, &[0]);
+            }
         }
     }
     h
@@ -4681,27 +5684,46 @@ pub fn compute_fingerprint(timeline: &[CastEvent]) -> u64 {
 // ─── perf 计时（线程局部计数器；按 simulate_core 边界 reset/dump）───
 #[derive(Default, Clone, Copy)]
 pub struct SimPerf {
-    pub snapshot_n: u32,        pub snapshot_ns: u64,
-    pub run_scripts_n: u32,     pub run_scripts_ns: u64,
-    pub buff_ticks_n: u32,      pub buff_ticks_ns: u64,
-    pub collect_recipes_n: u32, pub collect_recipes_ns: u64,
-    pub aggregate_n: u32,       pub aggregate_ns: u64,
-    pub cache_hit: u32,         pub cache_miss: u32,
-    pub fill_tick_n: u32,       pub fill_tick_ns: u64,
-    pub fill_event_n: u32,      pub fill_event_ns: u64,
-    pub calc_damage_n: u32,     pub calc_damage_ns: u64,
-    pub macro_eval_n: u32,      pub macro_eval_ns: u64,    // simulate_macro 整次调用
-    pub macro_cond_n: u32,      pub macro_cond_ns: u64,    // 条件求值
-    pub cast_skill_n: u32,      pub cast_skill_ns: u64,    // Player::cast_skill
+    pub snapshot_n: u32,
+    pub snapshot_ns: u64,
+    pub run_scripts_n: u32,
+    pub run_scripts_ns: u64,
+    pub buff_ticks_n: u32,
+    pub buff_ticks_ns: u64,
+    pub collect_recipes_n: u32,
+    pub collect_recipes_ns: u64,
+    pub aggregate_n: u32,
+    pub aggregate_ns: u64,
+    pub cache_hit: u32,
+    pub cache_miss: u32,
+    pub fill_tick_n: u32,
+    pub fill_tick_ns: u64,
+    pub fill_event_n: u32,
+    pub fill_event_ns: u64,
+    pub calc_damage_n: u32,
+    pub calc_damage_ns: u64,
+    pub macro_eval_n: u32,
+    pub macro_eval_ns: u64, // simulate_macro 整次调用
+    pub macro_cond_n: u32,
+    pub macro_cond_ns: u64, // 条件求值
+    pub cast_skill_n: u32,
+    pub cast_skill_ns: u64, // Player::cast_skill
     // macro_eval 内部细分（找 105ms 隐藏开销）
-    pub macro_phase1_n: u32,    pub macro_phase1_ns: u64,  // build skill pool（规则迭代+条件检查+ skill 查找）
-    pub macro_phase2_n: u32,    pub macro_phase2_ns: u64,  // try cast loop（对候选 try cast_skill）
-    pub macro_skill_lookup_n: u32, pub macro_skill_lookup_ns: u64, // skill_map 字符串 hash 查找
-    pub macro_advance_n: u32,   pub macro_advance_ns: u64, // 时间推进 + buff_tick + flush_advance + Vec extend
+    pub macro_phase1_n: u32,
+    pub macro_phase1_ns: u64, // build skill pool（规则迭代+条件检查+ skill 查找）
+    pub macro_phase2_n: u32,
+    pub macro_phase2_ns: u64, // try cast loop（对候选 try cast_skill）
+    pub macro_skill_lookup_n: u32,
+    pub macro_skill_lookup_ns: u64, // skill_map 字符串 hash 查找
+    pub macro_advance_n: u32,
+    pub macro_advance_ns: u64, // 时间推进 + buff_tick + flush_advance + Vec extend
     // macro_advance 内部三段细分
-    pub macro_adv_next_n: u32,  pub macro_adv_next_ns: u64,  // next_decision_time
-    pub macro_adv_ticks_n: u32, pub macro_adv_ticks_ns: u64, // process_buff_ticks（不含 fill）
-    pub macro_adv_fill_n: u32,  pub macro_adv_fill_ns: u64,  // fill_tick_events
+    pub macro_adv_next_n: u32,
+    pub macro_adv_next_ns: u64, // next_decision_time
+    pub macro_adv_ticks_n: u32,
+    pub macro_adv_ticks_ns: u64, // process_buff_ticks（不含 fill）
+    pub macro_adv_fill_n: u32,
+    pub macro_adv_fill_ns: u64, // fill_tick_events
 }
 thread_local! {
     pub static SIM_PERF: std::cell::RefCell<SimPerf> = std::cell::RefCell::new(SimPerf::default());
@@ -4729,36 +5751,57 @@ pub fn scopeguard_perf<F: FnMut(u64)>(cb: F, start: std::time::Instant) -> PerfG
 fn snapshot_event_state(player: &Player) -> EventState {
     let _t0 = std::time::Instant::now();
     let t = player.current_time;
-    let buffs: Vec<EventBuff> = player.active_buffs.iter()
+    let buffs: Vec<EventBuff> = player
+        .active_buffs
+        .iter()
         .filter(|b| b.expires_at == 0.0 || b.expires_at > t)
         .filter_map(|b| {
             let def = player.buff_def(b.buff_id)?;
-            if def.is_debuff { return None; } // 跳过 debuff
+            if def.is_debuff {
+                return None;
+            } // 跳过 debuff
             Some(EventBuff {
                 buff_id: b.buff_id,
                 name: def.name.to_string(),
-                remaining: if b.expires_at == 0.0 { 0.0 } else { (b.expires_at - t).max(0.0) },
+                remaining: if b.expires_at == 0.0 {
+                    0.0
+                } else {
+                    (b.expires_at - t).max(0.0)
+                },
                 stacks: b.stacks,
                 icon: def.icon.to_string(),
             })
-        }).collect();
-    let target_buffs: Vec<EventBuff> = player.target_buffs.iter()
+        })
+        .collect();
+    let target_buffs: Vec<EventBuff> = player
+        .target_buffs
+        .iter()
         .filter(|b| b.expires_at == 0.0 || b.expires_at > t)
         .filter_map(|b| {
             let def = player.buff_def(b.buff_id)?;
             Some(EventBuff {
                 buff_id: b.buff_id,
                 name: def.name.to_string(),
-                remaining: if b.expires_at == 0.0 { 0.0 } else { (b.expires_at - t).max(0.0) },
+                remaining: if b.expires_at == 0.0 {
+                    0.0
+                } else {
+                    (b.expires_at - t).max(0.0)
+                },
                 stacks: b.stacks,
                 icon: def.icon.to_string(),
             })
-        }).collect();
-    let mut skill_cds: Vec<EventSkillCd> = player.active_cds.iter()
+        })
+        .collect();
+    let mut skill_cds: Vec<EventSkillCd> = player
+        .active_cds
+        .iter()
         .filter(|(k, &v)| !k.starts_with("gcd_") && !k.starts_with("protect_") && v > t + 0.01)
         .map(|(k, &v)| {
             let name = k.strip_prefix("cd_").unwrap_or(k).to_string();
-            EventSkillCd { name, remaining: (v - t).max(0.0) }
+            EventSkillCd {
+                name,
+                remaining: (v - t).max(0.0),
+            }
         })
         .collect();
     // 充能技能：显示当前层数和下一层恢复时间（经过时间推进）
@@ -4774,7 +5817,10 @@ fn snapshot_event_state(player: &Player) -> EventState {
             // 时间推进：和 get_charges/charge_remaining 相同逻辑
             let mut ch = raw_ch;
             let mut next = raw_next;
-            while ch < max_ch && next <= t { ch += 1; next += cd; }
+            while ch < max_ch && next <= t {
+                ch += 1;
+                next += cd;
+            }
             let ch = ch.min(max_ch);
             if ch < max_ch {
                 let remaining = (next - t).max(0.0);
@@ -4785,15 +5831,39 @@ fn snapshot_event_state(player: &Player) -> EventState {
             }
         }
     }
-    let block_value = if player.mount == Mount::TieGuYi { Some(player.block_value) } else { None };
+    let block_value = if player.mount == Mount::TieGuYi {
+        Some(player.block_value)
+    } else {
+        None
+    };
     let _ns = _t0.elapsed().as_nanos() as u64;
-    perf_add(|p| { p.snapshot_n += 1; p.snapshot_ns += _ns; });
-    EventState { rage: player.rage, block_value, stance: player.stance(), buffs, target_buffs, skill_cds }
+    perf_add(|p| {
+        p.snapshot_n += 1;
+        p.snapshot_ns += _ns;
+    });
+    EventState {
+        rage: player.rage,
+        block_value,
+        stance: player.stance(),
+        buffs,
+        target_buffs,
+        skill_cds,
+    }
 }
 
 fn snapshot_buffs(player: &Player) -> Vec<BuffSnapshot> {
-    let mut result = snapshot_buff_list(&player.active_buffs, player.current_time, false, player.version);
-    result.extend(snapshot_buff_list(&player.target_buffs, player.current_time, true, player.version));
+    let mut result = snapshot_buff_list(
+        &player.active_buffs,
+        player.current_time,
+        false,
+        player.version,
+    );
+    result.extend(snapshot_buff_list(
+        &player.target_buffs,
+        player.current_time,
+        true,
+        player.version,
+    ));
     result
 }
 
@@ -4881,7 +5951,9 @@ pub struct AutoSearchProgress {
     pub cancelled: bool,
 }
 
-async fn health() -> impl IntoResponse { "OK" }
+async fn health() -> impl IntoResponse {
+    "OK"
+}
 
 async fn macro_presets() -> String {
     let path = if Path::new("./macros/presets.json").exists() {
@@ -4903,7 +5975,10 @@ async fn optimizer_candidates() -> String {
 
 async fn macro_save(Json(body): Json<serde_json::Value>) -> String {
     let path = macro_save_path();
-    match std::fs::write(&path, serde_json::to_string_pretty(&body).unwrap_or_default()) {
+    match std::fs::write(
+        &path,
+        serde_json::to_string_pretty(&body).unwrap_or_default(),
+    ) {
         Ok(_) => "ok".into(),
         Err(e) => format!("error: {e}"),
     }
@@ -4917,19 +5992,28 @@ async fn macro_load() -> String {
 // ─── 循环（loop）保存/加载 ──────────────────────────────────────────
 fn loops_dir() -> std::path::PathBuf {
     let p = user_data_path("loops");
-    if !p.exists() { let _ = std::fs::create_dir_all(&p); }
+    if !p.exists() {
+        let _ = std::fs::create_dir_all(&p);
+    }
     p
 }
 
 fn sanitize_loop_name(s: &str) -> String {
     let mut out = String::new();
     for ch in s.chars() {
-        if ch.is_alphanumeric() || matches!(ch, '-' | '_' | '.' | ' ') || ('\u{4e00}'..='\u{9fff}').contains(&ch) {
+        if ch.is_alphanumeric()
+            || matches!(ch, '-' | '_' | '.' | ' ')
+            || ('\u{4e00}'..='\u{9fff}').contains(&ch)
+        {
             out.push(ch);
         }
     }
     let out = out.trim().trim_matches('.').to_string();
-    if out.is_empty() { "loop".into() } else { out }
+    if out.is_empty() {
+        "loop".into()
+    } else {
+        out
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -4949,8 +6033,13 @@ async fn loop_save(Json(req): Json<LoopSaveRequest>) -> Json<serde_json::Value> 
     };
     let fname = format!("{}_{}.json", safe, ts);
     let path = loops_dir().join(&fname);
-    match std::fs::write(&path, serde_json::to_string_pretty(&req.config).unwrap_or_default()) {
-        Ok(_) => Json(serde_json::json!({ "ok": true, "file": fname, "path": path.display().to_string() })),
+    match std::fs::write(
+        &path,
+        serde_json::to_string_pretty(&req.config).unwrap_or_default(),
+    ) {
+        Ok(_) => Json(
+            serde_json::json!({ "ok": true, "file": fname, "path": path.display().to_string() }),
+        ),
         Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
     }
 }
@@ -4962,8 +6051,15 @@ async fn loop_list() -> Json<serde_json::Value> {
         for e in rd.flatten() {
             let p = e.path();
             if p.extension().and_then(|s| s.to_str()) == Some("json") {
-                let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("").to_string();
-                let mtime = e.metadata().and_then(|m| m.modified()).unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                let name = p
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("")
+                    .to_string();
+                let mtime = e
+                    .metadata()
+                    .and_then(|m| m.modified())
+                    .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
                 files.push((name, mtime));
             }
         }
@@ -4973,22 +6069,34 @@ async fn loop_list() -> Json<serde_json::Value> {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct LoopLoadQuery { pub name: String }
+pub struct LoopLoadQuery {
+    pub name: String,
+}
 
-async fn loop_load(axum::extract::Query(q): axum::extract::Query<LoopLoadQuery>) -> Json<serde_json::Value> {
+async fn loop_load(
+    axum::extract::Query(q): axum::extract::Query<LoopLoadQuery>,
+) -> Json<serde_json::Value> {
     let safe = sanitize_loop_name(&q.name.trim_end_matches(".json"));
     // 允许完整文件名或 slug 匹配 — 先按完整 name 直接找
     let dir = loops_dir();
     let direct = dir.join(&q.name);
-    let path = if direct.exists() { direct } else { dir.join(format!("{}.json", safe)) };
+    let path = if direct.exists() {
+        direct
+    } else {
+        dir.join(format!("{}.json", safe))
+    };
     match std::fs::read_to_string(&path) {
-        Ok(t) => serde_json::from_str::<serde_json::Value>(&t).map(Json).unwrap_or_else(|e| Json(serde_json::json!({ "error": e.to_string() }))),
+        Ok(t) => serde_json::from_str::<serde_json::Value>(&t)
+            .map(Json)
+            .unwrap_or_else(|e| Json(serde_json::json!({ "error": e.to_string() }))),
         Err(e) => Json(serde_json::json!({ "error": e.to_string() })),
     }
 }
 
 #[derive(Debug, Deserialize)]
-pub struct LoopDeleteRequest { pub name: String }
+pub struct LoopDeleteRequest {
+    pub name: String,
+}
 
 async fn loop_delete(Json(req): Json<LoopDeleteRequest>) -> Json<serde_json::Value> {
     let dir = loops_dir();
@@ -5006,14 +6114,16 @@ async fn loop_delete(Json(req): Json<LoopDeleteRequest>) -> Json<serde_json::Val
 // ─── 独立配装文件：userdata/equips/{name}_{ts}.json ───
 fn equips_dir() -> std::path::PathBuf {
     let p = user_data_path("equips");
-    if !p.exists() { let _ = std::fs::create_dir_all(&p); }
+    if !p.exists() {
+        let _ = std::fs::create_dir_all(&p);
+    }
     p
 }
 
 #[derive(Debug, Deserialize)]
 pub struct EquipConfigSaveRequest {
     pub name: String,
-    pub config: serde_json::Value,  // { slots, stone_id, stone_name, mount }
+    pub config: serde_json::Value, // { slots, stone_id, stone_name, mount }
 }
 
 async fn equip_config_save(Json(req): Json<EquipConfigSaveRequest>) -> Json<serde_json::Value> {
@@ -5027,10 +6137,19 @@ async fn equip_config_save(Json(req): Json<EquipConfigSaveRequest>) -> Json<serd
     // 在 config 里补一份 metadata，便于 list 时无需完整解析
     let mut data = req.config.clone();
     if let Some(obj) = data.as_object_mut() {
-        obj.insert("name".to_string(), serde_json::Value::String(req.name.clone()));
-        obj.insert("created_at".to_string(), serde_json::Value::Number(ts.into()));
+        obj.insert(
+            "name".to_string(),
+            serde_json::Value::String(req.name.clone()),
+        );
+        obj.insert(
+            "created_at".to_string(),
+            serde_json::Value::Number(ts.into()),
+        );
     }
-    match std::fs::write(&path, serde_json::to_string_pretty(&data).unwrap_or_default()) {
+    match std::fs::write(
+        &path,
+        serde_json::to_string_pretty(&data).unwrap_or_default(),
+    ) {
         Ok(_) => Json(serde_json::json!({ "ok": true, "file": fname })),
         Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
     }
@@ -5042,22 +6161,50 @@ async fn equip_config_list() -> Json<serde_json::Value> {
     if let Ok(rd) = std::fs::read_dir(&dir) {
         for e in rd.flatten() {
             let p = e.path();
-            if p.extension().and_then(|s| s.to_str()) != Some("json") { continue; }
+            if p.extension().and_then(|s| s.to_str()) != Some("json") {
+                continue;
+            }
             let file = match p.file_name().and_then(|s| s.to_str()) {
                 Some(f) => f.to_string(),
                 None => continue,
             };
-            let mtime = e.metadata().and_then(|m| m.modified()).unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-            let mtime_secs = mtime.duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+            let mtime = e
+                .metadata()
+                .and_then(|m| m.modified())
+                .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            let mtime_secs = mtime
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
             // 读取文件内容提取 meta；失败就只返回 file + mtime
             let (name, mount, slot_count, created_at) = match std::fs::read_to_string(&p) {
                 Ok(txt) => {
-                    let v: serde_json::Value = serde_json::from_str(&txt).unwrap_or(serde_json::Value::Null);
-                    let name = v.get("name").and_then(|x| x.as_str()).unwrap_or("").to_string();
-                    let mount = v.get("mount").and_then(|x| x.as_str()).unwrap_or("").to_string();
-                    let created = v.get("created_at").and_then(|x| x.as_u64()).unwrap_or(mtime_secs);
+                    let v: serde_json::Value =
+                        serde_json::from_str(&txt).unwrap_or(serde_json::Value::Null);
+                    let name = v
+                        .get("name")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let mount = v
+                        .get("mount")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let created = v
+                        .get("created_at")
+                        .and_then(|x| x.as_u64())
+                        .unwrap_or(mtime_secs);
                     let slots = v.get("slots").and_then(|x| x.as_object());
-                    let count = slots.map(|o| o.values().filter(|s| s.get("equip_id").and_then(|id| id.as_u64()).unwrap_or(0) > 0).count()).unwrap_or(0);
+                    let count = slots
+                        .map(|o| {
+                            o.values()
+                                .filter(|s| {
+                                    s.get("equip_id").and_then(|id| id.as_u64()).unwrap_or(0) > 0
+                                })
+                                .count()
+                        })
+                        .unwrap_or(0);
                     (name, mount, count, created)
                 }
                 Err(_) => (String::new(), String::new(), 0_usize, mtime_secs),
@@ -5072,28 +6219,40 @@ async fn equip_config_list() -> Json<serde_json::Value> {
             }));
         }
     }
-    entries.sort_by(|a, b| b.get("updated_at").and_then(|v| v.as_u64()).unwrap_or(0)
-                      .cmp(&a.get("updated_at").and_then(|v| v.as_u64()).unwrap_or(0)));
+    entries.sort_by(|a, b| {
+        b.get("updated_at")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0)
+            .cmp(&a.get("updated_at").and_then(|v| v.as_u64()).unwrap_or(0))
+    });
     Json(serde_json::json!({ "files": entries }))
 }
 
 #[derive(Debug, Deserialize)]
-pub struct EquipConfigLoadQuery { pub file: String }
+pub struct EquipConfigLoadQuery {
+    pub file: String,
+}
 
-async fn equip_config_load(axum::extract::Query(q): axum::extract::Query<EquipConfigLoadQuery>) -> Json<serde_json::Value> {
+async fn equip_config_load(
+    axum::extract::Query(q): axum::extract::Query<EquipConfigLoadQuery>,
+) -> Json<serde_json::Value> {
     let dir = equips_dir();
     let path = dir.join(&q.file);
     if !path.starts_with(&dir) || path.extension().and_then(|s| s.to_str()) != Some("json") {
         return Json(serde_json::json!({ "error": "invalid name" }));
     }
     match std::fs::read_to_string(&path) {
-        Ok(t) => serde_json::from_str::<serde_json::Value>(&t).map(Json).unwrap_or_else(|e| Json(serde_json::json!({ "error": e.to_string() }))),
+        Ok(t) => serde_json::from_str::<serde_json::Value>(&t)
+            .map(Json)
+            .unwrap_or_else(|e| Json(serde_json::json!({ "error": e.to_string() }))),
         Err(e) => Json(serde_json::json!({ "error": e.to_string() })),
     }
 }
 
 #[derive(Debug, Deserialize)]
-pub struct EquipConfigDeleteRequest { pub file: String }
+pub struct EquipConfigDeleteRequest {
+    pub file: String,
+}
 
 async fn equip_config_delete(Json(req): Json<EquipConfigDeleteRequest>) -> Json<serde_json::Value> {
     let dir = equips_dir();
@@ -5108,11 +6267,16 @@ async fn equip_config_delete(Json(req): Json<EquipConfigDeleteRequest>) -> Json<
 }
 
 // ─── 工作流恢复状态（顶栏"上次 X/步骤 N"）持久化到 userdata ───
-fn resume_save_path() -> std::path::PathBuf { user_data_path("resume.json") }
+fn resume_save_path() -> std::path::PathBuf {
+    user_data_path("resume.json")
+}
 
 async fn resume_save(Json(body): Json<serde_json::Value>) -> String {
     let path = resume_save_path();
-    match std::fs::write(&path, serde_json::to_string_pretty(&body).unwrap_or_default()) {
+    match std::fs::write(
+        &path,
+        serde_json::to_string_pretty(&body).unwrap_or_default(),
+    ) {
         Ok(_) => "ok".into(),
         Err(e) => format!("error: {e}"),
     }
@@ -5126,10 +6290,15 @@ async fn resume_load() -> String {
 // ─── 用户 UI 设置（主题/字体/序列显示模式等）账号级持久化 ───────────────
 // 前端把要同步的设置项打包成一个 JSON 对象 POST 上来，后端原样存 per-user 目录；
 // 登入后 GET 回来覆盖 localStorage → 设置跟账号走（换设备/换 origin/清缓存都跟随）。
-fn settings_path() -> std::path::PathBuf { user_data_path("settings.json") }
+fn settings_path() -> std::path::PathBuf {
+    user_data_path("settings.json")
+}
 async fn settings_save(Json(body): Json<serde_json::Value>) -> String {
     let body = filter_sensitive_settings(body);
-    match std::fs::write(settings_path(), serde_json::to_string_pretty(&body).unwrap_or_default()) {
+    match std::fs::write(
+        settings_path(),
+        serde_json::to_string_pretty(&body).unwrap_or_default(),
+    ) {
         Ok(_) => "ok".into(),
         Err(e) => format!("error: {e}"),
     }
@@ -5201,9 +6370,14 @@ mod settings_security_tests {
 // ─── 当前心法/版本 per-user 持久化 ──────────────────────────────────────
 // 进程隔离下 worker 空闲回收后重建，内存态心法会重置回默认。落盘 + 启动读回，
 // 否则回收后 current_mount 变默认 → 前端 autosave 因"心法不匹配"跳过恢复 → 像循环丢了。
-fn mount_state_path() -> std::path::PathBuf { user_data_path("mount_state.json") }
+fn mount_state_path() -> std::path::PathBuf {
+    user_data_path("mount_state.json")
+}
 #[derive(serde::Serialize, serde::Deserialize)]
-struct MountState { version: GameVersion, mount: Mount }
+struct MountState {
+    version: GameVersion,
+    mount: Mount,
+}
 fn save_mount_state(version: GameVersion, mount: Mount) {
     let _ = std::fs::write(
         mount_state_path(),
@@ -5238,7 +6412,9 @@ pub struct MacroFromSequenceRequest {
     pub options: macro_gen::GenOptions,
 }
 
-async fn macro_from_sequence(Json(req): Json<MacroFromSequenceRequest>) -> Json<macro_gen::GenResult> {
+async fn macro_from_sequence(
+    Json(req): Json<MacroFromSequenceRequest>,
+) -> Json<macro_gen::GenResult> {
     Json(macro_gen::generate(&req.timeline, &req.options))
 }
 
@@ -5252,30 +6428,45 @@ pub struct MacroPruneCandidatesRequest {
 async fn macro_prune_candidates(Json(req): Json<MacroPruneCandidatesRequest>) -> Response {
     match macro_prune::list_prune_candidates(&req.macro_text) {
         Ok(list) => Json(serde_json::json!({ "candidates": list })).into_response(),
-        Err(e) => (axum::http::StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": e }))).into_response(),
+        Err(e) => (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": e })),
+        )
+            .into_response(),
     }
 }
 
 async fn macro_swap_candidates(Json(req): Json<MacroPruneCandidatesRequest>) -> Response {
     match macro_prune::list_swap_candidates(&req.macro_text) {
         Ok(list) => Json(serde_json::json!({ "candidates": list })).into_response(),
-        Err(e) => (axum::http::StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": e }))).into_response(),
+        Err(e) => (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": e })),
+        )
+            .into_response(),
     }
 }
 
 async fn macro_tighten_candidates(Json(req): Json<MacroPruneCandidatesRequest>) -> Response {
     match macro_prune::list_tighten_candidates(&req.macro_text) {
         Ok(list) => Json(serde_json::json!({ "candidates": list })).into_response(),
-        Err(e) => (axum::http::StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": e }))).into_response(),
+        Err(e) => (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": e })),
+        )
+            .into_response(),
     }
 }
 
 // ─── 批量模拟（工作流 A v2 用：一次请求跑多个场景）──────────────────
 #[derive(Debug, Deserialize)]
 pub struct BatchSimScenario {
-    #[serde(default)] pub network_delay: Option<u32>,
-    #[serde(default)] pub initial_rage: Option<i32>,
-    #[serde(default)] pub macro_duration: Option<f64>,
+    #[serde(default)]
+    pub network_delay: Option<u32>,
+    #[serde(default)]
+    pub initial_rage: Option<i32>,
+    #[serde(default)]
+    pub macro_duration: Option<f64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -5304,49 +6495,76 @@ async fn batch_simulate(
     let team_buffs_table = state.team_buffs.read().await;
     let formations_table = state.formations.read().await;
 
-    let results: Vec<BatchSimResult> = req.scenarios.iter().map(|sc| {
-        let mut r = req.base.clone();
-        if let Some(d) = sc.network_delay { r.network_delay = d; }
-        if let Some(rage) = sc.initial_rage { r.initial_rage = Some(rage); }
-        if let Some(dur) = sc.macro_duration { r.macro_duration = Some(dur); }
-        // 确保序列足够长
-        if let Some(dur) = r.macro_duration {
-            let needed = (dur / 0.25) as usize + 20;
-            if r.sequence.len() < needed {
-                r.sequence.resize(needed, "__macro__".to_string());
+    let results: Vec<BatchSimResult> = req
+        .scenarios
+        .iter()
+        .map(|sc| {
+            let mut r = req.base.clone();
+            if let Some(d) = sc.network_delay {
+                r.network_delay = d;
             }
-        }
-        // 强制 lite + 保留 timeline：内部只需 cast counts + DPS，hover 数据全省
-        r.lite = true;
-        r.lite_keep_timeline = true;
-        let resp = simulate_core(&r, &skills, cur_version, cur_mount, cur_consts, &recipes_table, &team_buffs_table, &formations_table);
-        // 只提取轻量结果
-        let mut cast_counts: HashMap<String, u32> = HashMap::new();
-        for ev in &resp.timeline {
-            if ev.triggered { continue; }
-            // 雾海阵云系列保持完整名
-            let key = if ev.skill_id >= 90010 && ev.skill_id <= 90012 {
-                &ev.name as &str
-            } else {
-                ev.name.split('·').next().unwrap_or(&ev.name)
-            };
-            *cast_counts.entry(key.to_string()).or_insert(0) += 1;
-        }
-        BatchSimResult {
-            dps: resp.dps,
-            fight_time: resp.fight_time,
-            total_damage: resp.total_damage,
-            cast_counts,
-        }
-    }).collect();
+            if let Some(rage) = sc.initial_rage {
+                r.initial_rage = Some(rage);
+            }
+            if let Some(dur) = sc.macro_duration {
+                r.macro_duration = Some(dur);
+            }
+            // 确保序列足够长
+            if let Some(dur) = r.macro_duration {
+                let needed = (dur / 0.25) as usize + 20;
+                if r.sequence.len() < needed {
+                    r.sequence.resize(needed, "__macro__".to_string());
+                }
+            }
+            // 强制 lite + 保留 timeline：内部只需 cast counts + DPS，hover 数据全省
+            r.lite = true;
+            r.lite_keep_timeline = true;
+            let resp = simulate_core(
+                &r,
+                &skills,
+                cur_version,
+                cur_mount,
+                cur_consts,
+                &recipes_table,
+                &team_buffs_table,
+                &formations_table,
+            );
+            // 只提取轻量结果
+            let mut cast_counts: HashMap<String, u32> = HashMap::new();
+            for ev in &resp.timeline {
+                if ev.triggered {
+                    continue;
+                }
+                // 雾海阵云系列保持完整名
+                let key = if ev.skill_id >= 90010 && ev.skill_id <= 90012 {
+                    &ev.name as &str
+                } else {
+                    ev.name.split('·').next().unwrap_or(&ev.name)
+                };
+                *cast_counts.entry(key.to_string()).or_insert(0) += 1;
+            }
+            BatchSimResult {
+                dps: resp.dps,
+                fight_time: resp.fight_time,
+                total_damage: resp.total_damage,
+                cast_counts,
+            }
+        })
+        .collect();
 
     Json(results)
 }
 
-async fn attrs_save(State(state): State<SharedState>, Json(body): Json<serde_json::Value>) -> String {
+async fn attrs_save(
+    State(state): State<SharedState>,
+    Json(body): Json<serde_json::Value>,
+) -> String {
     let mount = *state.mount.read().await;
     let path = attrs_save_path(mount);
-    match std::fs::write(&path, serde_json::to_string_pretty(&body).unwrap_or_default()) {
+    match std::fs::write(
+        &path,
+        serde_json::to_string_pretty(&body).unwrap_or_default(),
+    ) {
         Ok(_) => "ok".into(),
         Err(e) => format!("error: {e}"),
     }
@@ -5401,9 +6619,16 @@ async fn attrs_save_profile(
     let mount = *state.mount.read().await;
     let filename = format!("attrs_{}_{}.json", mount_dir_name(mount), safe_name);
     let path = user_data_path(&filename);
-    match std::fs::write(&path, serde_json::to_string_pretty(&body.data).unwrap_or_default()) {
+    match std::fs::write(
+        &path,
+        serde_json::to_string_pretty(&body.data).unwrap_or_default(),
+    ) {
         Ok(_) => "ok".into_response(),
-        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("error: {e}")).into_response(),
+        Err(e) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            format!("error: {e}"),
+        )
+            .into_response(),
     }
 }
 
@@ -5463,9 +6688,16 @@ async fn macro_save_profile(Json(body): Json<ProfileSaveBody>) -> Response {
     };
     let filename = format!("macros_{}.json", safe_name);
     let path = user_data_path(&filename);
-    match std::fs::write(&path, serde_json::to_string_pretty(&body.data).unwrap_or_default()) {
+    match std::fs::write(
+        &path,
+        serde_json::to_string_pretty(&body.data).unwrap_or_default(),
+    ) {
         Ok(_) => "ok".into_response(),
-        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("error: {e}")).into_response(),
+        Err(e) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            format!("error: {e}"),
+        )
+            .into_response(),
     }
 }
 
@@ -5514,7 +6746,8 @@ async fn rl_rollout(
         Err(e) => (
             axum::http::StatusCode::BAD_REQUEST,
             Json(serde_json::json!({ "error": e })),
-        ).into_response(),
+        )
+            .into_response(),
     }
 }
 
@@ -5524,7 +6757,8 @@ async fn optimizer_analyze(Json(req): Json<OptimizerAnalyzeRequest>) -> Response
         Err(err) => (
             axum::http::StatusCode::BAD_REQUEST,
             Json(serde_json::json!({ "error": err })),
-        ).into_response(),
+        )
+            .into_response(),
     }
 }
 
@@ -5551,13 +6785,23 @@ async fn skill_damage(
     let cur_version = *state.version.read().await;
     let cur_mount = *state.mount.read().await;
     let cur_consts = *state.constants.read().await;
-    let mut player = Player::with_mount(cur_mount, cur_version, cur_consts, 0,
-        req.talents.clone().unwrap_or_default(), req.recipes.clone().unwrap_or_default());
+    let mut player = Player::with_mount(
+        cur_mount,
+        cur_version,
+        cur_consts,
+        0,
+        req.talents.clone().unwrap_or_default(),
+        req.recipes.clone().unwrap_or_default(),
+    );
     // 铁骨气劲
     if cur_mount == Mount::TieGuYi {
         match req.tiegu_mode {
-            1 => { player.add_buff(BUFF_TIE_GU); }
-            2 => { player.add_buff(BUFF_TIE_GU_SU_DI); }
+            1 => {
+                player.add_buff(BUFF_TIE_GU);
+            }
+            2 => {
+                player.add_buff(BUFF_TIE_GU_SU_DI);
+            }
             _ => {}
         }
     }
@@ -5575,7 +6819,8 @@ async fn skill_damage(
     {
         let formations_table = state.formations.read().await;
         player.formation = req.formation.clone();
-        player.formation_permanent_slots = formation_permanent_effects(&req.formation, &formations_table);
+        player.formation_permanent_slots =
+            formation_permanent_effects(&req.formation, &formations_table);
         player.formation_self_id = resolve_formation_self_id(&req.formation, &formations_table);
     }
     let buff_slots = aggregate_buff_fields(&player);
@@ -5587,21 +6832,46 @@ async fn skill_damage(
     let level_suppression = calc_level_suppression(PLAYER_LEVEL, req.target.level);
 
     ensure_recipe_index(recipes_table);
-    let skill_results: Vec<SkillResult> = skills.iter().map(|s| {
-        let base_name = s.name.split('·').next().unwrap_or(&s.name);
-        let recipes = collect_recipes_indexed(&player, s.skill_id, base_name, &[], recipes_table);
-        // 奇穴/加速 动态覆盖 attack_coeff
-        if let Some(coeff) = scripts::override_attack_coeff(&player, s) {
-            let mut s2 = s.clone();
-            s2.attack_coeff = coeff;
-            calc_damage(&s2, &req.attributes, &req.target, &rt, &recipes, &buff_slots, &target_slots, player.constants.non_player_bonus)
-        } else {
-            calc_damage(s, &req.attributes, &req.target, &rt, &recipes, &buff_slots, &target_slots, player.constants.non_player_bonus)
-        }
-    }).collect();
+    let skill_results: Vec<SkillResult> = skills
+        .iter()
+        .map(|s| {
+            let base_name = s.name.split('·').next().unwrap_or(&s.name);
+            let recipes =
+                collect_recipes_indexed(&player, s.skill_id, base_name, &[], recipes_table);
+            // 奇穴/加速 动态覆盖 attack_coeff
+            if let Some(coeff) = scripts::override_attack_coeff(&player, s) {
+                let mut s2 = s.clone();
+                s2.attack_coeff = coeff;
+                calc_damage(
+                    &s2,
+                    &req.attributes,
+                    &req.target,
+                    &rt,
+                    &recipes,
+                    &buff_slots,
+                    &target_slots,
+                    player.constants.non_player_bonus,
+                )
+            } else {
+                calc_damage(
+                    s,
+                    &req.attributes,
+                    &req.target,
+                    &rt,
+                    &recipes,
+                    &buff_slots,
+                    &target_slots,
+                    player.constants.non_player_bonus,
+                )
+            }
+        })
+        .collect();
     let sd_elapsed = sd_start.elapsed();
-    println!("[skill_damage] {} skills | {:.1}ms elapsed",
-        skill_results.len(), sd_elapsed.as_secs_f64() * 1000.0);
+    println!(
+        "[skill_damage] {} skills | {:.1}ms elapsed",
+        skill_results.len(),
+        sd_elapsed.as_secs_f64() * 1000.0
+    );
     Json(SkillDamageResponse {
         base_defense_rate,
         level_suppression,
@@ -5613,13 +6883,13 @@ async fn skill_damage(
 
 #[derive(Serialize)]
 struct MountOption {
-    version:        String,  // 枚举序列化字符串，如 "ShanHaiYuanLiu"
-    version_dir:    String,  // 目录名，如 "2025_10_山海源流"
-    version_label:  String,  // 展示名，如 "山海源流（2025.10）"
-    mount:          String,  // 枚举序列化字符串，如 "FenShanJin"
-    mount_dir:      String,  // 目录名，如 "分山劲"
-    mount_label:    String,  // 展示名
-    class_name:     String,  // 心法所属门派，如 "苍云"
+    version: String,       // 枚举序列化字符串，如 "ShanHaiYuanLiu"
+    version_dir: String,   // 目录名，如 "2025_10_山海源流"
+    version_label: String, // 展示名，如 "山海源流（2025.10）"
+    mount: String,         // 枚举序列化字符串，如 "FenShanJin"
+    mount_dir: String,     // 目录名，如 "分山劲"
+    mount_label: String,   // 展示名
+    class_name: String,    // 心法所属门派，如 "苍云"
 }
 
 fn version_label(v: GameVersion) -> &'static str {
@@ -5644,8 +6914,11 @@ async fn list_mounts() -> impl IntoResponse {
     for v in all_versions() {
         for m in all_mounts() {
             // 只返回 school.toml 存在的 (version, mount) 组合（铁骨衣可能暂未填数据）
-            if !Path::new(&school_toml_path(v, m)).exists() { continue; }
-            let class = load_school_toml(v, m).ok()
+            if !Path::new(&school_toml_path(v, m)).exists() {
+                continue;
+            }
+            let class = load_school_toml(v, m)
+                .ok()
                 .and_then(|_| {
                     // 重新读一遍拿 class 字段（load_school_toml 目前丢了 class）
                     std::fs::read_to_string(school_toml_path(v, m)).ok()
@@ -5654,13 +6927,13 @@ async fn list_mounts() -> impl IntoResponse {
                 .and_then(|v| v.get("class").and_then(|c| c.as_str()).map(String::from))
                 .unwrap_or_else(|| "苍云".into());
             out.push(MountOption {
-                version:       format!("{:?}", v),
-                version_dir:   version_dir_name(v).to_string(),
+                version: format!("{:?}", v),
+                version_dir: version_dir_name(v).to_string(),
                 version_label: version_label(v).to_string(),
-                mount:         format!("{:?}", m),
-                mount_dir:     mount_dir_name(m).to_string(),
-                mount_label:   mount_dir_name(m).to_string(),
-                class_name:    class,
+                mount: format!("{:?}", m),
+                mount_dir: mount_dir_name(m).to_string(),
+                mount_label: mount_dir_name(m).to_string(),
+                class_name: class,
             });
         }
     }
@@ -5670,7 +6943,7 @@ async fn list_mounts() -> impl IntoResponse {
 #[derive(Deserialize)]
 struct SwitchMountRequest {
     version: GameVersion,
-    mount:   Mount,
+    mount: Mount,
     /// UI 切换默认持久化；测试可传 false，避免污染本地用户选择。
     #[serde(default = "default_true")]
     persist: bool,
@@ -5680,7 +6953,7 @@ struct SwitchMountRequest {
 struct SwitchMountResponse {
     ok: bool,
     error: Option<String>,
-    school_ui:  Option<SchoolUi>,
+    school_ui: Option<SchoolUi>,
     workflow_a: Option<WorkflowA>,
 }
 
@@ -5691,9 +6964,14 @@ async fn switch_mount(
     let _agent_context_guard = state.agent_context_gate.write().await;
     let (consts, base_stats, mount_conv, ui, wa) = match load_school_toml(req.version, req.mount) {
         Ok(v) => v,
-        Err(e) => return Json(SwitchMountResponse {
-            ok: false, error: Some(e), school_ui: None, workflow_a: None,
-        }),
+        Err(e) => {
+            return Json(SwitchMountResponse {
+                ok: false,
+                error: Some(e),
+                school_ui: None,
+                workflow_a: None,
+            })
+        }
     };
     let new_skills = load_skills(Path::new(&skills_dir(req.version, req.mount)));
     let new_talents = load_talents(Path::new(&talents_file(req.version, req.mount)));
@@ -5730,35 +7008,37 @@ async fn switch_mount(
     }
 
     Json(SwitchMountResponse {
-        ok: true, error: None,
-        school_ui: Some(ui), workflow_a: Some(wa),
+        ok: true,
+        error: None,
+        school_ui: Some(ui),
+        workflow_a: Some(wa),
     })
 }
 
 #[derive(Serialize)]
 struct CurrentMountInfo {
-    version:       String,
-    version_dir:   String,
+    version: String,
+    version_dir: String,
     version_label: String,
-    mount:         String,
-    mount_dir:     String,
-    mount_label:   String,
-    school_ui:     SchoolUi,
-    workflow_a:    WorkflowA,
+    mount: String,
+    mount_dir: String,
+    mount_label: String,
+    school_ui: SchoolUi,
+    workflow_a: WorkflowA,
 }
 
 async fn current_mount(State(state): State<SharedState>) -> impl IntoResponse {
     let v = *state.version.read().await;
     let m = *state.mount.read().await;
     Json(CurrentMountInfo {
-        version:       format!("{:?}", v),
-        version_dir:   version_dir_name(v).to_string(),
+        version: format!("{:?}", v),
+        version_dir: version_dir_name(v).to_string(),
         version_label: version_label(v).to_string(),
-        mount:         format!("{:?}", m),
-        mount_dir:     mount_dir_name(m).to_string(),
-        mount_label:   mount_dir_name(m).to_string(),
-        school_ui:     state.school_ui.read().await.clone(),
-        workflow_a:    state.workflow_a.read().await.clone(),
+        mount: format!("{:?}", m),
+        mount_dir: mount_dir_name(m).to_string(),
+        mount_label: mount_dir_name(m).to_string(),
+        school_ui: state.school_ui.read().await.clone(),
+        workflow_a: state.workflow_a.read().await.clone(),
     })
 }
 
@@ -5794,7 +7074,10 @@ async fn reload_skills(State(state): State<SharedState>) -> impl IntoResponse {
     );
     *state.skills.write().await = new_skills;
     *state.agent_provenance.write().await = new_agent_provenance;
-    Json(ReloadResult { loaded, skills: names })
+    Json(ReloadResult {
+        loaded,
+        skills: names,
+    })
 }
 
 async fn list_skills(State(state): State<SharedState>) -> impl IntoResponse {
@@ -5817,7 +7100,11 @@ async fn list_formations(State(state): State<SharedState>) -> impl IntoResponse 
 
 async fn list_recipes(State(state): State<SharedState>) -> impl IntoResponse {
     // 仅返回玩家可见秘籍（隐藏秘籍由 buff/脚本激活，不在 UI 显示）
-    let visible: Vec<RecipeEntry> = state.recipes.read().await.iter()
+    let visible: Vec<RecipeEntry> = state
+        .recipes
+        .read()
+        .await
+        .iter()
         .filter(|r| !r.hidden)
         .cloned()
         .collect();
@@ -5837,7 +7124,16 @@ async fn simulate(
     let formations_table = state.formations.read().await;
 
     let t_core_start = std::time::Instant::now();
-    let resp = simulate_core(&req, &skills, cur_version, cur_mount, cur_consts, &recipes_table, &team_buffs_table, &formations_table);
+    let resp = simulate_core(
+        &req,
+        &skills,
+        cur_version,
+        cur_mount,
+        cur_consts,
+        &recipes_table,
+        &team_buffs_table,
+        &formations_table,
+    );
     let t_core = t_core_start.elapsed();
 
     // 序列化 to Vec<u8> 计时（与 axum 实际写出一致的工作量）
@@ -5846,14 +7142,19 @@ async fn simulate(
     let t_serde = t_serde_start.elapsed();
 
     if !req.lite {
-        println!("[simulate] core={:.1}ms serde={:.1}ms (events={}, body={}KB)",
+        println!(
+            "[simulate] core={:.1}ms serde={:.1}ms (events={}, body={}KB)",
             t_core.as_secs_f64() * 1000.0,
             t_serde.as_secs_f64() * 1000.0,
             resp.timeline.len(),
-            body.len() / 1024);
+            body.len() / 1024
+        );
     }
 
-    ([(axum::http::header::CONTENT_TYPE, "application/json")], body)
+    (
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        body,
+    )
 }
 
 fn simulate_core(
@@ -5877,7 +7178,9 @@ fn simulate_core(
     // 跳过被动技能（passive=true），它们只用于伤害计算
     let mut skill_map: HashMap<&str, Vec<&SkillSpec>> = HashMap::new();
     for s in skills.iter() {
-        if s.passive { continue; }
+        if s.passive {
+            continue;
+        }
         // 雾海寻龙系列用完整名做 key（避免 "阵云结晦·雾海" 被拆成 "阵云结晦" 和旧版合并）
         let base = if s.skill_id >= 90010 && s.skill_id <= 90012 {
             &s.name as &str
@@ -5887,8 +7190,14 @@ fn simulate_core(
         skill_map.entry(base).or_default().push(s);
     }
 
-    let mut player = Player::with_mount(cur_mount, cur_version, cur_consts,
-        req.haste_level, req.talents.clone(), req.recipes.clone());
+    let mut player = Player::with_mount(
+        cur_mount,
+        cur_version,
+        cur_consts,
+        req.haste_level,
+        req.talents.clone(),
+        req.recipes.clone(),
+    );
     if let Some(rage) = req.initial_rage {
         player.set_rage(rage);
     }
@@ -5922,8 +7231,7 @@ fn simulate_core(
         let cd_frames = 192u32
             - if player.has_recipe(4005) { 16 } else { 0 }
             - if player.has_recipe(4006) { 16 } else { 0 };
-        let extra_prob =
-              if player.has_recipe(4007) { 0.05 } else { 0.0 }
+        let extra_prob = if player.has_recipe(4007) { 0.05 } else { 0.0 }
             + if player.has_recipe(4008) { 0.05 } else { 0.0 };
         player.dunya_cd = Some(DunyaCdState {
             cd_remain: 0.0,
@@ -5936,8 +7244,12 @@ fn simulate_core(
     // 铁骨气劲（仅铁骨衣）
     if player.mount == Mount::TieGuYi {
         match req.tiegu_mode {
-            1 => { player.add_buff(BUFF_TIE_GU); }
-            2 => { player.add_buff(BUFF_TIE_GU_SU_DI); }
+            1 => {
+                player.add_buff(BUFF_TIE_GU);
+            }
+            2 => {
+                player.add_buff(BUFF_TIE_GU_SU_DI);
+            }
             _ => {}
         }
     }
@@ -5956,21 +7268,27 @@ fn simulate_core(
     }
     // 阵法：永久 effects 预计算 + self/other 标识写入 player（aggregate_buff_fields 合并）
     player.formation = req.formation.clone();
-    player.formation_permanent_slots = formation_permanent_effects(&req.formation, formations_table);
+    player.formation_permanent_slots =
+        formation_permanent_effects(&req.formation, formations_table);
     player.formation_self_id = resolve_formation_self_id(&req.formation, formations_table);
 
     // 开战面板（t=0：永久 buff/团辅 已挂、阵法已注入 player.formation_permanent_slots、装备已 setup）
     // 消费 pending_team_buffs 中 release_at<=0 的项（永久型团辅）让永久 buff 在身
-    let (initial_stats, initial_buffs): (Option<CombatStats>, Vec<BuffSnapshot>) = if let Some(a) = req.attributes.as_ref() {
-        let _t0_events = player.process_buff_ticks(0.0, 0.0);
-        let buff_slots = aggregate_buff_fields(&player);
-        let stats = build_runtime_stats(a, &buff_slots, &player.constants);
-        // 同时取 t=0 时刻 buff 快照，供前端实时面板 hover"增益来源"用
-        let buffs = if req.lite { Vec::new() } else { snapshot_buffs(&player) };
-        (Some(stats), buffs)
-    } else {
-        (None, Vec::new())
-    };
+    let (initial_stats, initial_buffs): (Option<CombatStats>, Vec<BuffSnapshot>) =
+        if let Some(a) = req.attributes.as_ref() {
+            let _t0_events = player.process_buff_ticks(0.0, 0.0);
+            let buff_slots = aggregate_buff_fields(&player);
+            let stats = build_runtime_stats(a, &buff_slots, &player.constants);
+            // 同时取 t=0 时刻 buff 快照，供前端实时面板 hover"增益来源"用
+            let buffs = if req.lite {
+                Vec::new()
+            } else {
+                snapshot_buffs(&player)
+            };
+            (Some(stats), buffs)
+        } else {
+            (None, Vec::new())
+        };
 
     let delay_sec = req.network_delay as f64 / 1000.0;
 
@@ -5991,16 +7309,18 @@ fn simulate_core(
     let mut is_first_main = true;
 
     // 预解析宏配置（如果有宏文本）
-    let macro_config = req.macro_text.as_ref().and_then(|text| {
-        match macro_parser::parse_macro_text(text) {
-            Ok(c) => Some(c),
-            Err(e) => {
-                skipped.push((0, e.to_string()));
-                None
-            }
-        }
-    });
+    let macro_config =
+        req.macro_text
+            .as_ref()
+            .and_then(|text| match macro_parser::parse_macro_text(text) {
+                Ok(c) => Some(c),
+                Err(e) => {
+                    skipped.push((0, e.to_string()));
+                    None
+                }
+            });
     let mut macro_debug = Vec::new();
+    let mut macro_line_stats = Vec::new();
     let mut macro_last_skill: Option<String> = None;
 
     // ── 预释放预处理 ──
@@ -6011,7 +7331,8 @@ fn simulate_core(
     if !req.pre_releases.is_empty() {
         let mut order: Vec<usize> = (0..req.pre_releases.len()).collect();
         order.sort_by(|&a, &b| {
-            req.pre_releases[b].time_before
+            req.pre_releases[b]
+                .time_before
                 .partial_cmp(&req.pre_releases[a].time_before)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
@@ -6019,7 +7340,8 @@ fn simulate_core(
         // player 默认 current_time/channel_end/last_cast_time = 0.0，
         // next_cast_time 里 max(current_time, channel_end) 会把负数钳回 0 → 所有预释放都在 t=0 释放。
         // 初始化到最早的预释放时间点，让 cast_skill 在正确的负数时刻触发。
-        let earliest_t = order.iter()
+        let earliest_t = order
+            .iter()
             .map(|&i| req.pre_releases[i].time_before)
             .fold(0.0f64, f64::max);
         player.current_time = -earliest_t;
@@ -6028,7 +7350,9 @@ fn simulate_core(
 
         for &idx in &order {
             let p = &req.pre_releases[idx];
-            if p.time_before <= 0.0 { continue; }
+            if p.time_before <= 0.0 {
+                continue;
+            }
             let target = (-p.time_before).max(player.current_time);
             if target > player.current_time {
                 let _ = player.process_buff_ticks(player.current_time, target);
@@ -6046,7 +7370,9 @@ fn simulate_core(
                 continue;
             }
             let now = player.current_time;
-            if !skill.passive { player.start_swing(now); }
+            if !skill.passive {
+                player.start_swing(now);
+            }
             let _ = scripts::run_scripts(&mut player, skill, now);
             player.bump_decision_gen();
         }
@@ -6066,12 +7392,18 @@ fn simulate_core(
         if !player.lite_mode {
             let state = snapshot_event_state(&player);
             for inst in &player.active_buffs {
-                player.buff_events.entry(inst.buff_id).or_default()
-                    .push((0.0, "gain".into(), state.clone()));
+                player.buff_events.entry(inst.buff_id).or_default().push((
+                    0.0,
+                    "gain".into(),
+                    state.clone(),
+                ));
             }
             for inst in &player.target_buffs {
-                player.buff_events.entry(inst.buff_id).or_default()
-                    .push((0.0, "gain".into(), state.clone()));
+                player.buff_events.entry(inst.buff_id).or_default().push((
+                    0.0,
+                    "gain".into(),
+                    state.clone(),
+                ));
             }
         }
         is_first_main = false;
@@ -6087,11 +7419,21 @@ fn simulate_core(
 
         // 切姿态：跳过盾飞延迟 buff 剩余时间
         if name == "__切体态延迟中__" {
-            if let Some(delay) = player.active_buffs.iter().find(|b| b.buff_id == BUFF_DUN_FEI_DELAY) {
+            if let Some(delay) = player
+                .active_buffs
+                .iter()
+                .find(|b| b.buff_id == BUFF_DUN_FEI_DELAY)
+            {
                 let target_time = delay.expires_at;
                 if target_time > prev_time {
                     let mut tick_events = player.process_buff_ticks(prev_time, target_time);
-                    fill_tick_events(&mut tick_events, &skill_by_id, dmg_ctx.as_ref(), recipes_table, &player);
+                    fill_tick_events(
+                        &mut tick_events,
+                        &skill_by_id,
+                        dmg_ctx.as_ref(),
+                        recipes_table,
+                        &player,
+                    );
                     timeline.extend(tick_events);
                     prev_time = target_time;
                     player.current_time = target_time;
@@ -6102,7 +7444,11 @@ fn simulate_core(
 
         // 战绝回怒：推进到 战绝 buff 下一跳 tick 时刻（+100 怒）
         if name == "__战绝回怒__" {
-            if let Some(zj) = player.active_buffs.iter().find(|b| b.buff_id == BUFF_ZHAN_JUE) {
+            if let Some(zj) = player
+                .active_buffs
+                .iter()
+                .find(|b| b.buff_id == BUFF_ZHAN_JUE)
+            {
                 if let Some(def) = player.buff_def(BUFF_ZHAN_JUE) {
                     let start = zj.expires_at - frames_to_sec(zj.duration_frames);
                     let tick_sec = frames_to_sec(def.tick_interval);
@@ -6110,14 +7456,24 @@ fn simulate_core(
                         let elapsed = (player.current_time - start).max(0.0);
                         let k = (elapsed / tick_sec).floor();
                         (start + (k + 1.0) * tick_sec).min(zj.expires_at)
-                    } else { zj.expires_at };
+                    } else {
+                        zj.expires_at
+                    };
                     if target_time > prev_time {
                         let mut tick_events = player.process_buff_ticks(prev_time, target_time);
-                        fill_tick_events(&mut tick_events, &skill_by_id, dmg_ctx.as_ref(), recipes_table, &player);
+                        fill_tick_events(
+                            &mut tick_events,
+                            &skill_by_id,
+                            dmg_ctx.as_ref(),
+                            recipes_table,
+                            &player,
+                        );
                         timeline.extend(tick_events);
                         prev_time = target_time;
                         player.current_time = target_time;
-                        if target_time > last_cast_time { last_cast_time = target_time; }
+                        if target_time > last_cast_time {
+                            last_cast_time = target_time;
+                        }
                     }
                 }
             }
@@ -6151,27 +7507,45 @@ fn simulate_core(
             if let Some(ref config) = macro_config {
                 // 从 timeline 取 last_skill（若 macro_last_skill 已有则用它）
                 if macro_last_skill.is_none() {
-                    macro_last_skill = timeline.iter().rev()
+                    macro_last_skill = timeline
+                        .iter()
+                        .rev()
                         .find(|e| !e.triggered)
                         .map(|e| e.name.split('·').next().unwrap_or(&e.name).to_string());
                 }
-                let (macro_tl, debug) = macro_eval::simulate_macro(
-                    config, &mut player, &skill_map,
-                    1, req.macro_duration.unwrap_or(3600.0), delay_sec,
-                    &mut prev_time, &mut is_first_main, macro_last_skill.clone(),
-                    dmg_ctx.as_ref(), recipes_table, &skill_by_id,
+                let (macro_tl, debug, line_stats) = macro_eval::simulate_macro(
+                    config,
+                    &mut player,
+                    &skill_map,
+                    1,
+                    req.macro_duration.unwrap_or(3600.0),
+                    delay_sec,
+                    &mut prev_time,
+                    &mut is_first_main,
+                    macro_last_skill.clone(),
+                    dmg_ctx.as_ref(),
+                    recipes_table,
+                    &skill_by_id,
                     &req.pauses,
                 );
                 if let Some(last) = macro_tl.iter().rev().find(|e| !e.triggered) {
-                    macro_last_skill = Some(last.name.split('·').next()
-                        .unwrap_or(&last.name).to_string());
+                    macro_last_skill = Some(
+                        last.name
+                            .split('·')
+                            .next()
+                            .unwrap_or(&last.name)
+                            .to_string(),
+                    );
                 }
                 // 宏模拟的"战斗用时"按实际模拟推进到的时刻算（含末尾空闲/channel），
                 // 但 clamp 到 macro_duration —— 否则 simulate_macro break 时 current_time 略超 max_duration
                 // 会让 fight_time 比固化路径（fight_time = macro_duration）多 0.x 秒。
-                last_cast_time = player.current_time.min(req.macro_duration.unwrap_or(f64::INFINITY));
+                last_cast_time = player
+                    .current_time
+                    .min(req.macro_duration.unwrap_or(f64::INFINITY));
                 timeline.extend(macro_tl);
                 macro_debug.extend(debug);
+                macro_eval::merge_line_execution_stats(&mut macro_line_stats, line_stats);
             }
             continue;
         }
@@ -6190,79 +7564,124 @@ fn simulate_core(
                 None => {
                     // 盾飞延迟等待：技能需要刀姿态但 GCD 不覆盖延迟 → 推进到延迟到期后重试
                     let has_blade_rank = ranks.iter().any(|s| s.stance == Stance::Blade);
-                    let delay_end = player.active_buffs.iter()
-                        .find(|b| b.buff_id == BUFF_DUN_FEI_DELAY && b.expires_at > player.current_time)
+                    let delay_end = player
+                        .active_buffs
+                        .iter()
+                        .find(|b| {
+                            b.buff_id == BUFF_DUN_FEI_DELAY && b.expires_at > player.current_time
+                        })
                         .map(|b| b.expires_at);
                     if has_blade_rank && delay_end.is_some() {
                         let target = delay_end.unwrap();
-                        let mut tick_events = player.process_buff_ticks(player.current_time, target);
-                        fill_tick_events(&mut tick_events, &skill_by_id, dmg_ctx.as_ref(), recipes_table, &player);
+                        let mut tick_events =
+                            player.process_buff_ticks(player.current_time, target);
+                        fill_tick_events(
+                            &mut tick_events,
+                            &skill_by_id,
+                            dmg_ctx.as_ref(),
+                            recipes_table,
+                            &player,
+                        );
                         timeline.extend(tick_events);
                         prev_time = target;
                         player.current_time = target;
                         // 姿态延迟是不可调节的硬等待，纳入 last_cast_time 让 cast_skill
                         // 的 base_time 包含它 → cd_wait 不会把这段等待计入（不显示红色角标）
-                        if target > last_cast_time { last_cast_time = target; }
-                        if target > player.last_cast_time { player.last_cast_time = target; }
+                        if target > last_cast_time {
+                            last_cast_time = target;
+                        }
+                        if target > player.last_cast_time {
+                            player.last_cast_time = target;
+                        }
                         match player.pick_rank(ranks) {
                             Some(s) => s,
                             None => {
-                                if was_channeling { player.channel_end = original_channel_end; }
-                                let reasons: Vec<String> = ranks.iter()
+                                if was_channeling {
+                                    player.channel_end = original_channel_end;
+                                }
+                                let reasons: Vec<String> = ranks
+                                    .iter()
                                     .filter_map(|s| player.reject_reason(s))
                                     .collect();
-                                let reason = if reasons.is_empty() { "未知原因".into() }
-                                    else { reasons.join("; ") };
+                                let reason = if reasons.is_empty() {
+                                    "未知原因".into()
+                                } else {
+                                    reasons.join("; ")
+                                };
                                 skipped.push((seq_idx, reason));
                                 continue;
                             }
                         }
                     } else {
-                        if was_channeling { player.channel_end = original_channel_end; }
-                        let reasons: Vec<String> = ranks.iter()
+                        if was_channeling {
+                            player.channel_end = original_channel_end;
+                        }
+                        let reasons: Vec<String> = ranks
+                            .iter()
                             .filter_map(|s| player.reject_reason(s))
                             .collect();
-                        let reason = if reasons.is_empty() { "未知原因".into() }
-                            else { reasons.join("; ") };
+                        let reason = if reasons.is_empty() {
+                            "未知原因".into()
+                        } else {
+                            reasons.join("; ")
+                        };
                         skipped.push((seq_idx, reason));
                         continue;
                     }
                 }
             };
 
-            let raw_timing = req.timing_offsets
-                .get(&seq_idx.to_string())
-                .copied();
+            let raw_timing = req.timing_offsets.get(&seq_idx.to_string()).copied();
             // -1 = "跟随最大值"标记：用户选了 GCD 窗口末尾，加速变化时自动跟随
             let is_timing_max = raw_timing.map_or(false, |t| t < 0.0);
-            let timing_offset = if is_timing_max { None } else { raw_timing.filter(|&t| t > 0.0) };
+            let timing_offset = if is_timing_max {
+                None
+            } else {
+                raw_timing.filter(|&t| t > 0.0)
+            };
 
             // GCD 窗口（非主 GCD 技能可在此窗口内偏移释放时间）
             let auto_max_offset = if !skill_is_main(skill) {
                 let earliest = player.next_cast_time(skill);
-                let gcd_end = player.active_cds.iter()
+                let gcd_end = player
+                    .active_cds
+                    .iter()
                     .filter(|(k, _)| k.starts_with("gcd_"))
                     .map(|(_, &v)| v)
                     .fold(0.0_f64, f64::max);
                 (gcd_end - earliest).max(0.0)
-            } else { 0.0 };
+            } else {
+                0.0
+            };
             // -1 = "跟随最大值"：非主 GCD 技能自动取 GCD 窗口末尾
             let timing_offset = if is_timing_max && auto_max_offset > 0.01 {
                 Some(auto_max_offset)
-            } else { timing_offset };
+            } else {
+                timing_offset
+            };
 
-            let skill_delay = if skill_is_main(skill) && !is_first_main { delay_sec } else { 0.0 };
+            let skill_delay = if skill_is_main(skill) && !is_first_main {
+                delay_sec
+            } else {
+                0.0
+            };
 
             let est_time = player.estimate_cast_time(skill, timing_offset, skill_delay);
 
             // 打断引导：用 est_time 算实际跳数 + 修正 timeline/怒气
             if was_channeling && est_time < original_channel_end - 0.001 {
                 let (old_ticks, actual_ticks) = player.interrupt_channel(est_time);
-                if let Some(ev) = timeline.iter_mut().rev().find(|e| e.skill_id == channel_skill_id && !e.triggered) {
+                if let Some(ev) = timeline
+                    .iter_mut()
+                    .rev()
+                    .find(|e| e.skill_id == channel_skill_id && !e.triggered)
+                {
                     ev.channel_ticks = Some(actual_ticks);
                     let interval = frames_to_sec(player.channel_interval_frame);
                     let first = frames_to_sec(player.channel_first_frame);
-                    ev.channel_duration = Some(if actual_ticks <= 1 { first } else {
+                    ev.channel_duration = Some(if actual_ticks <= 1 {
+                        first
+                    } else {
                         first + (actual_ticks - 1) as f64 * interval
                     });
                 }
@@ -6279,13 +7698,23 @@ fn simulate_core(
 
             // 盾飞延迟：记录到期时间（process_buff_ticks 会消耗 buff，cast_skill 里查不到）
             let stance_delay_end = if skill.stance == Stance::Blade {
-                player.active_buffs.iter()
+                player
+                    .active_buffs
+                    .iter()
                     .find(|b| b.buff_id == BUFF_DUN_FEI_DELAY && b.expires_at > player.current_time)
                     .map(|b| b.expires_at)
-            } else { None };
+            } else {
+                None
+            };
 
             let mut tick_events = player.process_buff_ticks(prev_time, est_time);
-            fill_tick_events(&mut tick_events, &skill_by_id, dmg_ctx.as_ref(), recipes_table, &player);
+            fill_tick_events(
+                &mut tick_events,
+                &skill_by_id,
+                dmg_ctx.as_ref(),
+                recipes_table,
+                &player,
+            );
             timeline.extend(tick_events);
             prev_time = est_time;
             // process_buff_ticks 内部会把 current_time 推到中间 tick/hit 时刻；显式 set 到 est_time
@@ -6296,7 +7725,8 @@ fn simulate_core(
             let skill = match player.pick_rank(ranks) {
                 Some(s) => s,
                 None => {
-                    let reason = ranks.iter()
+                    let reason = ranks
+                        .iter()
                         .filter_map(|s| player.reject_reason(s))
                         .next()
                         .unwrap_or_else(|| "Buff到期后状态不满足".into());
@@ -6306,22 +7736,46 @@ fn simulate_core(
             };
             // combo_follow：序列写阵云结晦，按连招状态自动重定向到二/三段
             let skill = resolve_combo_follow(skill, &player, &skill_by_id).unwrap_or(skill);
-            let override_ticks = req.channel_ticks
+            let override_ticks = req
+                .channel_ticks
                 .get(&seq_idx.to_string())
                 .copied()
                 .filter(|&t| t > 0);
-            let state_before = if req.lite { None } else { Some(snapshot_event_state(&player)) };
+            let state_before = if req.lite {
+                None
+            } else {
+                Some(snapshot_event_state(&player))
+            };
             let rage_before = player.rage;
+            let rage_overflow_before = player.rage_overflow_total;
+            player.rage_overflow_sources_current.clear();
+            player.rage_transactions_current.clear();
+            player.rage_generated_current = 0;
+            player.rage_gained_current = 0;
+            player.rage_spent_current = 0;
             // current_time 已 set 到 est_time（含 offset + 网络延迟）；cast_skill 不再传 offset / delay，
             // 否则 cast_time = (est_time) + offset/delay 会被重复叠加。
-            let (cast_time, mut cd_wait, ch_ticks, ch_max, ch_dur, _applied_offset_unused, _ret_max_offset_unused) =
-                match player.cast_skill(skill, override_ticks, None, 0.0, 0.0) {
+            let (
+                cast_time,
+                mut cd_wait,
+                ch_ticks,
+                ch_max,
+                ch_dur,
+                _applied_offset_unused,
+                _ret_max_offset_unused,
+            ) = match player.cast_skill(skill, override_ticks, None, 0.0, 0.0) {
                 Some(r) => {
                     // cast_time 可能 > est_time；补一次 process_buff_ticks 覆盖缝隙
                     if player.current_time > prev_time {
                         let mut gap = player.process_buff_ticks(prev_time, player.current_time);
                         if !gap.is_empty() {
-                            fill_tick_events(&mut gap, &skill_by_id, dmg_ctx.as_ref(), recipes_table, &player);
+                            fill_tick_events(
+                                &mut gap,
+                                &skill_by_id,
+                                dmg_ctx.as_ref(),
+                                recipes_table,
+                                &player,
+                            );
                         }
                         timeline.extend(gap);
                         prev_time = player.current_time;
@@ -6329,7 +7783,9 @@ fn simulate_core(
                     r
                 }
                 None => {
-                    let reason = player.reject_reason(skill).unwrap_or_else(|| "释放条件不满足".into());
+                    let reason = player
+                        .reject_reason(skill)
+                        .unwrap_or_else(|| "释放条件不满足".into());
                     skipped.push((seq_idx, reason));
                     continue;
                 }
@@ -6341,24 +7797,50 @@ fn simulate_core(
             }
             // 网络延迟不计入 cd_wait（已知固定开销，不显示红色角标）
             cd_wait = (cd_wait - skill_delay).max(0.0);
-            if skill_is_main(skill) { is_first_main = false; }
+            if skill_is_main(skill) {
+                is_first_main = false;
+            }
             // 启动卷雪刀循环（首次主动技能）
-            if !skill.passive { player.start_swing(cast_time); }
+            if !skill.passive {
+                player.start_swing(cast_time);
+            }
 
             let qijin_snap = if skill.skill_id == 90001 {
-                Some(snapshot_buff_list(&player.active_buffs, player.current_time, false, player.version)
-                    .into_iter().filter(|b| !b.is_debuff).collect::<Vec<_>>())
-            } else { None };
+                Some(
+                    snapshot_buff_list(
+                        &player.active_buffs,
+                        player.current_time,
+                        false,
+                        player.version,
+                    )
+                    .into_iter()
+                    .filter(|b| !b.is_debuff)
+                    .collect::<Vec<_>>(),
+                )
+            } else {
+                None
+            };
 
             let cost = player.last_rage_cost;
             // 释放前根据技能/怒气 决定瞬时附加的秘籍（如绝刀怒气段，破招段共享）
             let runtime_recipes = compute_runtime_recipes(skill, &player);
             // 释放主动技能的伤害（在脚本前算，使用当前 buff 状态）
-            let (dmg, dmg_normal, dmg_crit, dmg_total, rt_snap) = if let Some((ref a, ref t)) = dmg_ctx {
+            let (dmg, dmg_normal, dmg_crit, dmg_total, rt_snap) = if let Some((ref a, ref t)) =
+                dmg_ctx
+            {
                 let ticks = ch_ticks.unwrap_or(1);
-                let (r, dt, rt) = calc_event_damage(skill, a, t, &player, &runtime_recipes, recipes_table, ticks);
-                (Some(r.expected_damage), Some(r.normal_damage), Some(r.crit_damage), Some(dt), Some(rt))
-            } else { (None, None, None, None, None) };
+                let (r, dt, rt) =
+                    calc_event_damage(skill, a, t, &player, &runtime_recipes, recipes_table, ticks);
+                (
+                    Some(r.expected_damage),
+                    Some(r.normal_damage),
+                    Some(r.crit_damage),
+                    Some(dt),
+                    Some(rt),
+                )
+            } else {
+                (None, None, None, None, None)
+            };
             // 执行脚本（盾舞怒气回复、狂绝返还、emit 破招段等）
             let em = scripts::run_scripts(&mut player, skill, cast_time);
             // 脚本里可能直写 player.rage / inst.stacks 等绕过 helper —— 边界 bump 兜底
@@ -6374,36 +7856,107 @@ fn simulate_core(
             if skill.skill_id == 13054 {
                 if let Some((ref a, _)) = dmg_ctx {
                     let snap = capture_dot_snapshot(a, &player, 13054, "斩刀", recipes_table);
-                    if let Some(inst) = player.target_buffs.iter_mut().find(|b| b.buff_id == BUFF_LIU_XUE) {
+                    if let Some(inst) = player
+                        .target_buffs
+                        .iter_mut()
+                        .find(|b| b.buff_id == BUFF_LIU_XUE)
+                    {
                         inst.snapshot = Some(snap);
                     }
                 }
             }
             let rage_delta = player.rage - rage_before;
+            let rage_overflow = player
+                .rage_overflow_total
+                .saturating_sub(rage_overflow_before);
+            let rage_overflow_sources = player
+                .rage_overflow_sources_current
+                .iter()
+                .map(|(source, amount)| RageOverflowCause {
+                    source: source.clone(),
+                    amount: *amount,
+                })
+                .collect::<Vec<_>>();
+            let rage_transactions = player.rage_transactions_current.clone();
+            let rage_generated = player.rage_generated_current;
+            let rage_gained = player.rage_gained_current;
+            let rage_spent = player.rage_spent_current;
             let has_rage_effect = rage_delta != 0 || cost > 0 || skill.rage_gain > 0;
 
             // 主事件重写：阵云母技能等按 override 确定名称/伤害
-            let (event_name, final_dmg, final_dmg_n, final_dmg_c, final_dmg_t, final_rt, eff_recipes) =
-                if let Some((ref ov_name, ov_id)) = primary_override {
-                    if let (Some((ref a, ref t_cfg)), Some(ov_spec)) =
-                        (&dmg_ctx, skill_by_id.get(&ov_id).copied())
-                    {
-                        let ticks = ch_ticks.unwrap_or(1);
-                        let ov_recipes = compute_runtime_recipes(ov_spec, &player);
-                        let (r, dt, rt2) = calc_event_damage(ov_spec, a, t_cfg, &player, &ov_recipes, recipes_table, ticks);
-                        (ov_name.clone(), Some(r.expected_damage), Some(r.normal_damage), Some(r.crit_damage), Some(dt), Some(rt2), ov_recipes)
-                    } else {
-                        (ov_name.clone(), dmg, dmg_normal, dmg_crit, dmg_total, rt_snap, runtime_recipes.clone())
-                    }
-                } else if skill.skill_id == 13055 {
-                    let name = if cost == 0 { "绝刀·免耗".to_string() } else { format!("绝刀·{}怒", cost) };
-                    (name, dmg, dmg_normal, dmg_crit, dmg_total, rt_snap, runtime_recipes.clone())
+            let (
+                event_name,
+                final_dmg,
+                final_dmg_n,
+                final_dmg_c,
+                final_dmg_t,
+                final_rt,
+                eff_recipes,
+            ) = if let Some((ref ov_name, ov_id)) = primary_override {
+                if let (Some((ref a, ref t_cfg)), Some(ov_spec)) =
+                    (&dmg_ctx, skill_by_id.get(&ov_id).copied())
+                {
+                    let ticks = ch_ticks.unwrap_or(1);
+                    let ov_recipes = compute_runtime_recipes(ov_spec, &player);
+                    let (r, dt, rt2) = calc_event_damage(
+                        ov_spec,
+                        a,
+                        t_cfg,
+                        &player,
+                        &ov_recipes,
+                        recipes_table,
+                        ticks,
+                    );
+                    (
+                        ov_name.clone(),
+                        Some(r.expected_damage),
+                        Some(r.normal_damage),
+                        Some(r.crit_damage),
+                        Some(dt),
+                        Some(rt2),
+                        ov_recipes,
+                    )
                 } else {
-                    (skill.name.clone(), dmg, dmg_normal, dmg_crit, dmg_total, rt_snap, runtime_recipes.clone())
+                    (
+                        ov_name.clone(),
+                        dmg,
+                        dmg_normal,
+                        dmg_crit,
+                        dmg_total,
+                        rt_snap,
+                        runtime_recipes.clone(),
+                    )
+                }
+            } else if skill.skill_id == 13055 {
+                let name = if cost == 0 {
+                    "绝刀·免耗".to_string()
+                } else {
+                    format!("绝刀·{}怒", cost)
                 };
+                (
+                    name,
+                    dmg,
+                    dmg_normal,
+                    dmg_crit,
+                    dmg_total,
+                    rt_snap,
+                    runtime_recipes.clone(),
+                )
+            } else {
+                (
+                    skill.name.clone(),
+                    dmg,
+                    dmg_normal,
+                    dmg_crit,
+                    dmg_total,
+                    rt_snap,
+                    runtime_recipes.clone(),
+                )
+            };
 
-            timeline.push(CastEvent {
-                name: event_name,
+           timeline.push(CastEvent {
+                sequence_index: Some(seq_idx),
+               name: event_name,
                 skill_id: skill.skill_id,
                 cast_time,
                 triggered: false,
@@ -6414,31 +7967,76 @@ fn simulate_core(
                 max_channel_ticks: ch_max,
                 channel_duration: ch_dur,
                 timing_offset: timing_offset.filter(|&o| o > 0.001),
-                max_timing_offset: if auto_max_offset > 0.01 { Some(auto_max_offset) } else { None },
+                max_timing_offset: if auto_max_offset > 0.01 {
+                    Some(auto_max_offset)
+                } else {
+                    None
+                },
                 available_buffs: qijin_snap,
                 is_macro: false,
-                rage_after: if has_rage_effect { Some(player.rage) } else { None },
-                rage_delta: if has_rage_effect { Some(rage_delta) } else { None },
+                macro_page: None,
+                macro_line: None,
+                rage_after: if has_rage_effect {
+                    Some(player.rage)
+                } else {
+                    None
+                },
+                rage_delta: if has_rage_effect {
+                    Some(rage_delta)
+                } else {
+                    None
+                },
+                rage_overflow: (rage_overflow > 0).then_some(rage_overflow),
+                rage_overflow_sources,
+                rage_transactions,
+                rage_generated: (rage_generated > 0).then_some(rage_generated),
+                rage_gained: (rage_gained > 0).then_some(rage_gained),
+                rage_spent: (rage_spent > 0).then_some(rage_spent),
                 rage_cost: if cost > 0 { Some(cost) } else { None },
                 state_before,
-                state_after: if req.lite { None } else { Some(snapshot_event_state(&player)) },
+                state_after: if req.lite {
+                    None
+                } else {
+                    Some(snapshot_event_state(&player))
+                },
                 damage: final_dmg,
                 damage_normal: final_dmg_n,
-                damage_crit:   final_dmg_c,
+                damage_crit: final_dmg_c,
                 damage_total: final_dmg_t,
-                runtime_recipes: if req.lite { Vec::new() } else { eff_recipes.clone() },
+                runtime_recipes: if req.lite {
+                    Vec::new()
+                } else {
+                    eff_recipes.clone()
+                },
                 runtime_stats: if req.lite { None } else { final_rt.clone() },
                 override_attack_coeff: None,
-                applied_recipes: if req.lite { Vec::new() } else {
+                applied_recipes: if req.lite {
+                    Vec::new()
+                } else {
                     // 收集本次主事件实际激活的秘籍 ID（含奇穴常驻、buff 激活、装备激活、套装、用户配）
                     let base_name = skill.name.split('·').next().unwrap_or(&skill.name);
-                    collect_recipes_indexed(&player, skill.skill_id, base_name, &eff_recipes, recipes_table)
-                        .iter().map(|r| r.id).collect()
+                    collect_recipes_indexed(
+                        &player,
+                        skill.skill_id,
+                        base_name,
+                        &eff_recipes,
+                        recipes_table,
+                    )
+                    .iter()
+                    .map(|r| r.id)
+                    .collect()
                 },
             });
             // 给触发事件（脚本 emit 出来的）补伤害；破招段共享子技能的秘籍
             for mut ev in extra {
-                fill_event_damage(&mut ev, &skill_by_id, dmg_ctx.as_ref(), recipes_table, &player, &eff_recipes);
+                fill_event_damage(
+                    &mut ev,
+                    &skill_by_id,
+                    dmg_ctx.as_ref(),
+                    recipes_table,
+                    &player,
+                    &eff_recipes,
+                );
                 timeline.push(ev);
             }
             if skill.skill_id == 90001 {
@@ -6452,13 +8050,25 @@ fn simulate_core(
                 }
             }
             let mut advance_events = player.flush_advance();
-            fill_tick_events(&mut advance_events, &skill_by_id, dmg_ctx.as_ref(), recipes_table, &player);
+            fill_tick_events(
+                &mut advance_events,
+                &skill_by_id,
+                dmg_ctx.as_ref(),
+                recipes_table,
+                &player,
+            );
             timeline.extend(advance_events);
             prev_time = player.current_time;
             last_cast_time = player.current_time;
             // 手动技能释放后重置 macro_last_skill
-            macro_last_skill = Some(skill.name.split('·').next()
-                .unwrap_or(&skill.name).to_string());
+            macro_last_skill = Some(
+                skill
+                    .name
+                    .split('·')
+                    .next()
+                    .unwrap_or(&skill.name)
+                    .to_string(),
+            );
         } else {
             skipped.push((seq_idx, format!("未知技能: {}", name)));
         }
@@ -6482,10 +8092,20 @@ fn simulate_core(
     // ── buff 区快照：在 process_buff_ticks(...,fight_time) 之前取 ──
     // 否则推进到 fight_time（如 300s）后所有非永久 buff 都过期，buff 列表只剩永久站立 buff（如大附魔）。
     // 此时 player.current_time 还是 prev_time（最后一次主动 cast 完成时刻），刚好是用户期望的 buff 状态。
-    let buffs_snapshot = if req.lite { Vec::new() } else { snapshot_buffs(&player) };
+    let buffs_snapshot = if req.lite {
+        Vec::new()
+    } else {
+        snapshot_buffs(&player)
+    };
 
     let mut final_ticks = player.process_buff_ticks(prev_time, fight_time);
-    fill_tick_events(&mut final_ticks, &skill_by_id, dmg_ctx.as_ref(), recipes_table, &player);
+    fill_tick_events(
+        &mut final_ticks,
+        &skill_by_id,
+        dmg_ctx.as_ref(),
+        recipes_table,
+        &player,
+    );
     timeline.extend(final_ticks);
     player.current_time = fight_time; // 推进到战斗结束时刻，确保 skill_cds 等计算正确
 
@@ -6502,8 +8122,11 @@ fn simulate_core(
     let buffs = buffs_snapshot;
 
     // 计算当前状态下可施展的技能
-    let available_skills: Vec<String> = if req.lite { Vec::new() } else {
-        skill_map.iter()
+    let available_skills: Vec<String> = if req.lite {
+        Vec::new()
+    } else {
+        skill_map
+            .iter()
             .filter(|(_, ranks)| player.pick_rank(ranks).is_some())
             .map(|(&name, _)| name.to_string())
             .collect()
@@ -6513,85 +8136,116 @@ fn simulate_core(
     let mut skill_cds: HashMap<String, f64> = HashMap::new();
     let cur_t = player.current_time;
     if !req.lite {
-    for (&base_name, ranks) in &skill_map {
-        for skill in ranks {
-            // 充能技能：显示下一层恢复时间
-            if skill.max_charges > 0 {
-                let remaining = player.charge_remaining(skill);
-                if remaining > 0.01 {
-                    skill_cds.insert(base_name.to_string(), remaining);
-                }
-            } else {
-                // 非充能技能：显示技能 CD
-                for cd in &skill.cooldowns {
-                    if cd.cd_id.starts_with("gcd_") { continue; }
-                    if let Some(&expires) = player.active_cds.get(&cd.cd_id) {
-                        let remaining = (expires - cur_t).max(0.0);
-                        if remaining > 0.01 {
-                            let entry = skill_cds.entry(base_name.to_string()).or_insert(0.0);
-                            if remaining > *entry { *entry = remaining; }
+        for (&base_name, ranks) in &skill_map {
+            for skill in ranks {
+                // 充能技能：显示下一层恢复时间
+                if skill.max_charges > 0 {
+                    let remaining = player.charge_remaining(skill);
+                    if remaining > 0.01 {
+                        skill_cds.insert(base_name.to_string(), remaining);
+                    }
+                } else {
+                    // 非充能技能：显示技能 CD
+                    for cd in &skill.cooldowns {
+                        if cd.cd_id.starts_with("gcd_") {
+                            continue;
+                        }
+                        if let Some(&expires) = player.active_cds.get(&cd.cd_id) {
+                            let remaining = (expires - cur_t).max(0.0);
+                            if remaining > 0.01 {
+                                let entry = skill_cds.entry(base_name.to_string()).or_insert(0.0);
+                                if remaining > *entry {
+                                    *entry = remaining;
+                                }
+                            }
                         }
                     }
                 }
+                break;
             }
-            break;
         }
-    }
-
     } // end if !req.lite (skill_cds)
 
     // 各技能充能层数
     let mut skill_charges: HashMap<String, u32> = HashMap::new();
     if !req.lite {
-    for (&base_name, ranks) in &skill_map {
-        if let Some(skill) = ranks.first() {
-            if skill.max_charges > 0 {
-                if let Some(ch) = player.get_charges(skill) {
-                    skill_charges.insert(base_name.to_string(), ch);
+        for (&base_name, ranks) in &skill_map {
+            if let Some(skill) = ranks.first() {
+                if skill.max_charges > 0 {
+                    if let Some(ch) = player.get_charges(skill) {
+                        skill_charges.insert(base_name.to_string(), ch);
+                    }
                 }
             }
         }
-    }
     } // end if !req.lite (skill_charges)
 
     // 构建 buff 时间轴轨道
     // 构建 buff 时间轴轨道（仅 show_on_timeline=true，渲染用）
-    let mut buff_tracks: Vec<(u32, BuffTimelineTrack)> = if req.lite { Vec::new() } else { player.buff_events.iter()
-        .filter_map(|(&bid, events)| {
-            let def = player.buff_def(bid)?;
-            if !def.show_on_timeline { return None; }
-            Some((def.timeline_order, BuffTimelineTrack {
-                buff_id: bid,
-                name: def.name.to_string(),
-                short_name: def.short_name.unwrap_or(def.name).to_string(),
-                // 颜色由前端 renderBuffTimeline 按顺序自动生成，这里占位即可
-                color: String::new(),
-                events: events.iter().map(|(t, ty, st)| BuffTimelineEvent {
-                    time: *t, event_type: ty.clone(), state: Some(st.clone()),
-                }).collect(),
-            }))
-        })
-        .collect()
+    let mut buff_tracks: Vec<(u32, BuffTimelineTrack)> = if req.lite {
+        Vec::new()
+    } else {
+        player
+            .buff_events
+            .iter()
+            .filter_map(|(&bid, events)| {
+                let def = player.buff_def(bid)?;
+                if !def.show_on_timeline {
+                    return None;
+                }
+                Some((
+                    def.timeline_order,
+                    BuffTimelineTrack {
+                        buff_id: bid,
+                        name: def.name.to_string(),
+                        short_name: def.short_name.unwrap_or(def.name).to_string(),
+                        // 颜色由前端 renderBuffTimeline 按顺序自动生成，这里占位即可
+                        color: String::new(),
+                        events: events
+                            .iter()
+                            .map(|(t, ty, st)| BuffTimelineEvent {
+                                time: *t,
+                                event_type: ty.clone(),
+                                state: Some(st.clone()),
+                            })
+                            .collect(),
+                    },
+                ))
+            })
+            .collect()
     };
     buff_tracks.sort_by_key(|(order, _)| *order);
     let buff_timeline: Vec<BuffTimelineTrack> = buff_tracks.into_iter().map(|(_, t)| t).collect();
 
     // 战斗记录 log 专用：含所有 buff 事件（包括 show_on_timeline=false 的，如神兵·无双气劲）
     // 前端战斗记录弹窗 (btn_history) 用这个字段；buff_timeline 仅用于轨道渲染
-    let mut buff_log_tracks: Vec<(u32, BuffTimelineTrack)> = if req.lite { Vec::new() } else { player.buff_events.iter()
-        .filter_map(|(&bid, events)| {
-            let def = player.buff_def(bid)?;
-            Some((def.timeline_order, BuffTimelineTrack {
-                buff_id: bid,
-                name: def.name.to_string(),
-                short_name: def.short_name.unwrap_or(def.name).to_string(),
-                color: String::new(),
-                events: events.iter().map(|(t, ty, st)| BuffTimelineEvent {
-                    time: *t, event_type: ty.clone(), state: Some(st.clone()),
-                }).collect(),
-            }))
-        })
-        .collect()
+    let mut buff_log_tracks: Vec<(u32, BuffTimelineTrack)> = if req.lite {
+        Vec::new()
+    } else {
+        player
+            .buff_events
+            .iter()
+            .filter_map(|(&bid, events)| {
+                let def = player.buff_def(bid)?;
+                Some((
+                    def.timeline_order,
+                    BuffTimelineTrack {
+                        buff_id: bid,
+                        name: def.name.to_string(),
+                        short_name: def.short_name.unwrap_or(def.name).to_string(),
+                        color: String::new(),
+                        events: events
+                            .iter()
+                            .map(|(t, ty, st)| BuffTimelineEvent {
+                                time: *t,
+                                event_type: ty.clone(),
+                                state: Some(st.clone()),
+                            })
+                            .collect(),
+                    },
+                ))
+            })
+            .collect()
     };
     buff_log_tracks.sort_by_key(|(order, _)| *order);
     let buff_log: Vec<BuffTimelineTrack> = buff_log_tracks.into_iter().map(|(_, t)| t).collect();
@@ -6609,16 +8263,30 @@ fn simulate_core(
         }
         let mut meta = HashMap::new();
         for r in recipes_table.iter() {
-            if !used.contains(&r.id) { continue; }
+            if !used.contains(&r.id) {
+                continue;
+            }
             // 拼简短描述：name + 关键 pct（如有）
             let mut tag = r.name.clone();
             let mut deltas: Vec<String> = Vec::new();
-            if r.damage_pct != 0.0 { deltas.push(format!("伤害+{:.0}%", r.damage_pct * 100.0)); }
-            if r.critical_pct != 0.0 { deltas.push(format!("会心+{:.1}%", r.critical_pct * 100.0)); }
-            if r.crit_eff_pct != 0.0 { deltas.push(format!("会效+{:.1}%", r.crit_eff_pct * 100.0)); }
-            if r.surplus_pct != 0.0 { deltas.push(format!("破招+{:.0}%", r.surplus_pct * 100.0)); }
-            if r.shield_ignore != 0.0 { deltas.push(format!("无视防御+{:.1}%", r.shield_ignore / 1024.0 * 100.0)); }
-            if r.pve_addition != 0.0 { deltas.push(format!("非侠士+{:.0}%", r.pve_addition * 100.0)); }
+            if r.damage_pct != 0.0 {
+                deltas.push(format!("伤害+{:.0}%", r.damage_pct * 100.0));
+            }
+            if r.critical_pct != 0.0 {
+                deltas.push(format!("会心+{:.1}%", r.critical_pct * 100.0));
+            }
+            if r.crit_eff_pct != 0.0 {
+                deltas.push(format!("会效+{:.1}%", r.crit_eff_pct * 100.0));
+            }
+            if r.surplus_pct != 0.0 {
+                deltas.push(format!("破招+{:.0}%", r.surplus_pct * 100.0));
+            }
+            if r.shield_ignore != 0.0 {
+                deltas.push(format!("无视防御+{:.1}%", r.shield_ignore / 1024.0 * 100.0));
+            }
+            if r.pve_addition != 0.0 {
+                deltas.push(format!("非侠士+{:.0}%", r.pve_addition * 100.0));
+            }
             if !deltas.is_empty() {
                 tag.push_str(" (");
                 tag.push_str(&deltas.join("/"));
@@ -6630,11 +8298,16 @@ fn simulate_core(
     };
 
     // 计算当前剩余 GCD 和总 GCD（key 里的数字是 base duration，需按 haste 缩减得到"实际"时长）
-    let (gcd_end, total_gcd_base) = player.active_cds.iter()
+    let (gcd_end, total_gcd_base) = player
+        .active_cds
+        .iter()
         .filter(|(k, _)| k.starts_with("gcd_"))
         .fold((0.0_f64, 0.0_f64), |(best_end, best_total), (k, &v)| {
             if v > best_end {
-                let dur = k.strip_prefix("gcd_").and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
+                let dur = k
+                    .strip_prefix("gcd_")
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .unwrap_or(0.0);
                 (v, dur)
             } else {
                 (best_end, best_total)
@@ -6642,92 +8315,120 @@ fn simulate_core(
         });
     let total_gcd = if total_gcd_base > 0.0 {
         let base_frames = sec_to_frames(total_gcd_base);
-        frames_to_sec(get_actual_frames(base_frames, player.effective_haste_level()))
-    } else { 0.0 };
+        frames_to_sec(get_actual_frames(
+            base_frames,
+            player.effective_haste_level(),
+        ))
+    } else {
+        0.0
+    };
     let remaining_gcd = (gcd_end - player.current_time).max(0.0);
 
     // 连招状态：哪些技能当前处于连招后续段
     let mut combo_states: HashMap<String, (String, f64)> = HashMap::new();
     if !req.lite {
-    for (&base_name, ranks) in &skill_map {
-        if let Some(picked) = player.pick_rank(ranks) {
-            if let Some(ref req_combo) = picked.requires_combo {
-                let bid = combo_buff_id(req_combo);
-                let remaining = player.active_buffs.iter()
-                    .find(|b| b.buff_id == bid)
-                    .map(|b| (b.expires_at - player.current_time).max(0.0))
-                    .unwrap_or(0.0);
-                combo_states.insert(base_name.to_string(), (picked.name.clone(), remaining));
-            }
-        }
-    }
-
-    // 盾飞延迟切姿态：显示为连招状态
-    if let Some(delay) = player.active_buffs.iter().find(|b| b.buff_id == BUFF_DUN_FEI_DELAY) {
-        let remaining = (delay.expires_at - player.current_time).max(0.0);
-        if remaining > 0.001 {
-            combo_states.insert("盾飞".to_string(), ("切体态延迟中".to_string(), remaining));
-        }
-    }
-
-    // 战绝：怒气不足的刀系技能（斩/绝/劫/闪）显示为"战绝回怒中"连招状态
-    if let Some(zj) = player.active_buffs.iter().find(|b| b.buff_id == BUFF_ZHAN_JUE) {
-        if let Some(def) = player.buff_def(BUFF_ZHAN_JUE) {
-            let start = zj.expires_at - frames_to_sec(zj.duration_frames);
-            let tick_sec = frames_to_sec(def.tick_interval);
-            let remaining = if tick_sec > 0.0 {
-                let elapsed = (player.current_time - start).max(0.0);
-                let k = (elapsed / tick_sec).floor();
-                let next = start + (k + 1.0) * tick_sec;
-                (next.min(zj.expires_at) - player.current_time).max(0.0)
-            } else { 0.0 };
-            for (&base_name, ranks) in &skill_map {
-                if !matches!(base_name, "斩刀" | "绝刀" | "劫刀" | "闪刀") { continue; }
-                if combo_states.contains_key(base_name) { continue; }
-                // 最低档位的有效怒气消耗（绝刀 25怒，其他按 spec）
-                let min_cost = ranks.iter()
-                    .map(|r| player.effective_rage_cost(r))
-                    .min()
-                    .unwrap_or(0);
-                if (player.rage as u32) < min_cost {
-                    combo_states.insert(base_name.to_string(),
-                        ("战绝回怒中".to_string(), remaining));
+        for (&base_name, ranks) in &skill_map {
+            if let Some(picked) = player.pick_rank(ranks) {
+                if let Some(ref req_combo) = picked.requires_combo {
+                    let bid = combo_buff_id(req_combo);
+                    let remaining = player
+                        .active_buffs
+                        .iter()
+                        .find(|b| b.buff_id == bid)
+                        .map(|b| (b.expires_at - player.current_time).max(0.0))
+                        .unwrap_or(0.0);
+                    combo_states.insert(base_name.to_string(), (picked.name.clone(), remaining));
                 }
             }
         }
-    }
 
+        // 盾飞延迟切姿态：显示为连招状态
+        if let Some(delay) = player
+            .active_buffs
+            .iter()
+            .find(|b| b.buff_id == BUFF_DUN_FEI_DELAY)
+        {
+            let remaining = (delay.expires_at - player.current_time).max(0.0);
+            if remaining > 0.001 {
+                combo_states.insert("盾飞".to_string(), ("切体态延迟中".to_string(), remaining));
+            }
+        }
+
+        // 战绝：怒气不足的刀系技能（斩/绝/劫/闪）显示为"战绝回怒中"连招状态
+        if let Some(zj) = player
+            .active_buffs
+            .iter()
+            .find(|b| b.buff_id == BUFF_ZHAN_JUE)
+        {
+            if let Some(def) = player.buff_def(BUFF_ZHAN_JUE) {
+                let start = zj.expires_at - frames_to_sec(zj.duration_frames);
+                let tick_sec = frames_to_sec(def.tick_interval);
+                let remaining = if tick_sec > 0.0 {
+                    let elapsed = (player.current_time - start).max(0.0);
+                    let k = (elapsed / tick_sec).floor();
+                    let next = start + (k + 1.0) * tick_sec;
+                    (next.min(zj.expires_at) - player.current_time).max(0.0)
+                } else {
+                    0.0
+                };
+                for (&base_name, ranks) in &skill_map {
+                    if !matches!(base_name, "斩刀" | "绝刀" | "劫刀" | "闪刀") {
+                        continue;
+                    }
+                    if combo_states.contains_key(base_name) {
+                        continue;
+                    }
+                    // 最低档位的有效怒气消耗（绝刀 25怒，其他按 spec）
+                    let min_cost = ranks
+                        .iter()
+                        .map(|r| player.effective_rage_cost(r))
+                        .min()
+                        .unwrap_or(0);
+                    if (player.rage as u32) < min_cost {
+                        combo_states
+                            .insert(base_name.to_string(), ("战绝回怒中".to_string(), remaining));
+                    }
+                }
+            }
+        }
     } // end if !req.lite (combo_states)
 
     // 奇穴/秘籍修正后的技能数值
     let mut skill_effective: HashMap<String, SkillEffective> = HashMap::new();
     if !req.lite {
-    for (&base_name, ranks) in &skill_map {
-        if let Some(skill) = ranks.first() {
-            let eff = SkillEffective {
-                max_charges: player.effective_max_charges(skill),
-                charge_cd: player.effective_charge_cd(skill),
-                rage_cost: player.effective_rage_cost(skill),
-            };
-            // 只返回和原始值不同的
-            if eff.max_charges != skill.max_charges || (eff.charge_cd - skill.charge_cd).abs() > 0.001 || eff.rage_cost != skill.rage_cost {
-                skill_effective.insert(base_name.to_string(), eff);
+        for (&base_name, ranks) in &skill_map {
+            if let Some(skill) = ranks.first() {
+                let eff = SkillEffective {
+                    max_charges: player.effective_max_charges(skill),
+                    charge_cd: player.effective_charge_cd(skill),
+                    rage_cost: player.effective_rage_cost(skill),
+                };
+                // 只返回和原始值不同的
+                if eff.max_charges != skill.max_charges
+                    || (eff.charge_cd - skill.charge_cd).abs() > 0.001
+                    || eff.rage_cost != skill.rage_cost
+                {
+                    skill_effective.insert(base_name.to_string(), eff);
+                }
             }
         }
-    }
     } // end if !req.lite (skill_effective)
 
     // 汇总伤害和 DPS
-    let total_damage: f64 = timeline.iter()
-        .filter_map(|e| e.damage_total)
-        .sum();
-    let dps = if fight_time > 0.001 { total_damage / fight_time } else { 0.0 };
+    let total_damage: f64 = timeline.iter().filter_map(|e| e.damage_total).sum();
+    let dps = if fight_time > 0.001 {
+        total_damage / fight_time
+    } else {
+        0.0
+    };
     let skill_count = timeline.len();
     // ★ 在清空 timeline 之前算 fingerprint（lite 模式照样要返回它做差分校验）
     let fingerprint = compute_fingerprint(&timeline);
     // Lite 模式：默认清空 timeline（避免序列化数千事件）；若 lite_keep_timeline 则保留
     // （蒸馏工作流：验证/剪枝/swap 需要事件 .name 做 cast count，但不需要 hover 详情）
-    if req.lite && !req.lite_keep_timeline { timeline.clear(); }
+    if req.lite && !req.lite_keep_timeline {
+        timeline.clear();
+    }
 
     let t_post = t_post_start.elapsed();
     let sim_elapsed = sim_start.elapsed();
@@ -6744,25 +8445,98 @@ fn simulate_core(
         SIM_PERF.with(|p| {
             let p = *p.borrow();
             let ms = |ns: u64| ns as f64 / 1_000_000.0;
-            println!("  ├─ snapshot:       {:>5} calls, {:>6.2}ms",  p.snapshot_n, ms(p.snapshot_ns));
-            println!("  ├─ run_scripts:    {:>5} calls, {:>6.2}ms",  p.run_scripts_n, ms(p.run_scripts_ns));
-            println!("  ├─ buff_ticks:     {:>5} calls, {:>6.2}ms",  p.buff_ticks_n, ms(p.buff_ticks_ns));
-            println!("  ├─ collect_recipes:{:>5} calls, {:>6.2}ms",  p.collect_recipes_n, ms(p.collect_recipes_ns));
-            println!("  ├─ aggregate:      {:>5} calls, {:>6.2}ms (cache hit={} miss={})",
-                p.aggregate_n, ms(p.aggregate_ns), p.cache_hit, p.cache_miss);
-            println!("  ├─ calc_damage:    {:>5} calls, {:>6.2}ms",  p.calc_damage_n, ms(p.calc_damage_ns));
-            println!("  ├─ fill_event:     {:>5} calls, {:>6.2}ms",  p.fill_event_n, ms(p.fill_event_ns));
-            println!("  ├─ fill_tick:      {:>5} calls, {:>6.2}ms",  p.fill_tick_n, ms(p.fill_tick_ns));
-            println!("  ├─ macro_eval:     {:>5} calls, {:>6.2}ms",  p.macro_eval_n, ms(p.macro_eval_ns));
-            println!("  │  ├─ macro_phase1:  {:>5} calls, {:>6.2}ms",  p.macro_phase1_n, ms(p.macro_phase1_ns));
-            println!("  │  ├─ macro_phase2:  {:>5} calls, {:>6.2}ms",  p.macro_phase2_n, ms(p.macro_phase2_ns));
-            println!("  │  ├─ skill_lookup:  {:>5} calls, {:>6.2}ms",  p.macro_skill_lookup_n, ms(p.macro_skill_lookup_ns));
-            println!("  │  ├─ macro_advance: {:>5} calls, {:>6.2}ms",  p.macro_advance_n, ms(p.macro_advance_ns));
-            println!("  │  │  ├─ next_decision: {:>5} calls, {:>6.2}ms", p.macro_adv_next_n, ms(p.macro_adv_next_ns));
-            println!("  │  │  ├─ buff_ticks:    {:>5} calls, {:>6.2}ms", p.macro_adv_ticks_n, ms(p.macro_adv_ticks_ns));
-            println!("  │  │  └─ fill_tick:     {:>5} calls, {:>6.2}ms", p.macro_adv_fill_n, ms(p.macro_adv_fill_ns));
-            println!("  │  └─ macro_cond:    {:>5} calls, {:>6.2}ms",  p.macro_cond_n, ms(p.macro_cond_ns));
-            println!("  └─ cast_skill:     {:>5} calls, {:>6.2}ms",  p.cast_skill_n, ms(p.cast_skill_ns));
+            println!(
+                "  ├─ snapshot:       {:>5} calls, {:>6.2}ms",
+                p.snapshot_n,
+                ms(p.snapshot_ns)
+            );
+            println!(
+                "  ├─ run_scripts:    {:>5} calls, {:>6.2}ms",
+                p.run_scripts_n,
+                ms(p.run_scripts_ns)
+            );
+            println!(
+                "  ├─ buff_ticks:     {:>5} calls, {:>6.2}ms",
+                p.buff_ticks_n,
+                ms(p.buff_ticks_ns)
+            );
+            println!(
+                "  ├─ collect_recipes:{:>5} calls, {:>6.2}ms",
+                p.collect_recipes_n,
+                ms(p.collect_recipes_ns)
+            );
+            println!(
+                "  ├─ aggregate:      {:>5} calls, {:>6.2}ms (cache hit={} miss={})",
+                p.aggregate_n,
+                ms(p.aggregate_ns),
+                p.cache_hit,
+                p.cache_miss
+            );
+            println!(
+                "  ├─ calc_damage:    {:>5} calls, {:>6.2}ms",
+                p.calc_damage_n,
+                ms(p.calc_damage_ns)
+            );
+            println!(
+                "  ├─ fill_event:     {:>5} calls, {:>6.2}ms",
+                p.fill_event_n,
+                ms(p.fill_event_ns)
+            );
+            println!(
+                "  ├─ fill_tick:      {:>5} calls, {:>6.2}ms",
+                p.fill_tick_n,
+                ms(p.fill_tick_ns)
+            );
+            println!(
+                "  ├─ macro_eval:     {:>5} calls, {:>6.2}ms",
+                p.macro_eval_n,
+                ms(p.macro_eval_ns)
+            );
+            println!(
+                "  │  ├─ macro_phase1:  {:>5} calls, {:>6.2}ms",
+                p.macro_phase1_n,
+                ms(p.macro_phase1_ns)
+            );
+            println!(
+                "  │  ├─ macro_phase2:  {:>5} calls, {:>6.2}ms",
+                p.macro_phase2_n,
+                ms(p.macro_phase2_ns)
+            );
+            println!(
+                "  │  ├─ skill_lookup:  {:>5} calls, {:>6.2}ms",
+                p.macro_skill_lookup_n,
+                ms(p.macro_skill_lookup_ns)
+            );
+            println!(
+                "  │  ├─ macro_advance: {:>5} calls, {:>6.2}ms",
+                p.macro_advance_n,
+                ms(p.macro_advance_ns)
+            );
+            println!(
+                "  │  │  ├─ next_decision: {:>5} calls, {:>6.2}ms",
+                p.macro_adv_next_n,
+                ms(p.macro_adv_next_ns)
+            );
+            println!(
+                "  │  │  ├─ buff_ticks:    {:>5} calls, {:>6.2}ms",
+                p.macro_adv_ticks_n,
+                ms(p.macro_adv_ticks_ns)
+            );
+            println!(
+                "  │  │  └─ fill_tick:     {:>5} calls, {:>6.2}ms",
+                p.macro_adv_fill_n,
+                ms(p.macro_adv_fill_ns)
+            );
+            println!(
+                "  │  └─ macro_cond:    {:>5} calls, {:>6.2}ms",
+                p.macro_cond_n,
+                ms(p.macro_cond_ns)
+            );
+            println!(
+                "  └─ cast_skill:     {:>5} calls, {:>6.2}ms",
+                p.cast_skill_n,
+                ms(p.cast_skill_ns)
+            );
         });
     }
 
@@ -6771,8 +8545,16 @@ fn simulate_core(
         skill_count,
         stance: player.stance(),
         rage: player.rage,
-        block_value: if player.mount == Mount::TieGuYi { Some(player.block_value) } else { None },
-        max_block_value: if player.mount == Mount::TieGuYi { Some(player.max_block_value()) } else { None },
+        block_value: if player.mount == Mount::TieGuYi {
+            Some(player.block_value)
+        } else {
+            None
+        },
+        max_block_value: if player.mount == Mount::TieGuYi {
+            Some(player.max_block_value())
+        } else {
+            None
+        },
         timeline,
         buffs,
         available_skills,
@@ -6782,29 +8564,43 @@ fn simulate_core(
         buff_timeline,
         buff_log,
         recipes_meta,
-        damage_add_buff_ids: if req.lite { Vec::new() } else { crate::scripts::collect_damage_add_buff_ids(player.version) },
+        damage_add_buff_ids: if req.lite {
+            Vec::new()
+        } else {
+            crate::scripts::collect_damage_add_buff_ids(player.version)
+        },
         initial_buffs,
-        buff_attr_keys: if req.lite { HashMap::new() } else {
+        buff_attr_keys: if req.lite {
+            HashMap::new()
+        } else {
             crate::scripts::collect_buff_attr_keys(player.version)
                 .into_iter()
                 .map(|(id, keys)| (id, keys.into_iter().map(|s| s.to_string()).collect()))
                 .collect()
         },
-        buff_attr_desc: if req.lite { HashMap::new() } else {
+        buff_attr_desc: if req.lite {
+            HashMap::new()
+        } else {
             crate::scripts::collect_buff_attr_desc(player.version)
         },
-        formation_attr_keys: if req.lite { Vec::new() } else {
+        formation_attr_keys: if req.lite {
+            Vec::new()
+        } else {
             // 收集当前阵法 permanent_slots 中字段影响的 attr_keys
             let mut keys: Vec<String> = Vec::new();
             for (field, _) in &player.formation_permanent_slots {
                 for k in crate::scripts::affected_attr_keys(*field) {
                     let s = (*k).to_string();
-                    if !keys.contains(&s) { keys.push(s); }
+                    if !keys.contains(&s) {
+                        keys.push(s);
+                    }
                 }
             }
             keys
         },
-        talent_attr_keys: if req.lite { HashMap::new() } else {
+        talent_attr_keys: if req.lite {
+            HashMap::new()
+        } else {
             // 仅奇穴 hardcode 增益部分（aggregate_buff_fields 内硬编码激活的）
             //   13124 活血：VitalityBasePercentAdd +10%  → 仅列在 vit/hp（招架/拆招/攻击靠转化间接得到，不重复列）
             //   13366 从容：PhysicsAttackPowerPercent +10% + StrainBasePercentAdd +15% → atk/strain（直接加副属性）
@@ -6823,6 +8619,7 @@ fn simulate_core(
         combo_states,
         skill_effective,
         macro_debug: Vec::new(), // 不发送 debug 数据（6MB+ 序列化开销）
+        macro_line_stats,
         macro_next_skill,
         total_damage,
         initial_stats,
@@ -6862,7 +8659,9 @@ async fn equip_detail(
 }
 
 #[derive(Deserialize)]
-struct SubTypeRequest { sub_type: i32 }
+struct SubTypeRequest {
+    sub_type: i32,
+}
 
 async fn equip_enhances(
     State(state): State<SharedState>,
@@ -6910,10 +8709,18 @@ async fn equip_meta(State(state): State<SharedState>) -> impl IntoResponse {
     let mut max_level = 0u32;
 
     for item in data.items.values() {
-        if !item.belong_school.is_empty() { schools.insert(item.belong_school.clone()); }
-        if !item.magic_kind.is_empty() { kinds.insert(item.magic_kind.clone()); }
-        if item.level < min_level { min_level = item.level; }
-        if item.level > max_level { max_level = item.level; }
+        if !item.belong_school.is_empty() {
+            schools.insert(item.belong_school.clone());
+        }
+        if !item.magic_kind.is_empty() {
+            kinds.insert(item.magic_kind.clone());
+        }
+        if item.level < min_level {
+            min_level = item.level;
+        }
+        if item.level > max_level {
+            max_level = item.level;
+        }
     }
 
     Json(serde_json::json!({
@@ -6948,14 +8755,17 @@ async fn equip_haste_tiers(
     let natural_cap = (0.25 * LP_HASTE) as u32;
     let cap = q.cap.unwrap_or(natural_cap).min(200_000); // 防滥用
     let to_obj = |orig: u32| -> serde_json::Value {
-        let tiers: Vec<serde_json::Value> = haste_tier_boundaries(orig, cap).into_iter()
-            .map(|(tier, frames, lo, hi)| serde_json::json!({
-                "tier": tier,
-                "actual_frames": frames,
-                "actual_seconds": frames as f64 / FRAMES_PER_SEC as f64,
-                "haste_min": lo,
-                "haste_max": hi,
-            }))
+        let tiers: Vec<serde_json::Value> = haste_tier_boundaries(orig, cap)
+            .into_iter()
+            .map(|(tier, frames, lo, hi)| {
+                serde_json::json!({
+                    "tier": tier,
+                    "actual_frames": frames,
+                    "actual_seconds": frames as f64 / FRAMES_PER_SEC as f64,
+                    "haste_min": lo,
+                    "haste_max": hi,
+                })
+            })
             .collect();
         serde_json::json!({ "original_frames": orig, "tiers": tiers })
     };
@@ -6977,89 +8787,136 @@ async fn equip_haste_tiers(
 // ═════════════════════════════════════════════════════════════════════════════
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct HasteRange { pub min: u32, pub max: u32 }
+pub struct HasteRange {
+    pub min: u32,
+    pub max: u32,
+}
 
 #[derive(Debug, Deserialize)]
 pub struct AutoOptimizeRequest {
     /// 锁定槽位（"HAT"/"JACKET"/.../"PRIMARY_WEAPON"/..."），不参与枚举
-    #[serde(default)] pub fixed_slots: HashMap<String, equip::SlotConfig>,
+    #[serde(default)]
+    pub fixed_slots: HashMap<String, equip::SlotConfig>,
     /// 候选槽位 → equip_id 列表（笛卡尔积枚举），不在此表的部位 = 强制按 fixed_slots 走
     pub candidates: HashMap<String, Vec<u32>>,
     /// 目标 haste 多区间：候选 haste 落入任一区间即通过；空数组 = 无段位约束（fallback 到 [0, cap]）
     pub target_haste: Vec<HasteRange>,
     /// 五彩石 ID（仅主武器有效）
-    #[serde(default)] pub stone_id: u32,
+    #[serde(default)]
+    pub stone_id: u32,
     /// 模拟时长，默认 300s
-    #[serde(default = "default_auto_duration")] pub duration: f64,
+    #[serde(default = "default_auto_duration")]
+    pub duration: f64,
     pub mount: u32,
-    #[serde(default)] pub talents: Vec<u32>,
-    #[serde(default)] pub recipes: Vec<u32>,
+    #[serde(default)]
+    pub talents: Vec<u32>,
+    #[serde(default)]
+    pub recipes: Vec<u32>,
     pub macro_text: String,
-    #[serde(default)] pub target: Option<TargetConfig>,
-    #[serde(default)] pub network_delay: u32,
-    #[serde(default)] pub initial_rage: i32,
-    #[serde(default)] pub boss_attack_interval: f64,
-    #[serde(default)] pub hanjia_expectation: bool,
+    #[serde(default)]
+    pub target: Option<TargetConfig>,
+    #[serde(default)]
+    pub network_delay: u32,
+    #[serde(default)]
+    pub initial_rage: i32,
+    #[serde(default)]
+    pub boss_attack_interval: f64,
+    #[serde(default)]
+    pub hanjia_expectation: bool,
     /// 铁骨气劲模式（与模拟器 SimulateRequest.tiegu_mode 同语义；默认 2 = 主T·宿敌）
-    #[serde(default = "default_tiegu_mode")] pub tiegu_mode: u8,
+    #[serde(default = "default_tiegu_mode")]
+    pub tiegu_mode: u8,
     /// 实验性武学开关（与模拟器同字段；默认 false）
-    #[serde(default)] pub experimental: bool,
+    #[serde(default)]
+    pub experimental: bool,
     /// 团队增益启用列表（与模拟器同字段，确保 wzc 候选模拟的 buff 状态与主页面对齐）
-    #[serde(default)] pub team_buffs: Vec<TeamBuffSelection>,
+    #[serde(default)]
+    pub team_buffs: Vec<TeamBuffSelection>,
     /// 选中的阵法（与模拟器同字段，确保 wzc 候选模拟的阵法状态与主页面对齐）
-    #[serde(default)] pub formation: Option<FormationSelection>,
+    #[serde(default)]
+    pub formation: Option<FormationSelection>,
     /// 默认精炼 / 镶嵌模板（候选项 SlotConfig 全部按此模板）
-    #[serde(default)] pub default_strength: Option<u8>,
-    #[serde(default)] pub default_embedding: Option<Vec<u8>>,
+    #[serde(default)]
+    pub default_strength: Option<u8>,
+    #[serde(default)]
+    pub default_embedding: Option<Vec<u8>>,
     /// 每部位默认大附魔 ID（用户当前配装继承 + UI 可覆盖；缺省 0 = 无）
-    #[serde(default)] pub default_enchants: HashMap<String, u32>,
+    #[serde(default)]
+    pub default_enchants: HashMap<String, u32>,
     /// 每部位默认小附魔 ID（同上）
-    #[serde(default)] pub default_enhances: HashMap<String, u32>,
-    #[serde(default = "default_top_n")] pub top_n: usize,
+    #[serde(default)]
+    pub default_enhances: HashMap<String, u32>,
+    #[serde(default = "default_top_n")]
+    pub top_n: usize,
     /// 桶内 Pareto 剪枝（按 set/特效 分桶后，做 8 维属性 Pareto）。默认开启。
     /// 期望传播子系统启用时（boss_attack_interval > 0 + 选了寒甲/坚铁奇穴）建议关闭：
     /// 概率链非完全单调，Pareto 可能漏 winner。
-    #[serde(default = "default_true")] pub use_pareto: bool,
+    #[serde(default = "default_true")]
+    pub use_pareto: bool,
     /// 8 维属性向量量化 bin 大小（统一应用到 crit/crit_eff/overcome/strain/surplus/attack/agility/strength）。
     /// 原理：等级差异 < bin 时 floor(level/bin) 落同一桶，unique key + Pareto 都视为同点 → 大幅压低 unique 数。
     /// 默认 100：典型场景下与真实 DPS 影响 < 0.1%。设 0/1 = 不量化。
-    #[serde(default = "default_bucket_size")] pub bucket_size: u32,
+    #[serde(default = "default_bucket_size")]
+    pub bucket_size: u32,
 
     // ─── Phase A 内置（加速 enhance pair）──────────────
     /// 每加速槽（HAT/SHOES/PRIMARY_WEAPON 等）的紫·急速 enhance ID。
     /// 空 = 该槽不参与加速 enhance 搜索（只有 (装备, 0) 一种 pair 候选）。
-    #[serde(default)] pub haste_enhance_ids: HashMap<String, u32>,
+    #[serde(default)]
+    pub haste_enhance_ids: HashMap<String, u32>,
 
     // ─── 梯度排序预筛（Pareto 后、真实 sim 前）─────────────────────────
     /// 取 1 个参考配置 + 9 维属性扰动跑 10 次 sim 得到 ∂DPS/∂attr 梯度，
     /// 对 Pareto 后所有配置算线性预测 DPS，按预测排序取前 K 个进真实 sim。
     /// 0 = 不预筛（全部 sim，慢）；默认 5000 足够覆盖真实 top-N。
-    #[serde(default = "default_top_k_proxy")] pub top_k_proxy: usize,
+    #[serde(default = "default_top_k_proxy")]
+    pub top_k_proxy: usize,
 
     // ─── Phase B（偏导后处理：每非加速槽 enhance 候选）─────────────────
     /// 非加速槽 enhance 候选池：pos → [enhance_id, ...]。
     /// Phase B 用 9 维属性扰动求 ∂DPS/∂attr，每槽独立 argmax 选最佳 enhance。
     /// 旧字段名保留兼容（前端按外攻/T build 自动生成）。
-    #[serde(default)] pub enhance_candidates: HashMap<String, Vec<u32>>,
+    #[serde(default)]
+    pub enhance_candidates: HashMap<String, Vec<u32>>,
     /// Phase A → Phase B 切口：取 top-K 个 (装备 + 加速 enhance + stone) 配置进偏导阶段。
-    #[serde(default = "default_top_k_phase_b")] pub top_k_phase_b: usize,
+    #[serde(default = "default_top_k_phase_b")]
+    pub top_k_phase_b: usize,
     /// 是否对锁定槽（fixed_slots 里的位置）也做 Phase B 偏导附魔搜索。
     /// true（默认）：换了装备时附魔也跟着重新选最优；
     /// false：锁定槽附魔保持用户配装里的不变。
-    #[serde(default = "default_search_locked_enhance")] pub search_locked_enhance: bool,
+    #[serde(default = "default_search_locked_enhance")]
+    pub search_locked_enhance: bool,
 
     // ─── 旧字段（已废弃，保留兼容） ──────────────────────────────────
-    #[serde(default)] pub stone_candidates: Vec<u32>,
-    #[serde(default = "default_top_k_phase_c")] pub top_k_phase_c: usize,
+    #[serde(default)]
+    pub stone_candidates: Vec<u32>,
+    #[serde(default = "default_top_k_phase_c")]
+    pub top_k_phase_c: usize,
 }
-fn default_true() -> bool { true }
-fn default_auto_duration() -> f64 { 300.0 }
-fn default_top_n() -> usize { 10 }
-fn default_bucket_size() -> u32 { 500 }
-fn default_top_k_phase_b() -> usize { 500 }
-fn default_top_k_proxy() -> usize { 5000 }
-fn default_search_locked_enhance() -> bool { true }
-fn default_top_k_phase_c() -> usize { 1000 }
+fn default_true() -> bool {
+    true
+}
+fn default_auto_duration() -> f64 {
+    300.0
+}
+fn default_top_n() -> usize {
+    10
+}
+fn default_bucket_size() -> u32 {
+    500
+}
+fn default_top_k_phase_b() -> usize {
+    500
+}
+fn default_top_k_proxy() -> usize {
+    5000
+}
+fn default_search_locked_enhance() -> bool {
+    true
+}
+fn default_top_k_phase_c() -> usize {
+    1000
+}
 
 #[derive(Debug, Serialize, Clone, Default)]
 pub struct AutoOptimizeResponse {
@@ -7072,10 +8929,12 @@ pub struct AutoOptimizeResponse {
     /// S6 二次拟合模型（mean_pool / 一阶梯度 / Hessian / 9 维 raw 池子范围）。
     /// 用户在前端展开 top 结果时画属性收益曲线/属性置换矩阵用。
     /// `None` 表示池子样本太少（< 12，自由度不够）跳过了拟合。
-    #[serde(default)] pub fit_model: Option<AutoFitModel>,
+    #[serde(default)]
+    pub fit_model: Option<AutoFitModel>,
     /// 拟合质量评价指标（R² / RMSE / MAE / top10 重合）。
     /// `None` 时同 `fit_model` —— 没拟合就没指标。
-    #[serde(default)] pub fit_metrics: Option<AutoFitMetrics>,
+    #[serde(default)]
+    pub fit_metrics: Option<AutoFitMetrics>,
 }
 
 /// S6 拟合输出：DPS ≈ ref + g·Δ + ½·Δᵀ·H·Δ，其中 Δ = raw - mean。
@@ -7146,9 +9005,15 @@ pub struct FitCurveRequest {
     #[serde(default = "default_fit_axis_scale")]
     pub axis_scale: f64,
 }
-fn default_fit_order() -> u8 { 2 }
-fn default_fit_pert_delta() -> f64 { 1000.0 }
-fn default_fit_axis_scale() -> f64 { 5.0 }
+fn default_fit_order() -> u8 {
+    2
+}
+fn default_fit_pert_delta() -> f64 {
+    1000.0
+}
+fn default_fit_axis_scale() -> f64 {
+    5.0
+}
 
 #[derive(Debug, Serialize, Default)]
 pub struct FitCurveResponse {
@@ -7166,22 +9031,27 @@ pub struct FitCurveResponse {
 
 #[derive(Debug, Serialize, Clone, Default)]
 pub struct AutoTopEntry {
-    pub slots: HashMap<String, u32>,        // pos → equip_id（含固定槽与本组合）
-    pub names: HashMap<String, String>,     // pos → 装备名
+    pub slots: HashMap<String, u32>, // pos → equip_id（含固定槽与本组合）
+    pub names: HashMap<String, String>, // pos → 装备名
     pub dps: f64,
-    pub delta_pct: f64,                     // vs baseline
+    pub delta_pct: f64, // vs baseline
     pub haste_level: u32,
     pub panel_attack: f64,
     /// 完整面板属性（hover tooltip 显示）；只 top_n 个回填
-    #[serde(default)] pub panel: Option<equip::PanelAttrs>,
+    #[serde(default)]
+    pub panel: Option<equip::PanelAttrs>,
     /// 完整 RawAttrs 等级（hover tooltip 显示"等级 / 系数"用）；只 top_n 个回填
-    #[serde(default)] pub raw: Option<equip::RawAttrs>,
+    #[serde(default)]
+    pub raw: Option<equip::RawAttrs>,
     /// 选中的 enhance 配置（pos → enhance_id）；Phase B 后才有
-    #[serde(default)] pub enhances: HashMap<String, u32>,
+    #[serde(default)]
+    pub enhances: HashMap<String, u32>,
     /// 五彩石 ID（Phase C 后才有）
-    #[serde(default)] pub stone_id: u32,
+    #[serde(default)]
+    pub stone_id: u32,
     /// 五彩石名（仅显示用）
-    #[serde(default)] pub stone_name: String,
+    #[serde(default)]
+    pub stone_name: String,
 }
 
 #[derive(Debug, Serialize, Default, Clone)]
@@ -7192,17 +9062,21 @@ pub struct AutoOptimizeStats {
     pub unique_keys: usize,
     pub after_pareto: usize,
     /// 梯度预筛后保留的配置数（= top_k_proxy 或不预筛时 = after_pareto）
-    #[serde(default)] pub after_rank: usize,
+    #[serde(default)]
+    pub after_rank: usize,
     /// 是否启用了智能模式（梯度预筛）。前端按此切换"智能模式"/"完整模拟"指示
-    #[serde(default)] pub smart_mode: bool,
+    #[serde(default)]
+    pub smart_mode: bool,
     /// 主武器是否锁定（fixed_slots 含 PRIMARY_WEAPON）。智能模式下武器未锁定 = 排序可能受紫橙特效非线性影响
-    #[serde(default)] pub weapon_locked: bool,
+    #[serde(default)]
+    pub weapon_locked: bool,
     pub simulated: usize,
     pub time_total_ms: f64,
     pub time_calc_ms: f64,
     pub time_pareto_ms: f64,
     /// 梯度预筛耗时（包括 2 轮共 20 次 sim + 排序）
-    #[serde(default)] pub time_rank_ms: f64,
+    #[serde(default)]
+    pub time_rank_ms: f64,
     pub time_simulate_ms: f64,
     // ─── Phase B/C ─────────────────────────
     /// Phase B 起 base 数（top_k_phase_b 实际取到的数量）
@@ -7257,14 +9131,22 @@ fn compute_enhance_haste_range_per_slot(
     let mut out = HashMap::new();
     for (pos, ids) in candidates.iter() {
         let sub = equip::pos_to_subtype(pos) as i32;
-        let list = match data.enhances.get(&sub) { Some(l) => l, None => continue };
-        let hastes: Vec<i64> = ids.iter().filter_map(|&id| {
-            list.iter().find(|e| e.id == id).map(|e| {
-                e.attributes.iter()
-                    .filter(|(s, _)| s == "atHasteBase")
-                    .map(|(_, v)| *v).sum::<i64>()
+        let list = match data.enhances.get(&sub) {
+            Some(l) => l,
+            None => continue,
+        };
+        let hastes: Vec<i64> = ids
+            .iter()
+            .filter_map(|&id| {
+                list.iter().find(|e| e.id == id).map(|e| {
+                    e.attributes
+                        .iter()
+                        .filter(|(s, _)| s == "atHasteBase")
+                        .map(|(_, v)| *v)
+                        .sum::<i64>()
+                })
             })
-        }).collect();
+            .collect();
         let mn = hastes.iter().min().copied().unwrap_or(0);
         let mx = hastes.iter().max().copied().unwrap_or(0);
         out.insert(pos.clone(), (mn, mx));
@@ -7275,10 +9157,10 @@ fn compute_enhance_haste_range_per_slot(
 /// 给定 stone_id，算它的 atHasteBase 总值（不依赖 dc/dl 阈值；用于 branch prune 估算上限）
 
 /// 副属性 LP/1024 郭氏阈值（rate-converted 字段的最小有意义差，固定常量）
-const BIN_CRIT:     u32 = 193;   // ≈ floor(LP_CRIT / 1024)
-const BIN_CRIT_EFF: u32 = 71;    // ≈ floor(LP_CRIT_EFF / 1024)
-const BIN_OVERCOME: u32 = 220;   // ≈ floor(LP_OVERCOME / 1024)
-const BIN_STRAIN:   u32 = 130;   // ≈ floor(LP_STRAIN / 1024)
+const BIN_CRIT: u32 = 193; // ≈ floor(LP_CRIT / 1024)
+const BIN_CRIT_EFF: u32 = 71; // ≈ floor(LP_CRIT_EFF / 1024)
+const BIN_OVERCOME: u32 = 220; // ≈ floor(LP_OVERCOME / 1024)
+const BIN_STRAIN: u32 = 130; // ≈ floor(LP_STRAIN / 1024)
 
 /// 把 RawAttrs 折成 8 维比对向量
 ///   前 4 维（crit/crit_eff/overcome/strain）—— 走郭氏阈值固定 bin（LP/1024）
@@ -7287,17 +9169,21 @@ const BIN_STRAIN:   u32 = 130;   // ≈ floor(LP_STRAIN / 1024)
 fn raw_to_pareto_vec(r: &equip::RawAttrs, bucket: u32) -> [u32; 8] {
     let qn = |v: f64, b: u32| -> u32 {
         let x = v as u32;
-        if b <= 1 { x } else { x / b }
+        if b <= 1 {
+            x
+        } else {
+            x / b
+        }
     };
     [
-        (r.crit_level         as u32) / BIN_CRIT,
-        (r.crit_effect_level  as u32) / BIN_CRIT_EFF,
-        (r.overcome_level     as u32) / BIN_OVERCOME,
-        (r.strain_level       as u32) / BIN_STRAIN,
-        qn(r.surplus_value,   bucket),
-        qn(r.base_attack,     bucket),
-        qn(r.agility,         bucket),
-        qn(r.strength,        bucket),
+        (r.crit_level as u32) / BIN_CRIT,
+        (r.crit_effect_level as u32) / BIN_CRIT_EFF,
+        (r.overcome_level as u32) / BIN_OVERCOME,
+        (r.strain_level as u32) / BIN_STRAIN,
+        qn(r.surplus_value, bucket),
+        qn(r.base_attack, bucket),
+        qn(r.agility, bucket),
+        qn(r.strength, bucket),
     ]
 }
 
@@ -7309,12 +9195,12 @@ fn encode_combo_key(raw: &equip::RawAttrs, set_eff_fp: u64, bucket: u32) -> (u12
         let mask = (1u128 << width) - 1;
         *k |= ((x as u128) & mask) << shift;
     };
-    put(&mut k, v[0], 0,   17);
-    put(&mut k, v[1], 17,  17);
-    put(&mut k, v[2], 34,  17);
-    put(&mut k, v[3], 51,  17);
-    put(&mut k, v[4], 68,  17);
-    put(&mut k, v[5], 85,  17);
+    put(&mut k, v[0], 0, 17);
+    put(&mut k, v[1], 17, 17);
+    put(&mut k, v[2], 34, 17);
+    put(&mut k, v[3], 51, 17);
+    put(&mut k, v[4], 68, 17);
+    put(&mut k, v[5], 85, 17);
     put(&mut k, v[6], 102, 13);
     put(&mut k, v[7], 115, 13);
     (k, set_eff_fp)
@@ -7323,22 +9209,22 @@ fn encode_combo_key(raw: &equip::RawAttrs, set_eff_fp: u64, bucket: u32) -> (u12
 /// 把 RawAttrs 映射到 simulate 用的 Attributes
 fn raw_to_attributes(r: &equip::RawAttrs) -> Attributes {
     Attributes {
-        li_dao:            r.strength,
-        shen_fa:           r.agility,
-        vitality:          r.vitality,
-        gen_gu:             44.0,
-        yuan_qi:            44.0,
-        base_attack:       r.base_attack,
+        li_dao: r.strength,
+        shen_fa: r.agility,
+        vitality: r.vitality,
+        gen_gu: 44.0,
+        yuan_qi: 44.0,
+        base_attack: r.base_attack,
         base_magical_attack: r.base_magical_attack,
-        weapon_damage:     r.weapon_damage,
-        surplus_value:     r.surplus_value,
-        crit_level:        r.crit_level,
+        weapon_damage: r.weapon_damage,
+        surplus_value: r.surplus_value,
+        crit_level: r.crit_level,
         crit_effect_level: r.crit_effect_level,
-        overcome_level:    r.overcome_level,
-        strain_level:      r.strain_level,
-        haste_level:       r.haste_level,
-        parry_value:       r.parry_value,
-        parry_level:       r.parry_level,
+        overcome_level: r.overcome_level,
+        strain_level: r.strain_level,
+        haste_level: r.haste_level,
+        parry_value: r.parry_value,
+        parry_level: r.parry_level,
     }
 }
 
@@ -7357,9 +9243,12 @@ async fn equip_auto_optimize(
     {
         let mut p = state.auto_search.lock().unwrap();
         *p = AutoSearchProgress {
-            running: true, phase: "starting".into(),
+            running: true,
+            phase: "starting".into(),
             started_at_ms: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0),
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0),
             ..Default::default()
         };
     }
@@ -7376,7 +9265,9 @@ async fn equip_auto_optimize(
 
 /// 控制：cancel / pause / resume。前端通过 POST /api/equip/auto_optimize/control 调用。
 #[derive(Debug, Deserialize)]
-pub struct AutoOptimizeControlRequest { pub action: String }
+pub struct AutoOptimizeControlRequest {
+    pub action: String,
+}
 
 async fn equip_auto_optimize_control(
     State(state): State<SharedState>,
@@ -7398,7 +9289,9 @@ async fn equip_auto_optimize_control(
             state.auto_search_pause.store(false, Ordering::Relaxed);
             Json(serde_json::json!({ "ok": true, "action": "resume" }))
         }
-        _ => Json(serde_json::json!({ "ok": false, "error": format!("unknown action: {}", req.action) })),
+        _ => Json(
+            serde_json::json!({ "ok": false, "error": format!("unknown action: {}", req.action) }),
+        ),
     }
 }
 
@@ -7414,11 +9307,13 @@ async fn equip_fit_curve(
     let t_start = std::time::Instant::now();
     let attrs = match req.sim_req.attributes.as_ref() {
         Some(a) => a.clone(),
-        None => return Json(FitCurveResponse {
-            feasible: false,
-            error: Some("attributes 字段必填".to_string()),
-            ..Default::default()
-        }),
+        None => {
+            return Json(FitCurveResponse {
+                feasible: false,
+                error: Some("attributes 字段必填".to_string()),
+                ..Default::default()
+            })
+        }
     };
 
     let cur_version = *state.version.read().await;
@@ -7447,15 +9342,15 @@ async fn equip_fit_curve(
     let mut max_enh_pvx_src = String::new();
     let slot_to_axis = |slot: &str| -> Option<usize> {
         match slot {
-            "atStrengthBase"                                                      => Some(0),
-            "atAgilityBase"                                                       => Some(1),
-            "atPhysicsAttackPowerBase" | "atAllTypeAttackPowerBase"               => Some(2),
-            "atMeleeWeaponDamageBase"                                             => Some(3),
-            "atSurplusValueBase"                                                  => Some(4),
-            "atPhysicsCriticalStrike" | "atAllTypeCriticalStrike"                 => Some(5),
+            "atStrengthBase" => Some(0),
+            "atAgilityBase" => Some(1),
+            "atPhysicsAttackPowerBase" | "atAllTypeAttackPowerBase" => Some(2),
+            "atMeleeWeaponDamageBase" => Some(3),
+            "atSurplusValueBase" => Some(4),
+            "atPhysicsCriticalStrike" | "atAllTypeCriticalStrike" => Some(5),
             "atPhysicsCriticalDamagePowerBase" | "atAllTypeCriticalDamagePowerBase" => Some(6),
-            "atPhysicsOvercomeBase" | "atAllTypeOvercomeBase"                     => Some(7),
-            "atStrainBase"                                                        => Some(8),
+            "atPhysicsOvercomeBase" | "atAllTypeOvercomeBase" => Some(7),
+            "atStrainBase" => Some(8),
             _ => None,
         }
     };
@@ -7465,10 +9360,17 @@ async fn equip_fit_curve(
             //   这些部位的附魔数值天然偏高（含挑战附魔系列、且整体规模大于身上其它部位），
             //   不能代表"普通附魔幅度"作为决策参考。只取衣裤/帽子/护腕/腰带/鞋/主武器 的附魔
             //   作为各属性的"满附魔等级"，让"满附魔 ΔDPS" 反映身上常规位的换装幅度。
-            if matches!(entry.sub_type, 1 | 4 | 5 | 7) { continue; }
-            if entry.is_challenge { continue; }   // 兜底（is_challenge 当前只在首饰标记）
-            // 只看第一个属性增益（单一附魔的主属性；后面的 slot 多为展开衍生项，不算独立附魔属性）
-            let first = match entry.attributes.first() { Some(a) => a, None => continue };
+            if matches!(entry.sub_type, 1 | 4 | 5 | 7) {
+                continue;
+            }
+            if entry.is_challenge {
+                continue;
+            } // 兜底（is_challenge 当前只在首饰标记）
+              // 只看第一个属性增益（单一附魔的主属性；后面的 slot 多为展开衍生项，不算独立附魔属性）
+            let first = match entry.attributes.first() {
+                Some(a) => a,
+                None => continue,
+            };
             let (slot, value) = (&first.0, first.1);
             let v = value as f64;
             if slot == "atPVXAllRound" {
@@ -7487,20 +9389,26 @@ async fn equip_fit_curve(
     // 会效 + 全能的附魔表里没有高数值条目（首饰已被过滤；身上其他部位 atPhysicsCriticalDamagePowerBase
     // / atPVXAllRound 的小附魔等级远低于会心等同类副属性）。把这俩的容量对齐到会心（idx 5），
     // 让"满附魔 ΔDPS" 在同等装备容量下对比，不会因为"会效附魔表数据少"显得收益异常低。
-    let crit_idx = 5_usize;       // crit_level 在 9 维 raw 中的索引
-    let crit_eff_idx = 6_usize;   // crit_effect_level
+    let crit_idx = 5_usize; // crit_level 在 9 维 raw 中的索引
+    let crit_eff_idx = 6_usize; // crit_effect_level
     max_enh[crit_eff_idx] = max_enh[crit_idx];
     max_enh_src[crit_eff_idx] = format!("（容量对齐到会心）{}", max_enh_src[crit_idx]);
     max_enh_pvx = max_enh[crit_idx];
     max_enh_pvx_src = format!("（容量对齐到会心）{}", max_enh_src[crit_idx]);
 
-    let labels = ["力道", "身法", "攻击", "武伤", "破招", "会心", "会效", "破防", "无双"];
+    let labels = [
+        "力道", "身法", "攻击", "武伤", "破招", "会心", "会效", "破防", "无双",
+    ];
     for i in 0..9 {
-        eprintln!("[fit_curve] max_enh[{}]={:.0}  来自 \"{}\"",
-            labels[i], max_enh[i], max_enh_src[i]);
+        eprintln!(
+            "[fit_curve] max_enh[{}]={:.0}  来自 \"{}\"",
+            labels[i], max_enh[i], max_enh_src[i]
+        );
     }
-    eprintln!("[fit_curve] max_enh[全能]={:.0}  来自 \"{}\"",
-        max_enh_pvx, max_enh_pvx_src);
+    eprintln!(
+        "[fit_curve] max_enh[全能]={:.0}  来自 \"{}\"",
+        max_enh_pvx, max_enh_pvx_src
+    );
 
     // 跑拟合：spawn_blocking 避免占用 tokio worker（55 sim ≈ 0.4s）
     let mut sim_req_template = req.sim_req;
@@ -7520,11 +9428,22 @@ async fn equip_fit_curve(
 
     let resp = tokio::task::spawn_blocking(move || {
         compute_fit_curve_sync(
-            attrs, sim_req_template, pert_delta, order, axis_scale,
-            &skills, cur_version, cur_mount, cur_consts,
-            &recipes_table, &team_buffs_table, &formations_table,
+            attrs,
+            sim_req_template,
+            pert_delta,
+            order,
+            axis_scale,
+            &skills,
+            cur_version,
+            cur_mount,
+            cur_consts,
+            &recipes_table,
+            &team_buffs_table,
+            &formations_table,
         )
-    }).await.unwrap_or_else(|e| FitCurveResponse {
+    })
+    .await
+    .unwrap_or_else(|e| FitCurveResponse {
         feasible: false,
         error: Some(format!("拟合任务 panic: {}", e)),
         ..Default::default()
@@ -7570,15 +9489,15 @@ fn compute_fit_curve_sync(
         let mut a = attrs.clone();
         let v = (raw_a[axis] + delta).max(0.0);
         match axis {
-            0 => a.li_dao            = v,
-            1 => a.shen_fa           = v,
-            2 => a.base_attack       = v,
-            3 => a.weapon_damage     = v,
-            4 => a.surplus_value     = v,
-            5 => a.crit_level        = v,
+            0 => a.li_dao = v,
+            1 => a.shen_fa = v,
+            2 => a.base_attack = v,
+            3 => a.weapon_damage = v,
+            4 => a.surplus_value = v,
+            5 => a.crit_level = v,
             6 => a.crit_effect_level = v,
-            7 => a.overcome_level    = v,
-            8 => a.strain_level      = v,
+            7 => a.overcome_level = v,
+            8 => a.strain_level = v,
             _ => {}
         }
         a
@@ -7589,15 +9508,15 @@ fn compute_fit_curve_sync(
         let mut a = a1.clone();
         let vj = (raw_a[j] + delta).max(0.0);
         match j {
-            0 => a.li_dao            = vj,
-            1 => a.shen_fa           = vj,
-            2 => a.base_attack       = vj,
-            3 => a.weapon_damage     = vj,
-            4 => a.surplus_value     = vj,
-            5 => a.crit_level        = vj,
+            0 => a.li_dao = vj,
+            1 => a.shen_fa = vj,
+            2 => a.base_attack = vj,
+            3 => a.weapon_damage = vj,
+            4 => a.surplus_value = vj,
+            5 => a.crit_level = vj,
             6 => a.crit_effect_level = vj,
-            7 => a.overcome_level    = vj,
-            8 => a.strain_level      = vj,
+            7 => a.overcome_level = vj,
+            8 => a.strain_level = vj,
             _ => {}
         }
         a
@@ -7605,36 +9524,55 @@ fn compute_fit_curve_sync(
     let sim_one = |a: &Attributes| -> f64 {
         let mut req = sim_req_template.clone();
         req.attributes = Some(a.clone());
-        simulate_core(&req, skills, cur_version, cur_mount, cur_consts,
-            recipes_table, team_buffs_table, formations_table).dps
+        simulate_core(
+            &req,
+            skills,
+            cur_version,
+            cur_mount,
+            cur_consts,
+            recipes_table,
+            team_buffs_table,
+            formations_table,
+        )
+        .dps
     };
 
     // 1 ref + 18 单轴 + (36 交叉 if order>=2) = 19 或 55 sim
     let ref_dps = sim_one(&attrs);
-    let d_pairs: Vec<(f64, f64)> = (0..9usize).into_par_iter().map(|j| {
-        let r1 = attrs_with_axis(j, pert_delta);
-        let r2 = attrs_with_axis(j, 2.0 * pert_delta);
-        (sim_one(&r1) - ref_dps, sim_one(&r2) - ref_dps)
-    }).collect();
+    let d_pairs: Vec<(f64, f64)> = (0..9usize)
+        .into_par_iter()
+        .map(|j| {
+            let r1 = attrs_with_axis(j, pert_delta);
+            let r2 = attrs_with_axis(j, 2.0 * pert_delta);
+            (sim_one(&r1) - ref_dps, sim_one(&r2) - ref_dps)
+        })
+        .collect();
     let mut grad = [0f64; 9];
     let mut h_diag = [0f64; 9];
     for j in 0..9 {
         let (d1, d2) = d_pairs[j];
-        grad[j]   = (4.0 * d1 - d2) / (2.0 * pert_delta);
+        grad[j] = (4.0 * d1 - d2) / (2.0 * pert_delta);
         h_diag[j] = (d2 - 2.0 * d1) / (pert_delta * pert_delta);
     }
     let mut hess = [[0f64; 9]; 9];
-    for j in 0..9 { hess[j][j] = h_diag[j]; }
-    let mut sim_count: u32 = 19;   // 1 + 18
+    for j in 0..9 {
+        hess[j][j] = h_diag[j];
+    }
+    let mut sim_count: u32 = 19; // 1 + 18
     if order >= 2 {
-        let pairs: Vec<(usize, usize)> = (0..9).flat_map(|i| ((i+1)..9).map(move |j| (i, j))).collect();
-        let cross: Vec<f64> = pairs.par_iter().map(|&(i, j)| {
-            let r = attrs_with_two(i, j, pert_delta);
-            let sim_ij = sim_one(&r);
-            let lin = ref_dps + pert_delta * (grad[i] + grad[j]);
-            let diag = 0.5 * pert_delta * pert_delta * (h_diag[i] + h_diag[j]);
-            (sim_ij - lin - diag) / (pert_delta * pert_delta)
-        }).collect();
+        let pairs: Vec<(usize, usize)> = (0..9)
+            .flat_map(|i| ((i + 1)..9).map(move |j| (i, j)))
+            .collect();
+        let cross: Vec<f64> = pairs
+            .par_iter()
+            .map(|&(i, j)| {
+                let r = attrs_with_two(i, j, pert_delta);
+                let sim_ij = sim_one(&r);
+                let lin = ref_dps + pert_delta * (grad[i] + grad[j]);
+                let diag = 0.5 * pert_delta * pert_delta * (h_diag[i] + h_diag[j]);
+                (sim_ij - lin - diag) / (pert_delta * pert_delta)
+            })
+            .collect();
         for (k, &(i, j)) in pairs.iter().enumerate() {
             hess[i][j] = cross[k];
             hess[j][i] = cross[k];
@@ -7654,7 +9592,7 @@ fn compute_fit_curve_sync(
         feasible: true,
         ref_dps,
         sim_count,
-        elapsed_ms: 0.0,   // outer handler 写
+        elapsed_ms: 0.0, // outer handler 写
         error: None,
         fit_model: AutoFitModel {
             mean: raw_a,
@@ -7664,13 +9602,19 @@ fn compute_fit_curve_sync(
             axis_min,
             axis_max,
             axis_labels: vec![
-                "力道".to_string(), "身法".to_string(), "基础攻击".to_string(),
-                "武器伤害".to_string(), "破招".to_string(), "会心".to_string(),
-                "会心效果".to_string(), "破防".to_string(), "无双".to_string(),
+                "力道".to_string(),
+                "身法".to_string(),
+                "基础攻击".to_string(),
+                "武器伤害".to_string(),
+                "破招".to_string(),
+                "会心".to_string(),
+                "会心效果".to_string(),
+                "破防".to_string(),
+                "无双".to_string(),
             ],
-            pool_size: 1,   // 单点拟合（不来自池子）
-            max_enhance_levels: [0.0; 9],   // outer handler 填
-            max_enhance_pvx: 0.0,           // outer handler 填
+            pool_size: 1,                 // 单点拟合（不来自池子）
+            max_enhance_levels: [0.0; 9], // outer handler 填
+            max_enhance_pvx: 0.0,         // outer handler 填
         },
     }
 }
@@ -7687,38 +9631,50 @@ async fn run_auto_optimize_compute(
     let mut candidate_positions: Vec<String> = req.candidates.keys().cloned().collect();
     candidate_positions.sort();
 
-    let total_combos: u64 = candidate_positions.iter()
+    let total_combos: u64 = candidate_positions
+        .iter()
         .map(|p| req.candidates.get(p).map(|v| v.len() as u64).unwrap_or(0))
         .filter(|&n| n > 0)
         .product::<u64>();
 
     if total_combos == 0 {
         return AutoOptimizeResponse {
-            feasible: false, baseline_dps: 0.0, baseline_haste: 0, top: vec![],
-            stats: AutoOptimizeStats { candidate_positions: candidate_positions.len(), ..Default::default() },
+            feasible: false,
+            baseline_dps: 0.0,
+            baseline_haste: 0,
+            top: vec![],
+            stats: AutoOptimizeStats {
+                candidate_positions: candidate_positions.len(),
+                ..Default::default()
+            },
             warnings: vec!["候选池为空".into()],
-            fit_model: None, fit_metrics: None,
+            fit_model: None,
+            fit_metrics: None,
         };
     }
 
     // 进度状态初始化（前端通过 /api/equip/auto_optimize/progress 拉）
     let progress = state.auto_search.clone();
     let started_at_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
     {
         let mut p = progress.lock().unwrap();
         *p = AutoSearchProgress {
-            running: true, phase: "enumerate".into(),
-            total_combos, started_at_ms,
+            running: true,
+            phase: "enumerate".into(),
+            total_combos,
+            started_at_ms,
             ..Default::default()
         };
     }
 
-    let bs  = state.base_stats.read().await.clone();
-    let mc  = state.mount_conversions.read().await.clone();
+    let bs = state.base_stats.read().await.clone();
+    let mc = state.mount_conversions.read().await.clone();
     let cur_version = *state.version.read().await;
-    let cur_mount   = *state.mount.read().await;
-    let cur_consts  = *state.constants.read().await;
+    let cur_mount = *state.mount.read().await;
+    let cur_consts = *state.constants.read().await;
     let skills = state.skills.read().await;
     let recipes_table = state.recipes.read().await;
     let team_buffs_table = state.team_buffs.read().await;
@@ -7730,27 +9686,42 @@ async fn run_auto_optimize_compute(
     //    - 加速 enhance 单独存到 haste_enh_list，叶子里枚举 2^N 个"开/关"组合（HAT+SHOES = 4 种）
     //    - 非加速槽的 enhance 由 Phase B 偏导决策，Phase A 不带 enhance 贡献
     //    - 五彩石 stone_id 直接 fold 进 init_ctx，按 dc/dl 自动激活
-    struct Cand { equip_id: u32, haste_marginal: u32 }
+    struct Cand {
+        equip_id: u32,
+        haste_marginal: u32,
+    }
     let default_str = req.default_strength.unwrap_or(6);
-    let default_emb = req.default_embedding.clone().unwrap_or_else(|| vec![6, 6, 6]);
+    let default_emb = req
+        .default_embedding
+        .clone()
+        .unwrap_or_else(|| vec![6, 6, 6]);
 
-    let pool: HashMap<String, Vec<Cand>> = candidate_positions.iter().map(|pos| {
-        let sub = equip::pos_to_subtype(pos);
-        let mut v: Vec<Cand> = Vec::new();
-        for &id in &req.candidates[pos] {
-            if let Some(it) = equip_data.items.get(&(sub, id)) {
-                let cfg_no_enh = equip::SlotConfig {
-                    equip_id: id, strength: default_str, embedding: default_emb.clone(),
-                    enhance_id: 0, enchant_id: 0,
-                };
-                let item_h = item_haste_marginal(it, &cfg_no_enh);
-                v.push(Cand { equip_id: id, haste_marginal: item_h });
+    let pool: HashMap<String, Vec<Cand>> = candidate_positions
+        .iter()
+        .map(|pos| {
+            let sub = equip::pos_to_subtype(pos);
+            let mut v: Vec<Cand> = Vec::new();
+            for &id in &req.candidates[pos] {
+                if let Some(it) = equip_data.items.get(&(sub, id)) {
+                    let cfg_no_enh = equip::SlotConfig {
+                        equip_id: id,
+                        strength: default_str,
+                        embedding: default_emb.clone(),
+                        enhance_id: 0,
+                        enchant_id: 0,
+                    };
+                    let item_h = item_haste_marginal(it, &cfg_no_enh);
+                    v.push(Cand {
+                        equip_id: id,
+                        haste_marginal: item_h,
+                    });
+                }
             }
-        }
-        // 按 haste 降序：高 haste 先尝试，剪枝命中率高
-        v.sort_by(|a, b| b.haste_marginal.cmp(&a.haste_marginal));
-        (pos.clone(), v)
-    }).collect();
+            // 按 haste 降序：高 haste 先尝试，剪枝命中率高
+            v.sort_by(|a, b| b.haste_marginal.cmp(&a.haste_marginal));
+            (pos.clone(), v)
+        })
+        .collect();
 
     // 加速 enhance 信息：每加速槽对应一个 (slot_idx, enhance_id, haste, raw_delta)
     //   leaf 时枚举 2^N 个"开/关"组合，对每个组合在 raw 上做 haste 偏移（紫·急速 仅贡献 atHasteBase）
@@ -7759,14 +9730,18 @@ async fn run_auto_optimize_compute(
     struct HasteEnhInfo {
         slot_idx: usize,
         enhance_id: u32,
-        haste: u32,            // atHasteBase 贡献
-        accum_delta: Vec<(u8, f64)>,  // 完整 enhance Δ accum（fallback 用）
-        haste_only: bool,      // true = 只给 atHasteBase（fast path）
+        haste: u32,                  // atHasteBase 贡献
+        accum_delta: Vec<(u8, f64)>, // 完整 enhance Δ accum（fallback 用）
+        haste_only: bool,            // true = 只给 atHasteBase（fast path）
     }
-    let haste_enh_list: Vec<HasteEnhInfo> = candidate_positions.iter().enumerate()
+    let haste_enh_list: Vec<HasteEnhInfo> = candidate_positions
+        .iter()
+        .enumerate()
         .filter_map(|(i, pos)| {
             let enh_id = req.haste_enhance_ids.get(pos).copied().unwrap_or(0);
-            if enh_id == 0 { return None; }
+            if enh_id == 0 {
+                return None;
+            }
             let sub = equip::pos_to_subtype(pos) as i32;
             let list = equip_data.enhances.get(&sub)?;
             let e = list.iter().find(|e| e.id == enh_id)?;
@@ -7774,8 +9749,11 @@ async fn run_auto_optimize_compute(
             let mut haste_only = true;
             let mut accum_delta: Vec<(u8, f64)> = Vec::new();
             for (slot, val) in &e.attributes {
-                if slot == "atHasteBase" { haste += val; }
-                else { haste_only = false; }
+                if slot == "atHasteBase" {
+                    haste += val;
+                } else {
+                    haste_only = false;
+                }
                 if let Some(idx) = equip::search_calc::slot_to_idx(slot) {
                     accum_delta.push((idx as u8, *val as f64));
                 }
@@ -7790,26 +9768,36 @@ async fn run_auto_optimize_compute(
         })
         .collect();
     let max_enh_total: u32 = haste_enh_list.iter().map(|h| h.haste).sum();
-    eprintln!("[auto-enum] haste_enh_list: {} slots, total max haste = {}",
-        haste_enh_list.len(), max_enh_total);
+    eprintln!(
+        "[auto-enum] haste_enh_list: {} slots, total max haste = {}",
+        haste_enh_list.len(),
+        max_enh_total
+    );
 
     // h_minmax：每槽 cur_h 贡献范围（仅装备 atHasteBase + 加速 enhance 选项；不含 set bonus / stone）
-    let enh_range_per_slot = compute_enhance_haste_range_per_slot(&req.enhance_candidates, equip_data);
-    let h_minmax: Vec<(u32, u32)> = candidate_positions.iter().map(|pos| {
-        let p = &pool[pos];
-        if p.is_empty() { return (0, 0); }
-        let item_mn = p.iter().map(|c| c.haste_marginal).min().unwrap() as i64;
-        let item_mx = p.iter().map(|c| c.haste_marginal).max().unwrap() as i64;
-        let (enh_mn, enh_mx) = enh_range_per_slot.get(pos).copied().unwrap_or((0, 0));
-        let mn = (item_mn + enh_mn).max(0) as u32;
-        let mx = (item_mx + enh_mx).max(0) as u32;
-        (mn, mx)
-    }).collect();
+    let enh_range_per_slot =
+        compute_enhance_haste_range_per_slot(&req.enhance_candidates, equip_data);
+    let h_minmax: Vec<(u32, u32)> = candidate_positions
+        .iter()
+        .map(|pos| {
+            let p = &pool[pos];
+            if p.is_empty() {
+                return (0, 0);
+            }
+            let item_mn = p.iter().map(|c| c.haste_marginal).min().unwrap() as i64;
+            let item_mx = p.iter().map(|c| c.haste_marginal).max().unwrap() as i64;
+            let (enh_mn, enh_mx) = enh_range_per_slot.get(pos).copied().unwrap_or((0, 0));
+            let mn = (item_mn + enh_mn).max(0) as u32;
+            let mx = (item_mx + enh_mx).max(0) as u32;
+            (mn, mx)
+        })
+        .collect();
 
     // 实际枚举叶子数 = pool 各槽乘积（含加速 enhance pair 展开）。
     //   req-based 的 total_combos 只算装备 ID 数，遗漏了 pair 展开 → 进度条分母偏小。
     //   覆盖 progress.total_combos 让前端进度显示与真实枚举量对齐。
-    let total_combos: u64 = candidate_positions.iter()
+    let total_combos: u64 = candidate_positions
+        .iter()
         .map(|p| pool.get(p).map(|v| v.len() as u64).unwrap_or(1))
         .product();
     {
@@ -7818,12 +9806,17 @@ async fn run_auto_optimize_compute(
     }
 
     // 2. 基线（fixed_slots only）
-    let baseline_calc = equip::calculate(equip_data, &equip::CalcRequest {
-        slots: req.fixed_slots.clone(),
-        stone_id: req.stone_id,
-        mount: req.mount,
-        talents: req.talents.clone(),
-    }, &bs, &mc);
+    let baseline_calc = equip::calculate(
+        equip_data,
+        &equip::CalcRequest {
+            slots: req.fixed_slots.clone(),
+            stone_id: req.stone_id,
+            mount: req.mount,
+            talents: req.talents.clone(),
+        },
+        &bs,
+        &mc,
+    );
     let baseline_attrs = raw_to_attributes(&baseline_calc.raw);
     let baseline_haste = baseline_calc.raw.haste_level as u32;
 
@@ -7842,11 +9835,17 @@ async fn run_auto_optimize_compute(
             for (_n, attrs) in &set_entry.bonuses {
                 let mut tier_h: i64 = 0;
                 for b in attrs {
-                    if b.slot == "atHasteBase" { tier_h += b.value; }
+                    if b.slot == "atHasteBase" {
+                        tier_h += b.value;
+                    }
                 }
-                if tier_h > set_max { set_max = tier_h; }
+                if tier_h > set_max {
+                    set_max = tier_h;
+                }
             }
-            if set_max > 0 { total = total.saturating_add(set_max as u32); }
+            if set_max > 0 {
+                total = total.saturating_add(set_max as u32);
+            }
         }
         total
     };
@@ -7855,11 +9854,15 @@ async fn run_auto_optimize_compute(
         let mut total: i64 = 0;
         if let Some(stone) = equip_data.stones.iter().find(|s| s.id == req.stone_id) {
             for sa in &stone.attributes {
-                if sa.slot == "atHasteBase" { total += sa.value.max(0); }
+                if sa.slot == "atHasteBase" {
+                    total += sa.value.max(0);
+                }
             }
         }
         total.max(0) as u32
-    } else { 0 };
+    } else {
+        0
+    };
     let max_haste_delta = max_set_haste + max_stone_extra_haste;
     // 候选 cur_h（装备-only atHasteBase 之和）必要窗口：
     //   final = baseline + cur_h + enh_haste + Δ_set + Δ_stone
@@ -7869,12 +9872,19 @@ async fn run_auto_optimize_compute(
     // 空数组 fallback 成 [0, cap=natural_cap]，等同"无约束"
     let natural_cap = (0.25 * LP_HASTE) as u32;
     let target_ranges: Vec<HasteRange> = if req.target_haste.is_empty() {
-        vec![HasteRange { min: 0, max: natural_cap }]
+        vec![HasteRange {
+            min: 0,
+            max: natural_cap,
+        }]
     } else {
         req.target_haste.clone()
     };
     let union_min: u32 = target_ranges.iter().map(|r| r.min).min().unwrap_or(0);
-    let union_max: u32 = target_ranges.iter().map(|r| r.max).max().unwrap_or(natural_cap);
+    let union_max: u32 = target_ranges
+        .iter()
+        .map(|r| r.max)
+        .max()
+        .unwrap_or(natural_cap);
     let adj_target_min: u32 = union_min
         .saturating_sub(baseline_haste)
         .saturating_sub(max_haste_delta)
@@ -7894,15 +9904,23 @@ async fn run_auto_optimize_compute(
     let build_equipment_map = |cand_ids: &[u32]| -> HashMap<String, u32> {
         let mut m: HashMap<String, u32> = HashMap::new();
         for (pos, cfg) in &req.fixed_slots {
-            if cfg.equip_id   != 0 { m.insert(pos.clone(), cfg.equip_id); }
-            if cfg.enchant_id != 0 { m.insert(format!("ENCHANT_{}", pos), cfg.enchant_id); }
+            if cfg.equip_id != 0 {
+                m.insert(pos.clone(), cfg.equip_id);
+            }
+            if cfg.enchant_id != 0 {
+                m.insert(format!("ENCHANT_{}", pos), cfg.enchant_id);
+            }
         }
         for (i, pos) in candidate_positions.iter().enumerate() {
             if let Some(&id) = cand_ids.get(i) {
-                if id != 0 { m.insert(pos.clone(), id); }
+                if id != 0 {
+                    m.insert(pos.clone(), id);
+                }
             }
             if let Some(&eid) = req.default_enchants.get(pos) {
-                if eid != 0 { m.insert(format!("ENCHANT_{}", pos), eid); }
+                if eid != 0 {
+                    m.insert(format!("ENCHANT_{}", pos), eid);
+                }
             }
         }
         m
@@ -7927,7 +9945,11 @@ async fn run_auto_optimize_compute(
             network_delay: req.network_delay,
             initial_rage: Some(req.initial_rage),
             pauses: vec![],
-            boss_attack_interval: if req.boss_attack_interval > 0.0 { Some(req.boss_attack_interval) } else { None },
+            boss_attack_interval: if req.boss_attack_interval > 0.0 {
+                Some(req.boss_attack_interval)
+            } else {
+                None
+            },
             hanjia_expectation: Some(req.hanjia_expectation),
             tiegu_mode: req.tiegu_mode,
             experimental: req.experimental,
@@ -7941,8 +9963,15 @@ async fn run_auto_optimize_compute(
     };
     let baseline_dps = simulate_core(
         &make_sim_req(baseline_attrs, baseline_equipment.clone()),
-        &skills, cur_version, cur_mount, cur_consts, &recipes_table, &team_buffs_table, &formations_table,
-    ).dps;
+        &skills,
+        cur_version,
+        cur_mount,
+        cur_consts,
+        &recipes_table,
+        &team_buffs_table,
+        &formations_table,
+    )
+    .dps;
 
     // 3. 枚举 + 剪枝 + 增量 calc + dedup
     let t_calc_start = std::time::Instant::now();
@@ -7954,59 +9983,100 @@ async fn run_auto_optimize_compute(
     //   五彩石不再搜索（删除了 haste_stone_id 二态）；req.stone_id 直接进 ctx，
     //   leaf 时 calc_leaf_raw 按 live dc/dl 自动激活对应属性 → 单次 calc，无 stone iter
     let init_ctx = equip::search_calc::prepare_init(
-        equip_data, &req.fixed_slots, req.stone_id, &req.talents, &bs, &mc,
+        equip_data,
+        &req.fixed_slots,
+        req.stone_id,
+        &req.talents,
+        &bs,
+        &mc,
     );
 
     // Sanity check：baseline (fixed_slots only) 时 calc_leaf_raw 应等同于 equip::calculate.raw
     // 这一次额外计算覆盖整套后处理 / 套装 / 五彩石 / 心法转化 的等价性。
     {
-        let init_effect_count: HashMap<u32, u32> =
-            init_ctx.initial_effect_ids.iter().map(|&e| (e, 1)).collect();
+        let init_effect_count: HashMap<u32, u32> = init_ctx
+            .initial_effect_ids
+            .iter()
+            .map(|&e| (e, 1))
+            .collect();
         let new_raw = equip::search_calc::calc_leaf_raw(
-            &init_ctx, &init_ctx.initial_accum, &init_ctx.initial_set_counts,
-            init_ctx.initial_diamond_count, init_ctx.initial_diamond_level,
+            &init_ctx,
+            &init_ctx.initial_accum,
+            &init_ctx.initial_set_counts,
+            init_ctx.initial_diamond_count,
+            init_ctx.initial_diamond_level,
         );
         let _ = init_effect_count;
         let old = &baseline_calc.raw;
         let mismatches = [
-            ("crit",     new_raw.crit_level         as u32, old.crit_level         as u32),
-            ("crit_eff", new_raw.crit_effect_level  as u32, old.crit_effect_level  as u32),
-            ("overcome", new_raw.overcome_level     as u32, old.overcome_level     as u32),
-            ("strain",   new_raw.strain_level       as u32, old.strain_level       as u32),
-            ("surplus",  new_raw.surplus_value      as u32, old.surplus_value      as u32),
-            ("attack",   new_raw.base_attack        as u32, old.base_attack        as u32),
-            ("agility",  new_raw.agility            as u32, old.agility            as u32),
-            ("strength", new_raw.strength           as u32, old.strength           as u32),
-            ("haste",    new_raw.haste_level        as u32, old.haste_level        as u32),
-            ("vit",      new_raw.vitality           as u32, old.vitality           as u32),
-            ("parry",    new_raw.parry_level        as u32, old.parry_level        as u32),
+            ("crit", new_raw.crit_level as u32, old.crit_level as u32),
+            (
+                "crit_eff",
+                new_raw.crit_effect_level as u32,
+                old.crit_effect_level as u32,
+            ),
+            (
+                "overcome",
+                new_raw.overcome_level as u32,
+                old.overcome_level as u32,
+            ),
+            (
+                "strain",
+                new_raw.strain_level as u32,
+                old.strain_level as u32,
+            ),
+            (
+                "surplus",
+                new_raw.surplus_value as u32,
+                old.surplus_value as u32,
+            ),
+            ("attack", new_raw.base_attack as u32, old.base_attack as u32),
+            ("agility", new_raw.agility as u32, old.agility as u32),
+            ("strength", new_raw.strength as u32, old.strength as u32),
+            ("haste", new_raw.haste_level as u32, old.haste_level as u32),
+            ("vit", new_raw.vitality as u32, old.vitality as u32),
+            ("parry", new_raw.parry_level as u32, old.parry_level as u32),
         ];
         let bad: Vec<_> = mismatches.iter().filter(|(_, a, b)| a != b).collect();
         if !bad.is_empty() {
             println!("[auto-enum] WARN: incremental calc mismatch on baseline:");
-            for (k, a, b) in &bad { println!("  {:<10} new={} old={}", k, a, b); }
-            warnings.push(format!("增量 calc 校验未通过 (baseline)：{} 个字段不一致",  bad.len()));
+            for (k, a, b) in &bad {
+                println!("  {:<10} new={} old={}", k, a, b);
+            }
+            warnings.push(format!(
+                "增量 calc 校验未通过 (baseline)：{} 个字段不一致",
+                bad.len()
+            ));
         }
     }
     // 每候选物化 SlotContrib（装备-only：每槽 5 个装备，无 enhance；加速 enhance 在 leaf 时叠加）
-    let cand_contribs: HashMap<String, Vec<equip::search_calc::SlotContrib>> = candidate_positions.iter().map(|pos| {
-        let v: Vec<_> = pool[pos].iter().map(|c| {
-            let cfg = equip::SlotConfig {
-                equip_id: c.equip_id, strength: default_str,
-                embedding: default_emb.clone(),
-                enhance_id: 0,
-                enchant_id: 0,
-            };
-            equip::search_calc::prepare_slot_contrib(equip_data, pos, &cfg).unwrap_or_default()
-        }).collect();
-        (pos.clone(), v)
-    }).collect();
+    let cand_contribs: HashMap<String, Vec<equip::search_calc::SlotContrib>> = candidate_positions
+        .iter()
+        .map(|pos| {
+            let v: Vec<_> = pool[pos]
+                .iter()
+                .map(|c| {
+                    let cfg = equip::SlotConfig {
+                        equip_id: c.equip_id,
+                        strength: default_str,
+                        embedding: default_emb.clone(),
+                        enhance_id: 0,
+                        enchant_id: 0,
+                    };
+                    equip::search_calc::prepare_slot_contrib(equip_data, pos, &cfg)
+                        .unwrap_or_default()
+                })
+                .collect();
+            (pos.clone(), v)
+        })
+        .collect();
 
     // 注意：unique 存 (cand_ids, enh_ids, raw)，省掉每叶 HashMap clone
     //   - cand_ids: 按 candidate_positions 顺序的 equip_id
     //   - enh_ids:  按 candidate_positions 顺序的 加速 enhance ID（非加速槽 = 0）
     //   - raw:      该 (装备 pair + 固定 stone) 配置的真实 RawAttrs
-    let mut unique: ahash::AHashMap<(u128, u64), (Box<[u32]>, Box<[u32]>, equip::RawAttrs)> = ahash::AHashMap::new();
+    let mut unique: ahash::AHashMap<(u128, u64), (Box<[u32]>, Box<[u32]>, equip::RawAttrs)> =
+        ahash::AHashMap::new();
     let mut enumerated: u64 = 0;
     let mut after_pruning: u64 = 0;
 
@@ -8020,10 +10090,10 @@ async fn run_auto_optimize_compute(
         leaves_passed_marginal: u64,
         leaves_strict_filtered: u64,
         leaves_kept: u64,
-        time_apply_ns: u64,    // 增量 apply / unapply（accum + set_counts）
-        time_calc_ns: u64,     // calc_leaf_raw（拷贝 accum + 套装 + 后处理）
-        time_hash_ns: u64,     // fp + encode + dedup
-        time_emit_ns: u64,     // 仅 was_new 时构造 slots HashMap
+        time_apply_ns: u64, // 增量 apply / unapply（accum + set_counts）
+        time_calc_ns: u64,  // calc_leaf_raw（拷贝 accum + 套装 + 后处理）
+        time_hash_ns: u64,  // fp + encode + dedup
+        time_emit_ns: u64,  // 仅 was_new 时构造 slots HashMap
         last_log_at_ms: u64,
     }
 
@@ -8037,22 +10107,36 @@ async fn run_auto_optimize_compute(
     }
 
     fn apply_contrib(s: &mut LiveState, c: &equip::search_calc::SlotContrib) {
-        for (i, v) in &c.deltas { s.accum[*i as usize] += *v; }
-        if c.set_id > 0 { *s.set_counts.entry(c.set_id).or_default() += 1; }
-        for &eid in &c.effect_ids { *s.effect_count.entry(eid).or_default() += 1; }
+        for (i, v) in &c.deltas {
+            s.accum[*i as usize] += *v;
+        }
+        if c.set_id > 0 {
+            *s.set_counts.entry(c.set_id).or_default() += 1;
+        }
+        for &eid in &c.effect_ids {
+            *s.effect_count.entry(eid).or_default() += 1;
+        }
         s.diamond_count += c.diamond_count;
         s.diamond_level += c.diamond_level;
     }
     fn unapply_contrib(s: &mut LiveState, c: &equip::search_calc::SlotContrib) {
-        for (i, v) in &c.deltas { s.accum[*i as usize] -= *v; }
+        for (i, v) in &c.deltas {
+            s.accum[*i as usize] -= *v;
+        }
         if c.set_id > 0 {
             if let Some(n) = s.set_counts.get_mut(&c.set_id) {
-                *n -= 1; if *n == 0 { s.set_counts.remove(&c.set_id); }
+                *n -= 1;
+                if *n == 0 {
+                    s.set_counts.remove(&c.set_id);
+                }
             }
         }
         for &eid in &c.effect_ids {
             if let Some(n) = s.effect_count.get_mut(&eid) {
-                *n -= 1; if *n == 0 { s.effect_count.remove(&eid); }
+                *n -= 1;
+                if *n == 0 {
+                    s.effect_count.remove(&eid);
+                }
             }
         }
         s.diamond_count -= c.diamond_count;
@@ -8063,20 +10147,29 @@ async fn run_auto_optimize_compute(
     fn compute_fp_live(s: &LiveState) -> u64 {
         use std::hash::Hasher;
         let mut sets: std::collections::BTreeMap<u32, u8> = Default::default();
-        for (&sid, &cnt) in &s.set_counts { sets.insert(sid, cnt as u8); }
+        for (&sid, &cnt) in &s.set_counts {
+            sets.insert(sid, cnt as u8);
+        }
         let mut effects: std::collections::BTreeSet<u32> = Default::default();
-        for (&eid, _) in &s.effect_count { effects.insert(eid); }
+        for (&eid, _) in &s.effect_count {
+            effects.insert(eid);
+        }
         let mut h = ahash::AHasher::default();
-        for (sid, cnt) in &sets { h.write_u32(*sid); h.write_u8(*cnt); }
+        for (sid, cnt) in &sets {
+            h.write_u32(*sid);
+            h.write_u8(*cnt);
+        }
         h.write_u8(0xff);
-        for eid in &effects { h.write_u32(*eid); }
+        for eid in &effects {
+            h.write_u32(*eid);
+        }
         h.finish()
     }
 
     fn recurse(
         idx: usize,
         cur_h: u32,
-        partial: &mut Vec<u32>,           // 装备 IDs（按槽位顺序）
+        partial: &mut Vec<u32>, // 装备 IDs（按槽位顺序）
         positions: &[String],
         pool: &HashMap<String, Vec<Cand>>,
         contribs: &HashMap<String, Vec<equip::search_calc::SlotContrib>>,
@@ -8084,7 +10177,8 @@ async fn run_auto_optimize_compute(
         // subtree_size[idx+1] = 在深度 idx 选一个候选后下面的叶子数；用于分支剪枝时累加 branch_skipped
         subtree_size: &[u64],
         // cur_h（候选 atHasteBase 之和）的必要窗口，已扣 baseline + max_haste_delta + max_enh_total
-        cur_h_min: u32, cur_h_max: u32,
+        cur_h_min: u32,
+        cur_h_max: u32,
         // 绝对 haste 多区间（leaf 时 raw.haste_level 必须落入任一区间）
         abs_ranges: &[HasteRange],
         bucket_size: u32,
@@ -8094,17 +10188,23 @@ async fn run_auto_optimize_compute(
         ctx: &equip::search_calc::InitCtx,
         live: &mut LiveState,
         unique: &mut ahash::AHashMap<(u128, u64), (Box<[u32]>, Box<[u32]>, equip::RawAttrs)>,
-        enumerated: &mut u64, after_pruning: &mut u64, branch_skipped: &mut u64,
+        enumerated: &mut u64,
+        after_pruning: &mut u64,
+        branch_skipped: &mut u64,
         progress: &Arc<std::sync::Mutex<AutoSearchProgress>>,
         started_at_ms: u64,
         cancel: &std::sync::atomic::AtomicBool,
-        pause:  &std::sync::atomic::AtomicBool,
-        stats:  &mut EnumStats,
+        pause: &std::sync::atomic::AtomicBool,
+        stats: &mut EnumStats,
     ) {
         use std::sync::atomic::Ordering;
-        if cancel.load(Ordering::Relaxed) { return; }
+        if cancel.load(Ordering::Relaxed) {
+            return;
+        }
         while pause.load(Ordering::Relaxed) {
-            if cancel.load(Ordering::Relaxed) { return; }
+            if cancel.load(Ordering::Relaxed) {
+                return;
+            }
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
         if idx == positions.len() {
@@ -8113,7 +10213,9 @@ async fn run_auto_optimize_compute(
             // 每 10000 次叶子刷新进度 + 5 秒一次日志
             if *enumerated % 10000 == 0 {
                 let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0);
                 {
                     let mut p = progress.lock().unwrap();
                     p.enumerated = *enumerated;
@@ -8125,7 +10227,11 @@ async fn run_auto_optimize_compute(
                 let elapsed = now.saturating_sub(started_at_ms);
                 if elapsed.saturating_sub(stats.last_log_at_ms) >= 5000 {
                     stats.last_log_at_ms = elapsed;
-                    let leaves_per_sec = if elapsed > 0 { *enumerated as f64 * 1000.0 / elapsed as f64 } else { 0.0 };
+                    let leaves_per_sec = if elapsed > 0 {
+                        *enumerated as f64 * 1000.0 / elapsed as f64
+                    } else {
+                        0.0
+                    };
                     println!("[auto-enum] T={:.1}s  leaves={}  branch-prune(min={}, max={})  marginal-filter={}  passed={}  strict-filter={}  unique={}  rate={:.0} leaves/s  | apply={:.0}ms  calc={:.0}ms  hash={:.0}ms  emit={:.0}ms",
                         elapsed as f64 / 1000.0,
                         *enumerated, stats.branches_pruned_min, stats.branches_pruned_max,
@@ -8150,7 +10256,11 @@ async fn run_auto_optimize_compute(
             // 单次 calc：算"全部加速 enhance 关"情况下的完整 raw（其它槽 enhance=0）
             let t_calc = std::time::Instant::now();
             let raw_no_enh = equip::search_calc::calc_leaf_raw(
-                ctx, &live.accum, &live.set_counts, live.diamond_count, live.diamond_level,
+                ctx,
+                &live.accum,
+                &live.set_counts,
+                live.diamond_count,
+                live.diamond_level,
             );
             stats.time_calc_ns += t_calc.elapsed().as_nanos() as u64;
 
@@ -8167,12 +10277,17 @@ async fn run_auto_optimize_compute(
                 // 累加该组合的 enh haste
                 let mut enh_haste_sum: u32 = 0;
                 for (i, info) in haste_enh_list.iter().enumerate() {
-                    if mask & (1 << i) != 0 { enh_haste_sum = enh_haste_sum.saturating_add(info.haste); }
+                    if mask & (1 << i) != 0 {
+                        enh_haste_sum = enh_haste_sum.saturating_add(info.haste);
+                    }
                 }
                 let h_with_enh = (raw_no_enh.haste_level as u32).saturating_add(enh_haste_sum);
 
                 // 严格 haste 过滤：必须落入 abs_ranges 的任一区间
-                if !abs_ranges.iter().any(|r| h_with_enh >= r.min && h_with_enh <= r.max) {
+                if !abs_ranges
+                    .iter()
+                    .any(|r| h_with_enh >= r.min && h_with_enh <= r.max)
+                {
                     stats.leaves_strict_filtered += 1;
                     continue;
                 }
@@ -8182,7 +10297,9 @@ async fn run_auto_optimize_compute(
                 raw_combo.haste_level += enh_haste_sum as f64;
 
                 // mask 编进 fp，让不同 enhance 选择成不同 unique 项
-                let fp_with_mask = fp.wrapping_mul(0x9e3779b97f4a7c15).wrapping_add(mask as u64);
+                let fp_with_mask = fp
+                    .wrapping_mul(0x9e3779b97f4a7c15)
+                    .wrapping_add(mask as u64);
                 let key = encode_combo_key(&raw_combo, fp_with_mask, bucket_size);
 
                 if !unique.contains_key(&key) {
@@ -8190,7 +10307,9 @@ async fn run_auto_optimize_compute(
                     let cand_ids: Box<[u32]> = partial.iter().copied().collect();
                     let mut enh_ids: Box<[u32]> = vec![0u32; positions.len()].into_boxed_slice();
                     for (i, info) in haste_enh_list.iter().enumerate() {
-                        if mask & (1 << i) != 0 { enh_ids[info.slot_idx] = info.enhance_id; }
+                        if mask & (1 << i) != 0 {
+                            enh_ids[info.slot_idx] = info.enhance_id;
+                        }
                     }
                     unique.insert(key, (cand_ids, enh_ids, raw_combo));
                     stats.time_emit_ns += t_emit.elapsed().as_nanos() as u64;
@@ -8200,8 +10319,8 @@ async fn run_auto_optimize_compute(
             return;
         }
 
-        let max_remaining: u32 = h_minmax[idx+1..].iter().map(|(_, mx)| *mx).sum();
-        let min_remaining: u32 = h_minmax[idx+1..].iter().map(|(mn, _)| *mn).sum();
+        let max_remaining: u32 = h_minmax[idx + 1..].iter().map(|(_, mx)| *mx).sum();
+        let min_remaining: u32 = h_minmax[idx + 1..].iter().map(|(mn, _)| *mn).sum();
         let cands = &pool[&positions[idx]];
         let cands_contribs = &contribs[&positions[idx]];
         // 一个候选被剪掉时跳过的叶子数 = subtree_size[idx+1]（这个候选下面整棵子树）
@@ -8225,15 +10344,32 @@ async fn run_auto_optimize_compute(
             stats.time_apply_ns += t_apply.elapsed().as_nanos() as u64;
 
             partial.push(cand.equip_id);
-            recurse(idx + 1, nh, partial, positions, pool, contribs, h_minmax,
+            recurse(
+                idx + 1,
+                nh,
+                partial,
+                positions,
+                pool,
+                contribs,
+                h_minmax,
                 subtree_size,
-                cur_h_min, cur_h_max,
+                cur_h_min,
+                cur_h_max,
                 abs_ranges,
                 bucket_size,
                 haste_enh_list,
-                ctx, live,
-                unique, enumerated, after_pruning, branch_skipped,
-                progress, started_at_ms, cancel, pause, stats);
+                ctx,
+                live,
+                unique,
+                enumerated,
+                after_pruning,
+                branch_skipped,
+                progress,
+                started_at_ms,
+                cancel,
+                pause,
+                stats,
+            );
             partial.pop();
 
             let t_apply = std::time::Instant::now();
@@ -8243,7 +10379,7 @@ async fn run_auto_optimize_compute(
     }
 
     let cancel_flag = state.auto_search_cancel.clone();
-    let pause_flag  = state.auto_search_pause.clone();
+    let pause_flag = state.auto_search_pause.clone();
     let mut partial: Vec<u32> = Vec::with_capacity(candidate_positions.len());
     let mut enum_stats = EnumStats::default();
     let mut branch_skipped: u64 = 0;
@@ -8258,7 +10394,11 @@ async fn run_auto_optimize_compute(
     let mut live = LiveState {
         accum: init_ctx.initial_accum,
         set_counts: init_ctx.initial_set_counts.clone(),
-        effect_count: init_ctx.initial_effect_ids.iter().map(|&e| (e, 1)).collect(),
+        effect_count: init_ctx
+            .initial_effect_ids
+            .iter()
+            .map(|&e| (e, 1))
+            .collect(),
         diamond_count: init_ctx.initial_diamond_count,
         diamond_level: init_ctx.initial_diamond_level,
     };
@@ -8267,15 +10407,32 @@ async fn run_auto_optimize_compute(
         target_min, target_max, adj_target_min, adj_target_max,
         haste_enh_list.len(), req.stone_id);
     let bucket_size = req.bucket_size;
-    recurse(0, 0, &mut partial, &candidate_positions, &pool, &cand_contribs, &h_minmax,
+    recurse(
+        0,
+        0,
+        &mut partial,
+        &candidate_positions,
+        &pool,
+        &cand_contribs,
+        &h_minmax,
         &subtree_size,
-        adj_target_min, adj_target_max,
+        adj_target_min,
+        adj_target_max,
         &target_ranges,
         bucket_size,
         &haste_enh_list,
-        &init_ctx, &mut live,
-        &mut unique, &mut enumerated, &mut after_pruning, &mut branch_skipped,
-        &progress, started_at_ms, &cancel_flag, &pause_flag, &mut enum_stats);
+        &init_ctx,
+        &mut live,
+        &mut unique,
+        &mut enumerated,
+        &mut after_pruning,
+        &mut branch_skipped,
+        &progress,
+        started_at_ms,
+        &cancel_flag,
+        &pause_flag,
+        &mut enum_stats,
+    );
     let enum_elapsed_ms = t_calc_start.elapsed().as_millis();
     println!(
         "[auto-enum] DONE T={:.1}s  total_combos={}  leaves_visited={}  branch-prune(min={}, max={})  marginal-filter={}  passed={}  strict-filter={}  unique={}  || apply={:.0}ms  calc={:.0}ms ({:.2}μs/件)  hash={:.0}ms  emit={:.0}ms",
@@ -8295,20 +10452,26 @@ async fn run_auto_optimize_compute(
     // 取消时直接返回（feasible=false + warning）
     if cancel_flag.load(std::sync::atomic::Ordering::Relaxed) {
         return AutoOptimizeResponse {
-            feasible: false, baseline_dps, baseline_haste, top: vec![],
+            feasible: false,
+            baseline_dps,
+            baseline_haste,
+            top: vec![],
             stats: AutoOptimizeStats {
                 candidate_positions: candidate_positions.len(),
                 total_combinations: total_combos,
                 after_haste_pruning: after_pruning,
                 unique_keys: unique.len(),
-                after_pareto: 0, simulated: 0,
+                after_pareto: 0,
+                simulated: 0,
                 time_total_ms: t_start.elapsed().as_secs_f64() * 1000.0,
                 time_calc_ms: t_calc_start.elapsed().as_secs_f64() * 1000.0,
-                time_pareto_ms: 0.0, time_simulate_ms: 0.0,
+                time_pareto_ms: 0.0,
+                time_simulate_ms: 0.0,
                 ..Default::default()
             },
             warnings: vec!["搜索已取消（在枚举阶段）".into()],
-            fit_model: None, fit_metrics: None,
+            fit_model: None,
+            fit_metrics: None,
         };
     }
 
@@ -8349,94 +10512,112 @@ async fn run_auto_optimize_compute(
     let t_pareto_start = std::time::Instant::now();
     use rayon::prelude::*;
     // unique_vec: (key, cand_ids, enh_ids, raw)
-    let unique_vec: Vec<((u128, u64), Box<[u32]>, Box<[u32]>, equip::RawAttrs)> =
-        unique.into_iter().map(|(k, (cand_ids, enh_ids, r))| (k, cand_ids, enh_ids, r)).collect();
+    let unique_vec: Vec<((u128, u64), Box<[u32]>, Box<[u32]>, equip::RawAttrs)> = unique
+        .into_iter()
+        .map(|(k, (cand_ids, enh_ids, r))| (k, cand_ids, enh_ids, r))
+        .collect();
 
-    let after_pareto_vec: Vec<((u128, u64), Box<[u32]>, Box<[u32]>, equip::RawAttrs)> = if req.use_pareto {
-        // 4a. 按 fp 分桶（单线程；HashMap insert 顺序稳定）
-        let mut buckets: ahash::AHashMap<u64, Vec<usize>> = ahash::AHashMap::new();
-        for (i, ((_k, fp), _, _, _)) in unique_vec.iter().enumerate() {
-            buckets.entry(*fp).or_default().push(i);
-        }
-        // 4b. 桶内 skyline sweep + rayon 跨桶并行
-        let bucket_vec: Vec<Vec<usize>> = buckets.into_values().collect();
-        let total_points: u64 = bucket_vec.iter().map(|v| v.len() as u64).sum();
-
-        // 进度：以"已处理点数"计（target = total_points）。每桶处理完后原子加 idxs.len()
-        {
-            let mut p = progress.lock().unwrap();
-            p.target_simulated = total_points;
-            p.simulated = 0;
-        }
-        let pareto_counter = Arc::new(std::sync::atomic::AtomicU64::new(0));
-        let hb_done_pareto = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let hb_thread_pareto = {
-            let progress = progress.clone();
-            let counter = pareto_counter.clone();
-            let done = hb_done_pareto.clone();
-            std::thread::spawn(move || {
-                while !done.load(std::sync::atomic::Ordering::Relaxed) {
-                    std::thread::sleep(std::time::Duration::from_millis(100));
-                    let cnt = counter.load(std::sync::atomic::Ordering::Relaxed);
-                    let now = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
-                    let mut p = progress.lock().unwrap();
-                    p.simulated = cnt;
-                    p.elapsed_ms = now.saturating_sub(started_at_ms);
-                }
-            })
-        };
-        let counter_for_par = pareto_counter.clone();
-
-        let bucket_kept: Vec<Vec<usize>> = bucket_vec.into_par_iter().map(|idxs| {
-            let n_pts = idxs.len() as u64;
-            let result = if idxs.len() <= 1 { idxs } else {
-                let mut pts: Vec<(usize, [u32; 8])> = idxs.into_iter().map(|i| {
-                    (i, raw_to_pareto_vec(&unique_vec[i].3, bucket_size))
-                }).collect();
-                pts.sort_unstable_by(|a, b| {
-                    let sa: u64 = a.1.iter().map(|&v| v as u64).sum();
-                    let sb: u64 = b.1.iter().map(|&v| v as u64).sum();
-                    sb.cmp(&sa)
-                });
-                let mut kept: Vec<(usize, [u32; 8])> = Vec::new();
-                'outer: for (i, v) in pts {
-                    for (_, kv) in &kept {
-                        let mut all_ge = true;
-                        let mut any_gt = false;
-                        for d in 0..8 {
-                            if kv[d] < v[d] { all_ge = false; break; }
-                            if kv[d] > v[d] { any_gt = true; }
-                        }
-                        if all_ge && any_gt { continue 'outer; }
-                    }
-                    kept.push((i, v));
-                }
-                kept.into_iter().map(|(i, _)| i).collect()
-            };
-            counter_for_par.fetch_add(n_pts, std::sync::atomic::Ordering::Relaxed);
-            result
-        }).collect();
-
-        hb_done_pareto.store(true, std::sync::atomic::Ordering::Relaxed);
-        let _ = hb_thread_pareto.join();
-
-        let mut keep_idx: Vec<usize> = bucket_kept.into_iter().flatten().collect();
-        keep_idx.sort_unstable();
-        // 把保留的索引取出（unique_vec 不再需要，能用 swap 转移更轻；但实现上 collect 即可）
-        let mut iter = unique_vec.into_iter().enumerate();
-        let mut out = Vec::with_capacity(keep_idx.len());
-        let mut keep_iter = keep_idx.into_iter().peekable();
-        while let (Some(target), Some((i, item))) = (keep_iter.peek().copied(), iter.next()) {
-            if i == target {
-                out.push(item);
-                keep_iter.next();
+    let after_pareto_vec: Vec<((u128, u64), Box<[u32]>, Box<[u32]>, equip::RawAttrs)> =
+        if req.use_pareto {
+            // 4a. 按 fp 分桶（单线程；HashMap insert 顺序稳定）
+            let mut buckets: ahash::AHashMap<u64, Vec<usize>> = ahash::AHashMap::new();
+            for (i, ((_k, fp), _, _, _)) in unique_vec.iter().enumerate() {
+                buckets.entry(*fp).or_default().push(i);
             }
-        }
-        out
-    } else {
-        unique_vec
-    };
+            // 4b. 桶内 skyline sweep + rayon 跨桶并行
+            let bucket_vec: Vec<Vec<usize>> = buckets.into_values().collect();
+            let total_points: u64 = bucket_vec.iter().map(|v| v.len() as u64).sum();
+
+            // 进度：以"已处理点数"计（target = total_points）。每桶处理完后原子加 idxs.len()
+            {
+                let mut p = progress.lock().unwrap();
+                p.target_simulated = total_points;
+                p.simulated = 0;
+            }
+            let pareto_counter = Arc::new(std::sync::atomic::AtomicU64::new(0));
+            let hb_done_pareto = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let hb_thread_pareto = {
+                let progress = progress.clone();
+                let counter = pareto_counter.clone();
+                let done = hb_done_pareto.clone();
+                std::thread::spawn(move || {
+                    while !done.load(std::sync::atomic::Ordering::Relaxed) {
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                        let cnt = counter.load(std::sync::atomic::Ordering::Relaxed);
+                        let now = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_millis() as u64)
+                            .unwrap_or(0);
+                        let mut p = progress.lock().unwrap();
+                        p.simulated = cnt;
+                        p.elapsed_ms = now.saturating_sub(started_at_ms);
+                    }
+                })
+            };
+            let counter_for_par = pareto_counter.clone();
+
+            let bucket_kept: Vec<Vec<usize>> = bucket_vec
+                .into_par_iter()
+                .map(|idxs| {
+                    let n_pts = idxs.len() as u64;
+                    let result = if idxs.len() <= 1 {
+                        idxs
+                    } else {
+                        let mut pts: Vec<(usize, [u32; 8])> = idxs
+                            .into_iter()
+                            .map(|i| (i, raw_to_pareto_vec(&unique_vec[i].3, bucket_size)))
+                            .collect();
+                        pts.sort_unstable_by(|a, b| {
+                            let sa: u64 = a.1.iter().map(|&v| v as u64).sum();
+                            let sb: u64 = b.1.iter().map(|&v| v as u64).sum();
+                            sb.cmp(&sa)
+                        });
+                        let mut kept: Vec<(usize, [u32; 8])> = Vec::new();
+                        'outer: for (i, v) in pts {
+                            for (_, kv) in &kept {
+                                let mut all_ge = true;
+                                let mut any_gt = false;
+                                for d in 0..8 {
+                                    if kv[d] < v[d] {
+                                        all_ge = false;
+                                        break;
+                                    }
+                                    if kv[d] > v[d] {
+                                        any_gt = true;
+                                    }
+                                }
+                                if all_ge && any_gt {
+                                    continue 'outer;
+                                }
+                            }
+                            kept.push((i, v));
+                        }
+                        kept.into_iter().map(|(i, _)| i).collect()
+                    };
+                    counter_for_par.fetch_add(n_pts, std::sync::atomic::Ordering::Relaxed);
+                    result
+                })
+                .collect();
+
+            hb_done_pareto.store(true, std::sync::atomic::Ordering::Relaxed);
+            let _ = hb_thread_pareto.join();
+
+            let mut keep_idx: Vec<usize> = bucket_kept.into_iter().flatten().collect();
+            keep_idx.sort_unstable();
+            // 把保留的索引取出（unique_vec 不再需要，能用 swap 转移更轻；但实现上 collect 即可）
+            let mut iter = unique_vec.into_iter().enumerate();
+            let mut out = Vec::with_capacity(keep_idx.len());
+            let mut keep_iter = keep_idx.into_iter().peekable();
+            while let (Some(target), Some((i, item))) = (keep_iter.peek().copied(), iter.next()) {
+                if i == target {
+                    out.push(item);
+                    keep_iter.next();
+                }
+            }
+            out
+        } else {
+            unique_vec
+        };
     let after_pareto = after_pareto_vec.len();
     let time_pareto_ms = t_pareto_start.elapsed().as_secs_f64() * 1000.0;
 
@@ -8465,7 +10646,8 @@ async fn run_auto_optimize_compute(
     if prefilter_enabled && !weapon_locked {
         warnings.push(
             "主武器未锁定且候选池较大，已启用梯度预筛。如候选包含多种武器（紫武/橙武），\
-             特殊效果差异可能影响线性预测精度，建议优先锁定主武器。".to_string(),
+             特殊效果差异可能影响线性预测精度，建议优先锁定主武器。"
+                .to_string(),
         );
     }
 
@@ -8481,8 +10663,8 @@ async fn run_auto_optimize_compute(
         //   2. 全池 quadratic 预测 → 取 top K_proxy
         //   3. 9 个属性各自 top K_per_attr → union（捕获单轴极端配置）
         const PERT_DELTA: f64 = 1000.0;
-        const HESSIAN_SIMS: u64 = 55;            // 1 + 9*2 + 36
-        const K_PER_ATTR_RATIO: usize = 5;       // 每属性 top = K_proxy / 5（默认 1000）
+        const HESSIAN_SIMS: u64 = 55; // 1 + 9*2 + 36
+        const K_PER_ATTR_RATIO: usize = 5; // 每属性 top = K_proxy / 5（默认 1000）
 
         {
             let mut p = progress.lock().unwrap();
@@ -8491,31 +10673,44 @@ async fn run_auto_optimize_compute(
             p.simulated = 0;
         }
 
-        let perturb_axis = |ref_raw: &equip::RawAttrs, axis: usize, delta: f64| -> equip::RawAttrs {
-            let mut r = ref_raw.clone();
-            match axis {
-                0 => r.strength          += delta,
-                1 => r.agility           += delta,
-                2 => r.base_attack       += delta,
-                3 => r.weapon_damage     += delta,
-                4 => r.surplus_value     += delta,
-                5 => r.crit_level        += delta,
-                6 => r.crit_effect_level += delta,
-                7 => r.overcome_level    += delta,
-                8 => r.strain_level      += delta,
-                _ => {}
-            }
-            r
-        };
+        let perturb_axis =
+            |ref_raw: &equip::RawAttrs, axis: usize, delta: f64| -> equip::RawAttrs {
+                let mut r = ref_raw.clone();
+                match axis {
+                    0 => r.strength += delta,
+                    1 => r.agility += delta,
+                    2 => r.base_attack += delta,
+                    3 => r.weapon_damage += delta,
+                    4 => r.surplus_value += delta,
+                    5 => r.crit_level += delta,
+                    6 => r.crit_effect_level += delta,
+                    7 => r.overcome_level += delta,
+                    8 => r.strain_level += delta,
+                    _ => {}
+                }
+                r
+            };
         let sim_one = |raw: &equip::RawAttrs| -> f64 {
-            simulate_core(&make_sim_req(raw_to_attributes(raw), baseline_equipment.clone()),
-                &skills, ctx.0, ctx.1, ctx.2, &recipes_table, &team_buffs_table, &formations_table).dps
+            simulate_core(
+                &make_sim_req(raw_to_attributes(raw), baseline_equipment.clone()),
+                &skills,
+                ctx.0,
+                ctx.1,
+                ctx.2,
+                &recipes_table,
+                &team_buffs_table,
+                &formations_table,
+            )
+            .dps
         };
         let progress_atomic = std::sync::atomic::AtomicU64::new(0);
         let bump_progress = |delta: u64| {
-            let cnt = progress_atomic.fetch_add(delta, std::sync::atomic::Ordering::Relaxed) + delta;
+            let cnt =
+                progress_atomic.fetch_add(delta, std::sync::atomic::Ordering::Relaxed) + delta;
             let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
             let mut p = progress.lock().unwrap();
             p.simulated = cnt;
             p.elapsed_ms = now.saturating_sub(started_at_ms);
@@ -8523,34 +10718,56 @@ async fn run_auto_optimize_compute(
 
         // ─── S6 计算：1 ref + 18 对角 + 36 交叉 ───
         let mean_of = |configs: &[((u128, u64), Box<[u32]>, Box<[u32]>, equip::RawAttrs)],
-                       indices: Option<&[usize]>| -> equip::RawAttrs
-        {
+                       indices: Option<&[usize]>|
+         -> equip::RawAttrs {
             let mut acc = equip::RawAttrs::default();
             let n = match indices {
-                Some(idx) => { for &i in idx {
-                    let r = &configs[i].3;
-                    acc.strength += r.strength; acc.agility += r.agility;
-                    acc.base_attack += r.base_attack; acc.weapon_damage += r.weapon_damage;
-                    acc.surplus_value += r.surplus_value;
-                    acc.crit_level += r.crit_level; acc.crit_effect_level += r.crit_effect_level;
-                    acc.overcome_level += r.overcome_level; acc.strain_level += r.strain_level;
-                    acc.haste_level += r.haste_level; acc.vitality += r.vitality;
-                } idx.len() as f64 }
-                None => { for c in configs {
-                    let r = &c.3;
-                    acc.strength += r.strength; acc.agility += r.agility;
-                    acc.base_attack += r.base_attack; acc.weapon_damage += r.weapon_damage;
-                    acc.surplus_value += r.surplus_value;
-                    acc.crit_level += r.crit_level; acc.crit_effect_level += r.crit_effect_level;
-                    acc.overcome_level += r.overcome_level; acc.strain_level += r.strain_level;
-                    acc.haste_level += r.haste_level; acc.vitality += r.vitality;
-                } configs.len() as f64 }
+                Some(idx) => {
+                    for &i in idx {
+                        let r = &configs[i].3;
+                        acc.strength += r.strength;
+                        acc.agility += r.agility;
+                        acc.base_attack += r.base_attack;
+                        acc.weapon_damage += r.weapon_damage;
+                        acc.surplus_value += r.surplus_value;
+                        acc.crit_level += r.crit_level;
+                        acc.crit_effect_level += r.crit_effect_level;
+                        acc.overcome_level += r.overcome_level;
+                        acc.strain_level += r.strain_level;
+                        acc.haste_level += r.haste_level;
+                        acc.vitality += r.vitality;
+                    }
+                    idx.len() as f64
+                }
+                None => {
+                    for c in configs {
+                        let r = &c.3;
+                        acc.strength += r.strength;
+                        acc.agility += r.agility;
+                        acc.base_attack += r.base_attack;
+                        acc.weapon_damage += r.weapon_damage;
+                        acc.surplus_value += r.surplus_value;
+                        acc.crit_level += r.crit_level;
+                        acc.crit_effect_level += r.crit_effect_level;
+                        acc.overcome_level += r.overcome_level;
+                        acc.strain_level += r.strain_level;
+                        acc.haste_level += r.haste_level;
+                        acc.vitality += r.vitality;
+                    }
+                    configs.len() as f64
+                }
             };
-            acc.strength /= n; acc.agility /= n;
-            acc.base_attack /= n; acc.weapon_damage /= n; acc.surplus_value /= n;
-            acc.crit_level /= n; acc.crit_effect_level /= n;
-            acc.overcome_level /= n; acc.strain_level /= n;
-            acc.haste_level /= n; acc.vitality /= n;
+            acc.strength /= n;
+            acc.agility /= n;
+            acc.base_attack /= n;
+            acc.weapon_damage /= n;
+            acc.surplus_value /= n;
+            acc.crit_level /= n;
+            acc.crit_effect_level /= n;
+            acc.overcome_level /= n;
+            acc.strain_level /= n;
+            acc.haste_level /= n;
+            acc.vitality /= n;
             acc
         };
 
@@ -8559,101 +10776,147 @@ async fn run_auto_optimize_compute(
         bump_progress(1);
 
         // 9 维 × 2 扰动 → 一阶 g_i + 对角 h_ii
-        let d_pairs: Vec<(f64, f64)> = (0..9).into_par_iter().map(|j| {
-            let r1 = perturb_axis(&mean_pool, j, PERT_DELTA);
-            let r2 = perturb_axis(&mean_pool, j, 2.0 * PERT_DELTA);
-            (sim_one(&r1) - ref_dps, sim_one(&r2) - ref_dps)
-        }).collect();
+        let d_pairs: Vec<(f64, f64)> = (0..9)
+            .into_par_iter()
+            .map(|j| {
+                let r1 = perturb_axis(&mean_pool, j, PERT_DELTA);
+                let r2 = perturb_axis(&mean_pool, j, 2.0 * PERT_DELTA);
+                (sim_one(&r1) - ref_dps, sim_one(&r2) - ref_dps)
+            })
+            .collect();
         bump_progress(18);
 
         let mut grad = [0f64; 9];
         let mut h_diag = [0f64; 9];
         for j in 0..9 {
             let (d1, d2) = d_pairs[j];
-            grad[j]   = (4.0 * d1 - d2) / (2.0 * PERT_DELTA);
+            grad[j] = (4.0 * d1 - d2) / (2.0 * PERT_DELTA);
             h_diag[j] = (d2 - 2.0 * d1) / (PERT_DELTA * PERT_DELTA);
         }
 
         // 36 个交叉对 → 完整 Hessian
-        let pairs: Vec<(usize, usize)> = (0..9).flat_map(|i| ((i+1)..9).map(move |j| (i, j))).collect();
-        let cross: Vec<f64> = pairs.par_iter().map(|&(i, j)| {
-            let mut r = mean_pool.clone();
-            r = perturb_axis(&r, i, PERT_DELTA);
-            r = perturb_axis(&r, j, PERT_DELTA);
-            let sim_ij = sim_one(&r);
-            let lin = ref_dps + PERT_DELTA * (grad[i] + grad[j]);
-            let diag = 0.5 * PERT_DELTA * PERT_DELTA * (h_diag[i] + h_diag[j]);
-            (sim_ij - lin - diag) / (PERT_DELTA * PERT_DELTA)
-        }).collect();
+        let pairs: Vec<(usize, usize)> = (0..9)
+            .flat_map(|i| ((i + 1)..9).map(move |j| (i, j)))
+            .collect();
+        let cross: Vec<f64> = pairs
+            .par_iter()
+            .map(|&(i, j)| {
+                let mut r = mean_pool.clone();
+                r = perturb_axis(&r, i, PERT_DELTA);
+                r = perturb_axis(&r, j, PERT_DELTA);
+                let sim_ij = sim_one(&r);
+                let lin = ref_dps + PERT_DELTA * (grad[i] + grad[j]);
+                let diag = 0.5 * PERT_DELTA * PERT_DELTA * (h_diag[i] + h_diag[j]);
+                (sim_ij - lin - diag) / (PERT_DELTA * PERT_DELTA)
+            })
+            .collect();
         bump_progress(36);
 
         let mut hess = [[0f64; 9]; 9];
-        for j in 0..9 { hess[j][j] = h_diag[j]; }
+        for j in 0..9 {
+            hess[j][j] = h_diag[j];
+        }
         for (k, &(i, j)) in pairs.iter().enumerate() {
             hess[i][j] = cross[k];
             hess[j][i] = cross[k];
         }
-        eprintln!("[auto-enum] rank S6: ref_dps={:.0}  Hessian 完成（{} sims, {:.1}s）",
-            ref_dps, HESSIAN_SIMS, t_rank_start.elapsed().as_secs_f64());
+        eprintln!(
+            "[auto-enum] rank S6: ref_dps={:.0}  Hessian 完成（{} sims, {:.1}s）",
+            ref_dps,
+            HESSIAN_SIMS,
+            t_rank_start.elapsed().as_secs_f64()
+        );
 
         // 全池 quadratic 预测：DPS ≈ ref + g·Δ + ½·Δᵀ·H·Δ
         let n = after_pareto_vec.len();
-        let predicted: Vec<f64> = after_pareto_vec.par_iter().map(|c| {
-            let r = &c.3;
-            let d = [
-                r.strength          - mean_pool.strength,
-                r.agility           - mean_pool.agility,
-                r.base_attack       - mean_pool.base_attack,
-                r.weapon_damage     - mean_pool.weapon_damage,
-                r.surplus_value     - mean_pool.surplus_value,
-                r.crit_level        - mean_pool.crit_level,
-                r.crit_effect_level - mean_pool.crit_effect_level,
-                r.overcome_level    - mean_pool.overcome_level,
-                r.strain_level      - mean_pool.strain_level,
-            ];
-            let mut s = ref_dps;
-            for k in 0..9 { s += grad[k] * d[k]; }
-            for i in 0..9 {
-                for j in 0..9 {
-                    s += 0.5 * hess[i][j] * d[i] * d[j];
+        let predicted: Vec<f64> = after_pareto_vec
+            .par_iter()
+            .map(|c| {
+                let r = &c.3;
+                let d = [
+                    r.strength - mean_pool.strength,
+                    r.agility - mean_pool.agility,
+                    r.base_attack - mean_pool.base_attack,
+                    r.weapon_damage - mean_pool.weapon_damage,
+                    r.surplus_value - mean_pool.surplus_value,
+                    r.crit_level - mean_pool.crit_level,
+                    r.crit_effect_level - mean_pool.crit_effect_level,
+                    r.overcome_level - mean_pool.overcome_level,
+                    r.strain_level - mean_pool.strain_level,
+                ];
+                let mut s = ref_dps;
+                for k in 0..9 {
+                    s += grad[k] * d[k];
                 }
-            }
-            s
-        }).collect();
+                for i in 0..9 {
+                    for j in 0..9 {
+                        s += 0.5 * hess[i][j] * d[i] * d[j];
+                    }
+                }
+                s
+            })
+            .collect();
 
         let mut union_set: ahash::AHashSet<usize> = ahash::AHashSet::new();
         let mut idx_sorted: Vec<usize> = (0..n).collect();
         idx_sorted.par_sort_by(|&a, &b| {
-            predicted[b].partial_cmp(&predicted[a]).unwrap_or(std::cmp::Ordering::Equal)
+            predicted[b]
+                .partial_cmp(&predicted[a])
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
-        for &i in idx_sorted.iter().take(req.top_k_proxy) { union_set.insert(i); }
-        eprintln!("[auto-enum] rank S6 top {}: union {}", req.top_k_proxy, union_set.len());
+        for &i in idx_sorted.iter().take(req.top_k_proxy) {
+            union_set.insert(i);
+        }
+        eprintln!(
+            "[auto-enum] rank S6 top {}: union {}",
+            req.top_k_proxy,
+            union_set.len()
+        );
 
         // ─── 单属性 top-K（9 个属性各取 K_per_attr）───
         let k_per_attr = (req.top_k_proxy / K_PER_ATTR_RATIO).max(500);
         let attr_getters: [fn(&equip::RawAttrs) -> f64; 9] = [
-            |r| r.strength, |r| r.agility, |r| r.base_attack, |r| r.weapon_damage,
-            |r| r.surplus_value, |r| r.crit_level, |r| r.crit_effect_level,
-            |r| r.overcome_level, |r| r.strain_level,
+            |r| r.strength,
+            |r| r.agility,
+            |r| r.base_attack,
+            |r| r.weapon_damage,
+            |r| r.surplus_value,
+            |r| r.crit_level,
+            |r| r.crit_effect_level,
+            |r| r.overcome_level,
+            |r| r.strain_level,
         ];
         for (attr_i, get) in attr_getters.iter().enumerate() {
             let mut idx: Vec<usize> = (0..n).collect();
             idx.par_sort_by(|&a, &b| {
-                get(&after_pareto_vec[b].3).partial_cmp(&get(&after_pareto_vec[a].3))
+                get(&after_pareto_vec[b].3)
+                    .partial_cmp(&get(&after_pareto_vec[a].3))
                     .unwrap_or(std::cmp::Ordering::Equal)
             });
             let before = union_set.len();
-            for &i in idx.iter().take(k_per_attr) { union_set.insert(i); }
-            eprintln!("[auto-enum] rank attr-top[{}]: +{} new (union now {})",
-                attr_i, union_set.len() - before, union_set.len());
+            for &i in idx.iter().take(k_per_attr) {
+                union_set.insert(i);
+            }
+            eprintln!(
+                "[auto-enum] rank attr-top[{}]: +{} new (union now {})",
+                attr_i,
+                union_set.len() - before,
+                union_set.len()
+            );
         }
 
-        let filtered: Vec<_> = after_pareto_vec.into_iter().enumerate()
+        let filtered: Vec<_> = after_pareto_vec
+            .into_iter()
+            .enumerate()
             .filter(|(i, _)| union_set.contains(i))
             .map(|(_, item)| item)
             .collect();
-        eprintln!("[auto-enum] rank prefilter done: {} → {}  elapsed={:.1}s",
-            n, filtered.len(), t_rank_start.elapsed().as_secs_f64());
+        eprintln!(
+            "[auto-enum] rank prefilter done: {} → {}  elapsed={:.1}s",
+            n,
+            filtered.len(),
+            t_rank_start.elapsed().as_secs_f64()
+        );
         filtered
     } else {
         after_pareto_vec
@@ -8683,7 +10946,9 @@ async fn run_auto_optimize_compute(
                 std::thread::sleep(std::time::Duration::from_millis(100));
                 let cnt = sim_counter.load(std::sync::atomic::Ordering::Relaxed);
                 let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0);
                 let mut p = progress.lock().unwrap();
                 p.simulated = cnt;
                 p.elapsed_ms = now.saturating_sub(started_at_ms);
@@ -8692,21 +10957,34 @@ async fn run_auto_optimize_compute(
     };
     let counter_for_par = sim_counter.clone();
     let cancel_for_par = cancel_flag.clone();
-    let pause_for_par  = pause_flag.clone();
+    let pause_for_par = pause_flag.clone();
     // dps_results: (dps, cand_ids, enh_ids, raw)
     let dps_results: Vec<(f64, Box<[u32]>, Box<[u32]>, equip::RawAttrs)> = after_pareto_vec
         .into_par_iter()
         .filter_map(|(_k, cand_ids, enh_ids, raw)| {
             use std::sync::atomic::Ordering;
-            if cancel_for_par.load(Ordering::Relaxed) { return None; }
+            if cancel_for_par.load(Ordering::Relaxed) {
+                return None;
+            }
             while pause_for_par.load(Ordering::Relaxed) {
-                if cancel_for_par.load(Ordering::Relaxed) { return None; }
+                if cancel_for_par.load(Ordering::Relaxed) {
+                    return None;
+                }
                 std::thread::sleep(std::time::Duration::from_millis(100));
             }
             let attrs = raw_to_attributes(&raw);
             let eq = build_equipment_map(&cand_ids);
             let req2 = make_sim_req(attrs, eq);
-            let resp = simulate_core(&req2, &skills, ctx.0, ctx.1, ctx.2, &recipes_table, &team_buffs_table, &formations_table);
+            let resp = simulate_core(
+                &req2,
+                &skills,
+                ctx.0,
+                ctx.1,
+                ctx.2,
+                &recipes_table,
+                &team_buffs_table,
+                &formations_table,
+            );
             counter_for_par.fetch_add(1, Ordering::Relaxed);
             Some((resp.dps, cand_ids, enh_ids, raw))
         })
@@ -8721,12 +10999,16 @@ async fn run_auto_optimize_compute(
         let mut s = req.fixed_slots.clone();
         for (i, (&id, &enh_id)) in cand_ids.iter().zip(enh_ids.iter()).enumerate() {
             let pos = &candidate_positions[i];
-            s.insert(pos.clone(), equip::SlotConfig {
-                equip_id: id, strength: default_str,
-                embedding: default_emb.clone(),
-                enhance_id: enh_id,    // Phase A 仅加速槽带 enhance；非加速槽 = 0（Phase B 偏导填）
-                enchant_id: req.default_enchants.get(pos).copied().unwrap_or(0),
-            });
+            s.insert(
+                pos.clone(),
+                equip::SlotConfig {
+                    equip_id: id,
+                    strength: default_str,
+                    embedding: default_emb.clone(),
+                    enhance_id: enh_id, // Phase A 仅加速槽带 enhance；非加速槽 = 0（Phase B 偏导填）
+                    enchant_id: req.default_enchants.get(pos).copied().unwrap_or(0),
+                },
+            );
         }
         s
     };
@@ -8736,33 +11018,53 @@ async fn run_auto_optimize_compute(
         let mut sorted = dps_results;
         sorted.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
         sorted.truncate(req.top_n);
-        let top: Vec<AutoTopEntry> = sorted.into_iter().map(|(dps, cand_ids, enh_ids, raw)| {
-            let slots = make_slots_a(&cand_ids, &enh_ids);
-            let sl: HashMap<String, u32> = slots.iter().map(|(p, c)| (p.clone(), c.equip_id)).collect();
-            let nm: HashMap<String, String> = slots.iter().filter_map(|(pos, cfg)| {
-                let sub = equip::pos_to_subtype(pos);
-                equip_data.items.get(&(sub, cfg.equip_id)).map(|it| (pos.clone(), it.name.clone()))
-            }).collect();
-            // 加速槽 enhance map（Phase A 完成的部分；Phase B 未跑）
-            let enh_map: HashMap<String, u32> = candidate_positions.iter().zip(enh_ids.iter())
-                .filter(|(_, &eid)| eid > 0)
-                .map(|(p, &eid)| (p.clone(), eid))
-                .collect();
-            AutoTopEntry {
-                slots: sl, names: nm, dps,
-                delta_pct: if baseline_dps > 0.0 { (dps - baseline_dps) / baseline_dps * 100.0 } else { 0.0 },
-                haste_level: raw.haste_level as u32,
-                panel_attack: 0.0,
-                panel: None,
-                raw: None,
-                enhances: enh_map,
-                stone_id: req.stone_id,
-                stone_name: String::new(),
-            }
-        }).collect();
+        let top: Vec<AutoTopEntry> = sorted
+            .into_iter()
+            .map(|(dps, cand_ids, enh_ids, raw)| {
+                let slots = make_slots_a(&cand_ids, &enh_ids);
+                let sl: HashMap<String, u32> =
+                    slots.iter().map(|(p, c)| (p.clone(), c.equip_id)).collect();
+                let nm: HashMap<String, String> = slots
+                    .iter()
+                    .filter_map(|(pos, cfg)| {
+                        let sub = equip::pos_to_subtype(pos);
+                        equip_data
+                            .items
+                            .get(&(sub, cfg.equip_id))
+                            .map(|it| (pos.clone(), it.name.clone()))
+                    })
+                    .collect();
+                // 加速槽 enhance map（Phase A 完成的部分；Phase B 未跑）
+                let enh_map: HashMap<String, u32> = candidate_positions
+                    .iter()
+                    .zip(enh_ids.iter())
+                    .filter(|(_, &eid)| eid > 0)
+                    .map(|(p, &eid)| (p.clone(), eid))
+                    .collect();
+                AutoTopEntry {
+                    slots: sl,
+                    names: nm,
+                    dps,
+                    delta_pct: if baseline_dps > 0.0 {
+                        (dps - baseline_dps) / baseline_dps * 100.0
+                    } else {
+                        0.0
+                    },
+                    haste_level: raw.haste_level as u32,
+                    panel_attack: 0.0,
+                    panel: None,
+                    raw: None,
+                    enhances: enh_map,
+                    stone_id: req.stone_id,
+                    stone_name: String::new(),
+                }
+            })
+            .collect();
         return AutoOptimizeResponse {
             feasible: !top.is_empty(),
-            baseline_dps, baseline_haste, top,
+            baseline_dps,
+            baseline_haste,
+            top,
             stats: AutoOptimizeStats {
                 candidate_positions: candidate_positions.len(),
                 total_combinations: total_combos,
@@ -8777,7 +11079,8 @@ async fn run_auto_optimize_compute(
                 ..Default::default()
             },
             warnings: vec!["搜索已取消（保留已完成的部分模拟结果）".into()],
-            fit_model: None, fit_metrics: None,
+            fit_model: None,
+            fit_metrics: None,
         };
     }
 
@@ -8831,7 +11134,7 @@ async fn run_auto_optimize_compute(
         let counter_pb = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let counter_for_pb = counter_pb.clone();
         let cancel_for_pb = cancel_flag.clone();
-        let pause_for_pb  = pause_flag.clone();
+        let pause_for_pb = pause_flag.clone();
         // 后台心跳：与 Phase A 一致，每 100ms 把原子计数刷到 progress.simulated
         // 否则前端只看到 0/200 不动（fetch_add 不会自己写回 progress 状态）
         let pb_hb_done = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -8844,7 +11147,9 @@ async fn run_auto_optimize_compute(
                     std::thread::sleep(std::time::Duration::from_millis(100));
                     let cnt = counter.load(std::sync::atomic::Ordering::Relaxed);
                     let now = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis() as u64)
+                        .unwrap_or(0);
                     let mut p = progress.lock().unwrap();
                     p.simulated = cnt;
                     p.elapsed_ms = now.saturating_sub(started_at_ms);
@@ -8855,24 +11160,39 @@ async fn run_auto_optimize_compute(
         // 6.4 重建给定 (cand_ids, enh_ids) 配置下的 base accum / set_counts / dc / dl
         //   pool[pos] 是装备-only；如果 enh_ids[i] 是加速 enhance（在 haste_enh_list 里），
         //   额外把它的 accum_delta 叠到 base accum（让偏导评估时 base 已含加速 enhance 的贡献）
-        let haste_enh_by_pos: HashMap<&str, &HasteEnhInfo> = haste_enh_list.iter()
-            .map(|h| (candidate_positions[h.slot_idx].as_str(), h)).collect();
-        let rebuild_base = |cand_ids: &[u32], enh_ids: &[u32]|
-            -> ([f64; equip::search_calc::N_ATTRS], HashMap<u32, u32>, u32, u32)
-        {
+        let haste_enh_by_pos: HashMap<&str, &HasteEnhInfo> = haste_enh_list
+            .iter()
+            .map(|h| (candidate_positions[h.slot_idx].as_str(), h))
+            .collect();
+        let rebuild_base = |cand_ids: &[u32],
+                            enh_ids: &[u32]|
+         -> (
+            [f64; equip::search_calc::N_ATTRS],
+            HashMap<u32, u32>,
+            u32,
+            u32,
+        ) {
             let mut accum = init_ctx.initial_accum;
             let mut set_counts = init_ctx.initial_set_counts.clone();
             let mut dc = init_ctx.initial_diamond_count;
             let mut dl = init_ctx.initial_diamond_level;
             for (i, pos) in candidate_positions.iter().enumerate() {
                 let id = cand_ids[i];
-                let pool_v = match pool.get(pos) { Some(v) => v, None => continue };
+                let pool_v = match pool.get(pos) {
+                    Some(v) => v,
+                    None => continue,
+                };
                 let idx = match pool_v.iter().position(|c| c.equip_id == id) {
-                    Some(x) => x, None => continue,
+                    Some(x) => x,
+                    None => continue,
                 };
                 let contrib = &cand_contribs[pos][idx];
-                for (slot_idx, val) in &contrib.deltas { accum[*slot_idx as usize] += val; }
-                if contrib.set_id > 0 { *set_counts.entry(contrib.set_id).or_default() += 1; }
+                for (slot_idx, val) in &contrib.deltas {
+                    accum[*slot_idx as usize] += val;
+                }
+                if contrib.set_id > 0 {
+                    *set_counts.entry(contrib.set_id).or_default() += 1;
+                }
                 dc += contrib.diamond_count;
                 dl += contrib.diamond_level;
                 // 该槽如选了加速 enhance（enh_ids[i] != 0），叠 enhance Δ
@@ -8893,13 +11213,24 @@ async fn run_auto_optimize_compute(
         //   phase_b_slots：枚举槽（candidate_positions）+ 锁定槽（fixed_slots，启用 search_locked_enhance 时）
         //   只要 enhance_candidates 里有该 pos 的候选就纳入
         let phase_b_slots: Vec<String> = {
-            let mut slots: Vec<String> = candidate_positions.iter()
-                .filter(|p| req.enhance_candidates.get(*p).map(|v| !v.is_empty()).unwrap_or(false))
-                .cloned().collect();
+            let mut slots: Vec<String> = candidate_positions
+                .iter()
+                .filter(|p| {
+                    req.enhance_candidates
+                        .get(*p)
+                        .map(|v| !v.is_empty())
+                        .unwrap_or(false)
+                })
+                .cloned()
+                .collect();
             if req.search_locked_enhance {
                 for pos in req.fixed_slots.keys() {
                     if !slots.contains(pos)
-                        && req.enhance_candidates.get(pos).map(|v| !v.is_empty()).unwrap_or(false)
+                        && req
+                            .enhance_candidates
+                            .get(pos)
+                            .map(|v| !v.is_empty())
+                            .unwrap_or(false)
                     {
                         slots.push(pos.clone());
                     }
@@ -8914,14 +11245,27 @@ async fn run_auto_optimize_compute(
             let mut m = HashMap::new();
             if req.search_locked_enhance {
                 for (pos, cfg) in &req.fixed_slots {
-                    if !req.enhance_candidates.get(pos).map(|v| !v.is_empty()).unwrap_or(false) { continue; }
-                    if cfg.enhance_id == 0 { continue; }
+                    if !req
+                        .enhance_candidates
+                        .get(pos)
+                        .map(|v| !v.is_empty())
+                        .unwrap_or(false)
+                    {
+                        continue;
+                    }
+                    if cfg.enhance_id == 0 {
+                        continue;
+                    }
                     let sub = equip::pos_to_subtype(pos) as i32;
                     if let Some(list) = equip_data.enhances.get(&sub) {
                         if let Some(e) = list.iter().find(|x| x.id == cfg.enhance_id) {
-                            let d: Vec<(u8, f64)> = e.attributes.iter().filter_map(|(s, v)| {
-                                equip::search_calc::slot_to_idx(s).map(|i| (i as u8, *v as f64))
-                            }).collect();
+                            let d: Vec<(u8, f64)> = e
+                                .attributes
+                                .iter()
+                                .filter_map(|(s, v)| {
+                                    equip::search_calc::slot_to_idx(s).map(|i| (i as u8, *v as f64))
+                                })
+                                .collect();
                             m.insert(pos.clone(), d);
                         }
                     }
@@ -8929,18 +11273,26 @@ async fn run_auto_optimize_compute(
             }
             m
         };
-        eprintln!("[phase-b] phase_b_slots={:?}  locked-with-enh-search={}",
-            phase_b_slots, locked_existing_enh.len());
+        eprintln!(
+            "[phase-b] phase_b_slots={:?}  locked-with-enh-search={}",
+            phase_b_slots,
+            locked_existing_enh.len()
+        );
 
         // 用于扰动梯度的 8 个 raw 字段（外功 build 关心的）
         // 每个：(field_setter_closure_index, perturb_delta)
         const PERT_DELTA: f64 = 1000.0;
-        let final_rows: Vec<FinalRow> = phase_a_sorted.into_par_iter()
+        let final_rows: Vec<FinalRow> = phase_a_sorted
+            .into_par_iter()
             .filter_map(|(dps_a, cand_ids, enh_ids, raw_a)| {
                 use std::sync::atomic::Ordering;
-                if cancel_for_pb.load(Ordering::Relaxed) { return None; }
+                if cancel_for_pb.load(Ordering::Relaxed) {
+                    return None;
+                }
                 while pause_for_pb.load(Ordering::Relaxed) {
-                    if cancel_for_pb.load(Ordering::Relaxed) { return None; }
+                    if cancel_for_pb.load(Ordering::Relaxed) {
+                        return None;
+                    }
                     std::thread::sleep(std::time::Duration::from_millis(100));
                 }
 
@@ -8953,26 +11305,37 @@ async fn run_auto_optimize_compute(
                 let perturb_and_sim = |bump_field: usize| -> f64 {
                     let mut r = raw_a.clone();
                     match bump_field {
-                        0 => r.strength          += PERT_DELTA,
-                        1 => r.agility           += PERT_DELTA,
-                        2 => r.base_attack       += PERT_DELTA,
-                        3 => r.weapon_damage     += PERT_DELTA,
-                        4 => r.surplus_value     += PERT_DELTA,
-                        5 => r.crit_level        += PERT_DELTA,
+                        0 => r.strength += PERT_DELTA,
+                        1 => r.agility += PERT_DELTA,
+                        2 => r.base_attack += PERT_DELTA,
+                        3 => r.weapon_damage += PERT_DELTA,
+                        4 => r.surplus_value += PERT_DELTA,
+                        5 => r.crit_level += PERT_DELTA,
                         6 => r.crit_effect_level += PERT_DELTA,
-                        7 => r.overcome_level    += PERT_DELTA,
-                        8 => r.strain_level      += PERT_DELTA,
+                        7 => r.overcome_level += PERT_DELTA,
+                        8 => r.strain_level += PERT_DELTA,
                         _ => {}
                     }
                     let attrs = raw_to_attributes(&r);
-                    let resp = simulate_core(&make_sim_req(attrs, eq_base.clone()), &skills, ctx.0, ctx.1, ctx.2, &recipes_table, &team_buffs_table, &formations_table);
+                    let resp = simulate_core(
+                        &make_sim_req(attrs, eq_base.clone()),
+                        &skills,
+                        ctx.0,
+                        ctx.1,
+                        ctx.2,
+                        &recipes_table,
+                        &team_buffs_table,
+                        &formations_table,
+                    );
                     resp.dps
                 };
                 let mut grad: [f64; 9] = [0.0; 9];
                 for i in 0..9 {
                     let dps_p = perturb_and_sim(i);
                     grad[i] = (dps_p - dps_a) / PERT_DELTA;
-                    if cancel_for_pb.load(Ordering::Relaxed) { return None; }
+                    if cancel_for_pb.load(Ordering::Relaxed) {
+                        return None;
+                    }
                 }
 
                 // (b) 重建 base accum 用于 enhance candidate 评分（init_ctx 已含 stone）
@@ -8980,15 +11343,15 @@ async fn run_auto_optimize_compute(
 
                 // raw 字段 grad 点乘
                 let raw_dot_grad = |r: &equip::RawAttrs| -> f64 {
-                    grad[0] * (r.strength          - raw_a.strength)
-                  + grad[1] * (r.agility           - raw_a.agility)
-                  + grad[2] * (r.base_attack       - raw_a.base_attack)
-                  + grad[3] * (r.weapon_damage     - raw_a.weapon_damage)
-                  + grad[4] * (r.surplus_value     - raw_a.surplus_value)
-                  + grad[5] * (r.crit_level        - raw_a.crit_level)
-                  + grad[6] * (r.crit_effect_level - raw_a.crit_effect_level)
-                  + grad[7] * (r.overcome_level    - raw_a.overcome_level)
-                  + grad[8] * (r.strain_level      - raw_a.strain_level)
+                    grad[0] * (r.strength - raw_a.strength)
+                        + grad[1] * (r.agility - raw_a.agility)
+                        + grad[2] * (r.base_attack - raw_a.base_attack)
+                        + grad[3] * (r.weapon_damage - raw_a.weapon_damage)
+                        + grad[4] * (r.surplus_value - raw_a.surplus_value)
+                        + grad[5] * (r.crit_level - raw_a.crit_level)
+                        + grad[6] * (r.crit_effect_level - raw_a.crit_effect_level)
+                        + grad[7] * (r.overcome_level - raw_a.overcome_level)
+                        + grad[8] * (r.strain_level - raw_a.strain_level)
                 };
 
                 // (c) 对每个槽（含可搜的锁定槽）：按 grad 选最佳 enhance
@@ -8997,28 +11360,50 @@ async fn run_auto_optimize_compute(
                 //   —— 一个装备只能带一个附魔；急速优先，非急速候选作 mask=0 时的兜底
                 let mut chosen_enh: HashMap<String, u32> = HashMap::new();
                 for pos in &phase_b_slots {
-                    let cands = match req.enhance_candidates.get(pos) { Some(v) => v, None => continue };
+                    let cands = match req.enhance_candidates.get(pos) {
+                        Some(v) => v,
+                        None => continue,
+                    };
                     // 枚举槽 + Phase A 已选急速 → 跳过
                     if let Some(idx) = candidate_positions.iter().position(|p| p == pos) {
-                        if enh_ids[idx] != 0 { continue; }
+                        if enh_ids[idx] != 0 {
+                            continue;
+                        }
                     }
                     let existing = locked_existing_enh.get(pos);
                     let mut best_score = f64::NEG_INFINITY;
                     let mut best_id: u32 = 0;
                     for &eid in cands {
-                        let delta = match enhance_accum_deltas.get(&(pos.clone(), eid)) { Some(d) => d, None => continue };
+                        let delta = match enhance_accum_deltas.get(&(pos.clone(), eid)) {
+                            Some(d) => d,
+                            None => continue,
+                        };
                         let mut accum = base_accum;
                         // 锁定槽：减掉已有的 user enhance Δ
                         if let Some(ex) = existing {
-                            for (idx, val) in ex { accum[*idx as usize] -= val; }
+                            for (idx, val) in ex {
+                                accum[*idx as usize] -= val;
+                            }
                         }
-                        for (idx, val) in delta { accum[*idx as usize] += val; }
+                        for (idx, val) in delta {
+                            accum[*idx as usize] += val;
+                        }
                         let r = equip::search_calc::calc_leaf_raw(
-                            &init_ctx, &accum, &set_counts, base_dc, base_dl);
+                            &init_ctx,
+                            &accum,
+                            &set_counts,
+                            base_dc,
+                            base_dl,
+                        );
                         let score = raw_dot_grad(&r);
-                        if score > best_score { best_score = score; best_id = eid; }
+                        if score > best_score {
+                            best_score = score;
+                            best_id = eid;
+                        }
                     }
-                    if best_id > 0 { chosen_enh.insert(pos.clone(), best_id); }
+                    if best_id > 0 {
+                        chosen_enh.insert(pos.clone(), best_id);
+                    }
                 }
 
                 // (d) 应用所有 chosen 非加速 enhance Δ → final raw
@@ -9026,14 +11411,23 @@ async fn run_auto_optimize_compute(
                 let mut final_accum = base_accum;
                 for (pos, &eid) in &chosen_enh {
                     if let Some(ex) = locked_existing_enh.get(pos) {
-                        for (idx, val) in ex { final_accum[*idx as usize] -= val; }
+                        for (idx, val) in ex {
+                            final_accum[*idx as usize] -= val;
+                        }
                     }
                     if let Some(d) = enhance_accum_deltas.get(&(pos.clone(), eid)) {
-                        for (idx, val) in d { final_accum[*idx as usize] += val; }
+                        for (idx, val) in d {
+                            final_accum[*idx as usize] += val;
+                        }
                     }
                 }
                 let final_raw = equip::search_calc::calc_leaf_raw(
-                    &init_ctx, &final_accum, &set_counts, base_dc, base_dl);
+                    &init_ctx,
+                    &final_accum,
+                    &set_counts,
+                    base_dc,
+                    base_dl,
+                );
 
                 // 严格 haste 过滤（多区间 any 命中；防止偏导引导到非加速档）
                 let h = final_raw.haste_level as u32;
@@ -9044,14 +11438,25 @@ async fn run_auto_optimize_compute(
 
                 // (e) final sim — 用本 base 的 equipment（装备特效触发）
                 let attrs = raw_to_attributes(&final_raw);
-                let resp = simulate_core(&make_sim_req(attrs, eq_base.clone()), &skills, ctx.0, ctx.1, ctx.2, &recipes_table, &team_buffs_table, &formations_table);
+                let resp = simulate_core(
+                    &make_sim_req(attrs, eq_base.clone()),
+                    &skills,
+                    ctx.0,
+                    ctx.1,
+                    ctx.2,
+                    &recipes_table,
+                    &team_buffs_table,
+                    &formations_table,
+                );
                 counter_for_pb.fetch_add(1, Ordering::Relaxed);
 
                 // (f) 合并 enhance map：加速槽（来自 enh_ids）+ 非加速槽（chosen_enh）
                 let mut enh_map = chosen_enh;
                 for (i, pos) in candidate_positions.iter().enumerate() {
                     let eid = enh_ids[i];
-                    if eid > 0 { enh_map.insert(pos.clone(), eid); }
+                    if eid > 0 {
+                        enh_map.insert(pos.clone(), eid);
+                    }
                 }
 
                 Some((resp.dps, cand_ids, final_raw, enh_map))
@@ -9068,18 +11473,27 @@ async fn run_auto_optimize_compute(
 
         stats_b.simulated = final_rows.len();
         stats_b.time_ms = t_pb_start.elapsed().as_secs_f64() * 1000.0;
-        eprintln!("[phase-b] 偏导 完成 bases={} simulated={} elapsed={:.1}s",
-            stats_b.bases, stats_b.simulated, stats_b.time_ms / 1000.0);
+        eprintln!(
+            "[phase-b] 偏导 完成 bases={} simulated={} elapsed={:.1}s",
+            stats_b.bases,
+            stats_b.simulated,
+            stats_b.time_ms / 1000.0
+        );
         final_rows
     } else {
         // 无 Phase B：直接把 dps_results 转 FinalRow（加速槽 enhance 进 enh_map）
-        dps_results.into_iter().map(|(dps, cand_ids, enh_ids, raw)| {
-            let enh_map: HashMap<String, u32> = candidate_positions.iter().zip(enh_ids.iter())
-                .filter(|(_, &eid)| eid > 0)
-                .map(|(p, &eid)| (p.clone(), eid))
-                .collect();
-            (dps, cand_ids, raw, enh_map)
-        }).collect()
+        dps_results
+            .into_iter()
+            .map(|(dps, cand_ids, enh_ids, raw)| {
+                let enh_map: HashMap<String, u32> = candidate_positions
+                    .iter()
+                    .zip(enh_ids.iter())
+                    .filter(|(_, &eid)| eid > 0)
+                    .map(|(p, &eid)| (p.clone(), eid))
+                    .collect();
+                (dps, cand_ids, raw, enh_map)
+            })
+            .collect()
     };
 
     // 7. 排序 + top N（top_n 个回填 panel.physics_attack_power）
@@ -9087,54 +11501,90 @@ async fn run_auto_optimize_compute(
     sorted.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
     sorted.truncate(req.top_n);
 
-    let top: Vec<AutoTopEntry> = sorted.into_iter().map(|item| {
-        let (dps, cand_ids, raw, enhance_map): FinalRow = item;
-        // 用 enhance_map 覆盖 default_enhances 来构 slots（让最终展示反映 winning enhance）
-        let slots = {
-            let mut s = req.fixed_slots.clone();
-            for (i, &id) in cand_ids.iter().enumerate() {
-                let pos = &candidate_positions[i];
-                let chosen_enh = enhance_map.get(pos).copied()
-                    .unwrap_or_else(|| req.default_enhances.get(pos).copied().unwrap_or(0));
-                s.insert(pos.clone(), equip::SlotConfig {
-                    equip_id: id, strength: default_str,
-                    embedding: default_emb.clone(),
-                    enhance_id: chosen_enh,
-                    enchant_id: req.default_enchants.get(pos).copied().unwrap_or(0),
-                });
+    let top: Vec<AutoTopEntry> = sorted
+        .into_iter()
+        .map(|item| {
+            let (dps, cand_ids, raw, enhance_map): FinalRow = item;
+            // 用 enhance_map 覆盖 default_enhances 来构 slots（让最终展示反映 winning enhance）
+            let slots = {
+                let mut s = req.fixed_slots.clone();
+                for (i, &id) in cand_ids.iter().enumerate() {
+                    let pos = &candidate_positions[i];
+                    let chosen_enh = enhance_map
+                        .get(pos)
+                        .copied()
+                        .unwrap_or_else(|| req.default_enhances.get(pos).copied().unwrap_or(0));
+                    s.insert(
+                        pos.clone(),
+                        equip::SlotConfig {
+                            equip_id: id,
+                            strength: default_str,
+                            embedding: default_emb.clone(),
+                            enhance_id: chosen_enh,
+                            enchant_id: req.default_enchants.get(pos).copied().unwrap_or(0),
+                        },
+                    );
+                }
+                s
+            };
+            let sl: HashMap<String, u32> =
+                slots.iter().map(|(p, c)| (p.clone(), c.equip_id)).collect();
+            let nm: HashMap<String, String> = slots
+                .iter()
+                .filter_map(|(pos, cfg)| {
+                    let sub = equip::pos_to_subtype(pos);
+                    equip_data
+                        .items
+                        .get(&(sub, cfg.equip_id))
+                        .map(|it| (pos.clone(), it.name.clone()))
+                })
+                .collect();
+            let stone_name = if req.stone_id > 0 {
+                equip_data
+                    .stones
+                    .iter()
+                    .find(|s| s.id == req.stone_id)
+                    .map(|s| s.name.clone())
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
+            // 重新走 calc 拿 panel.physics_attack_power（含心法转化 + 全能展开后的最终面板攻击）
+            // 注意：calc_resp.raw 跟 Phase B 实际跑 sim 用的 final_raw 累加路径不完全一致
+            // （前者从 slots 重新跑全流程，后者基于 init_ctx + 增量），所以 t.raw 必须用 final_raw
+            // ——否则前端拿 t.raw 反推出来的 attrs 跑 sim，DPS 跟 t.dps 对不上（实测差 ~3-4%）。
+            let calc_resp = equip::calculate(
+                equip_data,
+                &equip::CalcRequest {
+                    slots: slots.clone(),
+                    stone_id: req.stone_id,
+                    mount: req.mount,
+                    talents: req.talents.clone(),
+                },
+                &bs,
+                &mc,
+            );
+            let panel = calc_resp.panel;
+            let haste_lv = raw.haste_level as u32;
+            AutoTopEntry {
+                slots: sl,
+                names: nm,
+                dps,
+                delta_pct: if baseline_dps > 0.0 {
+                    (dps - baseline_dps) / baseline_dps * 100.0
+                } else {
+                    0.0
+                },
+                haste_level: haste_lv,
+                panel_attack: panel.physics_attack_power,
+                panel: Some(panel),
+                raw: Some(raw), // ← Phase B 实际跑 sim 用的 final_raw（之前误用 calc_resp.raw 导致 fit_curve 对不上）
+                enhances: enhance_map,
+                stone_id: req.stone_id,
+                stone_name,
             }
-            s
-        };
-        let sl: HashMap<String, u32> = slots.iter().map(|(p, c)| (p.clone(), c.equip_id)).collect();
-        let nm: HashMap<String, String> = slots.iter().filter_map(|(pos, cfg)| {
-            let sub = equip::pos_to_subtype(pos);
-            equip_data.items.get(&(sub, cfg.equip_id)).map(|it| (pos.clone(), it.name.clone()))
-        }).collect();
-        let stone_name = if req.stone_id > 0 {
-            equip_data.stones.iter().find(|s| s.id == req.stone_id).map(|s| s.name.clone()).unwrap_or_default()
-        } else { String::new() };
-        // 重新走 calc 拿 panel.physics_attack_power（含心法转化 + 全能展开后的最终面板攻击）
-        // 注意：calc_resp.raw 跟 Phase B 实际跑 sim 用的 final_raw 累加路径不完全一致
-        // （前者从 slots 重新跑全流程，后者基于 init_ctx + 增量），所以 t.raw 必须用 final_raw
-        // ——否则前端拿 t.raw 反推出来的 attrs 跑 sim，DPS 跟 t.dps 对不上（实测差 ~3-4%）。
-        let calc_resp = equip::calculate(equip_data, &equip::CalcRequest {
-            slots: slots.clone(), stone_id: req.stone_id, mount: req.mount,
-            talents: req.talents.clone(),
-        }, &bs, &mc);
-        let panel = calc_resp.panel;
-        let haste_lv = raw.haste_level as u32;
-        AutoTopEntry {
-            slots: sl, names: nm, dps,
-            delta_pct: if baseline_dps > 0.0 { (dps - baseline_dps) / baseline_dps * 100.0 } else { 0.0 },
-            haste_level: haste_lv,
-            panel_attack: panel.physics_attack_power,
-            panel: Some(panel),
-            raw: Some(raw),   // ← Phase B 实际跑 sim 用的 final_raw（之前误用 calc_resp.raw 导致 fit_curve 对不上）
-            enhances: enhance_map,
-            stone_id: req.stone_id,
-            stone_name,
-        }
-    }).collect();
+        })
+        .collect();
 
     let total_ms = t_start.elapsed().as_secs_f64() * 1000.0;
     // 不在这里把 progress 标 done —— 由外层 spawn 任务在拿到本函数 Result 后统一标记，
@@ -9227,24 +11677,28 @@ async fn icon_proxy(axum::extract::Path(id): axum::extract::Path<u32>) -> axum::
     // 未命中：拉上游 + 落盘
     let url = format!("https://icon.jx3box.com/icon/{}.png", id);
     match reqwest::get(&url).await {
-        Ok(resp) if resp.status().is_success() => {
-            match resp.bytes().await {
-                Ok(bytes) => {
-                    if let Some(parent) = cache_file.parent() {
-                        let _ = std::fs::create_dir_all(parent);
-                    }
-                    let _ = std::fs::write(&cache_file, bytes.as_ref());
-                    Response::builder()
-                        .status(StatusCode::OK)
-                        .header("Content-Type", "image/png")
-                        .header("Cache-Control", "public, max-age=31536000, immutable")
-                        .body(Body::from(bytes))
-                        .unwrap()
+        Ok(resp) if resp.status().is_success() => match resp.bytes().await {
+            Ok(bytes) => {
+                if let Some(parent) = cache_file.parent() {
+                    let _ = std::fs::create_dir_all(parent);
                 }
-                Err(_) => Response::builder().status(StatusCode::BAD_GATEWAY).body(Body::empty()).unwrap(),
+                let _ = std::fs::write(&cache_file, bytes.as_ref());
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .header("Content-Type", "image/png")
+                    .header("Cache-Control", "public, max-age=31536000, immutable")
+                    .body(Body::from(bytes))
+                    .unwrap()
             }
-        }
-        _ => Response::builder().status(StatusCode::NOT_FOUND).body(Body::empty()).unwrap(),
+            Err(_) => Response::builder()
+                .status(StatusCode::BAD_GATEWAY)
+                .body(Body::empty())
+                .unwrap(),
+        },
+        _ => Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(Body::empty())
+            .unwrap(),
     }
 }
 
@@ -9268,20 +11722,28 @@ fn spawn_icon_prefetch(
     for m in &[Mount::FenShanJin, Mount::TieGuYi] {
         let dir = skills_dir(version, *m);
         for s in load_skills(Path::new(&dir)) {
-            if let Some(id) = extract_icon_id(&s.icon) { ids.insert(id); }
+            if let Some(id) = extract_icon_id(&s.icon) {
+                ids.insert(id);
+            }
         }
     }
     // BuffDef icon（自身 + 团辅）
     for def in scripts::all_buff_defs_by_version(version) {
-        if let Some(id) = extract_icon_id(def.icon) { ids.insert(id); }
+        if let Some(id) = extract_icon_id(def.icon) {
+            ids.insert(id);
+        }
     }
     // 团辅 toml icon
     for tb in team_buffs {
-        if let Some(id) = extract_icon_id(&tb.icon) { ids.insert(id); }
+        if let Some(id) = extract_icon_id(&tb.icon) {
+            ids.insert(id);
+        }
     }
     // 阵法 icon
     for f in formations {
-        if let Some(id) = extract_icon_id(&f.icon) { ids.insert(id); }
+        if let Some(id) = extract_icon_id(&f.icon) {
+            ids.insert(id);
+        }
     }
     // 虚拟技能 icon（前端硬编码用，不在 /api/skills 里）
     ids.insert(21739); // 预释放
@@ -9290,10 +11752,13 @@ fn spawn_icon_prefetch(
     let total_icons = ids.len();
 
     // 过滤掉已有缓存的
-    let missing: Vec<u32> = ids.into_iter().filter(|id| {
-        let p = icon_cache_file(*id);
-        !p.exists()
-    }).collect();
+    let missing: Vec<u32> = ids
+        .into_iter()
+        .filter(|id| {
+            let p = icon_cache_file(*id);
+            !p.exists()
+        })
+        .collect();
 
     if missing.is_empty() {
         println!("[icon] 全部 {} 个 icon 已缓存", total_icons);
@@ -9316,9 +11781,13 @@ fn spawn_icon_prefetch(
                         }
                         let _ = std::fs::write(&cache_file, bytes.as_ref());
                         ok += 1;
-                    } else { fail += 1; }
+                    } else {
+                        fail += 1;
+                    }
                 }
-                _ => { fail += 1; }
+                _ => {
+                    fail += 1;
+                }
             }
         }
         println!("[icon] 预拉取完成：成功 {ok}/{total}，失败 {fail}");
@@ -9331,23 +11800,34 @@ fn spawn_icon_prefetch(
 
 #[tokio::main]
 async fn main() {
-    std::panic::set_hook(Box::new(|info| { eprintln!("[PANIC] {info}"); }));
+    std::panic::set_hook(Box::new(|info| {
+        eprintln!("[PANIC] {info}");
+    }));
 
     // 进程隔离 Router 模式：不加载任何技能数据，只做认证 + 反向代理 + per-user worker 管理。
-    if std::env::var("JX3_ROUTER").map(|v| !v.trim().is_empty()).unwrap_or(false) {
+    if std::env::var("JX3_ROUTER")
+        .map(|v| !v.trim().is_empty())
+        .unwrap_or(false)
+    {
         router::run().await;
         return;
     }
 
     // 默认：暗影千机（2026.04）+ 分山劲（当前最新版本，排序里也是第一个）；
     // 若该用户存过心法（进程隔离回收重建场景）则恢复，避免回收后重置回默认。
-    let (version, mount) = load_mount_state()
-        .unwrap_or((GameVersion::AnYingQianJi, Mount::FenShanJin));
+    let (version, mount) =
+        load_mount_state().unwrap_or((GameVersion::AnYingQianJi, Mount::FenShanJin));
 
-    let (constants, base_stats, mount_conversions, school_ui, workflow_a) = load_school_toml(version, mount)
-        .unwrap_or_else(|e| {
+    let (constants, base_stats, mount_conversions, school_ui, workflow_a) =
+        load_school_toml(version, mount).unwrap_or_else(|e| {
             eprintln!("[warn] load school.toml failed: {} (使用内置默认常量)", e);
-            (MountConstants::for_mount(mount), equip::MountBaseStats::default(), equip::MountConversions::default(), SchoolUi::default(), WorkflowA::default())
+            (
+                MountConstants::for_mount(mount),
+                equip::MountBaseStats::default(),
+                equip::MountConversions::default(),
+                SchoolUi::default(),
+                WorkflowA::default(),
+            )
         });
 
     let initial_skills = load_skills(Path::new(&skills_dir(version, mount)));
@@ -9374,7 +11854,10 @@ async fn main() {
             agent::provider::ProviderCatalog::offline_default()
         }
     };
-    println!("[agent] 已加载 {} 个 provider profile", agent_providers.len());
+    println!(
+        "[agent] 已加载 {} 个 provider profile",
+        agent_providers.len()
+    );
 
     let agent_knowledge = match agent::KnowledgeIndex::from_env() {
         Ok(index) => {
@@ -9404,13 +11887,16 @@ async fn main() {
     // 后台预拉取缺失的 icon 到本地缓存（数据 move 到 SharedState 之前取引用）
     // worker 模式（JX3_NO_BROWSER）下跳过：预拉取会同步加载两套心法技能表收集 icon ID，
     // 拖慢冷启动；worker 走 Router 共享 icon 缓存，缺失的由 /api/icon 代理按需补，无需启动期预热。
-    let is_worker = std::env::var("JX3_NO_BROWSER").map(|v| !v.trim().is_empty()).unwrap_or(false);
+    let is_worker = std::env::var("JX3_NO_BROWSER")
+        .map(|v| !v.trim().is_empty())
+        .unwrap_or(false);
     if !is_worker {
         spawn_icon_prefetch(&team_buffs, &formations, version);
     }
 
     let agent_userdata_root = userdata_base();
-    let agent_sessions = match agent::session::AgentSessionStore::open(agent_userdata_root.clone()) {
+    let agent_sessions = match agent::session::AgentSessionStore::open(agent_userdata_root.clone())
+    {
         Ok(store) => store,
         Err(error) => {
             eprintln!(
@@ -9468,114 +11954,187 @@ async fn main() {
         .allow_headers([CONTENT_TYPE, AUTHORIZATION]);
 
     let app = Router::new()
-        .route("/health",            get(health))
-        .route("/api/calculate",     post(calculate))
-        .route("/api/skill_damage",  post(skill_damage))
-        .route("/api/skills",        get(list_skills))
+        .route("/health", get(health))
+        .route("/api/calculate", post(calculate))
+        .route("/api/skill_damage", post(skill_damage))
+        .route("/api/skills", get(list_skills))
         .route("/api/skills/reload", post(reload_skills))
-        .route("/api/mounts",        get(list_mounts))
+        .route("/api/mounts", get(list_mounts))
         .route("/api/mounts/current", get(current_mount))
         .route("/api/mounts/defaults", get(mount_defaults))
         .route("/api/mounts/switch", post(switch_mount))
-        .route("/api/talents",       get(list_talents))
-        .route("/api/recipes",       get(list_recipes))
-        .route("/api/team_buffs",    get(list_team_buffs))
-        .route("/api/icon/:id",      get(icon_proxy))
-        .route("/api/formations",    get(list_formations))
-        .route("/api/simulate",      post(simulate))
-        .route("/api/agent/tools/scenario", post(agent::http::scenario_handler))
-        .route("/api/agent/tools/simulate", post(agent::http::simulate_handler))
-        .route("/api/agent/tools/compare", post(agent::http::compare_handler))
-        .route("/api/agent/tools/timeline", post(agent::http::timeline_handler))
-        .route("/api/agent/providers", get(agent::provider::providers_handler))
+        .route("/api/talents", get(list_talents))
+        .route("/api/recipes", get(list_recipes))
+        .route("/api/team_buffs", get(list_team_buffs))
+        .route("/api/icon/:id", get(icon_proxy))
+        .route("/api/formations", get(list_formations))
+        .route("/api/simulate", post(simulate))
+        .route(
+            "/api/agent/tools/scenario",
+            post(agent::http::scenario_handler),
+        )
+        .route(
+            "/api/agent/tools/simulate",
+            post(agent::http::simulate_handler),
+        )
+        .route(
+            "/api/agent/tools/compare",
+            post(agent::http::compare_handler),
+        )
+        .route(
+            "/api/agent/tools/timeline",
+            post(agent::http::timeline_handler),
+        )
+        .route(
+            "/api/agent/providers",
+            get(agent::provider::providers_handler),
+        )
         .route("/api/agent/runs", post(agent::run::create_run_handler))
-        .route("/api/agent/runs/:run_id", get(agent::run::run_status_handler))
-        .route("/api/agent/runs/:run_id/stream", get(agent::run::run_stream_handler))
-        .route("/api/agent/runs/:run_id/cancel", post(agent::run::cancel_run_handler))
-        .route("/api/agent/sessions", get(agent::session::list_sessions_handler))
-        .route("/api/agent/sessions/:session_id", get(agent::session::get_session_handler))
+        .route(
+            "/api/agent/runs/:run_id",
+            get(agent::run::run_status_handler),
+        )
+        .route(
+            "/api/agent/runs/:run_id/stream",
+            get(agent::run::run_stream_handler),
+        )
+        .route(
+            "/api/agent/runs/:run_id/cancel",
+            post(agent::run::cancel_run_handler),
+        )
+        .route(
+            "/api/agent/sessions",
+            get(agent::session::list_sessions_handler),
+        )
+        .route(
+            "/api/agent/sessions/:session_id",
+            get(agent::session::get_session_handler),
+        )
         .route("/api/macro/presets", get(macro_presets))
-        .route("/api/macro/save",    post(macro_save))
-        .route("/api/macro/load",    get(macro_load))
-        .route("/api/loop/save",        post(loop_save))
-        .route("/api/loop/list",        get(loop_list))
-        .route("/api/loop/load",        get(loop_load))
+        .route("/api/macro/save", post(macro_save))
+        .route("/api/macro/load", get(macro_load))
+        .route("/api/loop/save", post(loop_save))
+        .route("/api/loop/list", get(loop_list))
+        .route("/api/loop/load", get(loop_load))
         .route("/api/loop/open_folder", post(loop_open_folder))
-        .route("/api/loop/delete",      post(loop_delete))
-        .route("/api/equip/configs/save",   post(equip_config_save))
-        .route("/api/equip/configs/list",   get(equip_config_list))
-        .route("/api/equip/configs/load",   get(equip_config_load))
+        .route("/api/loop/delete", post(loop_delete))
+        .route("/api/equip/configs/save", post(equip_config_save))
+        .route("/api/equip/configs/list", get(equip_config_list))
+        .route("/api/equip/configs/load", get(equip_config_load))
         .route("/api/equip/configs/delete", post(equip_config_delete))
-        .route("/api/resume/save",      post(resume_save))
-        .route("/api/resume/load",      get(resume_load))
-        .route("/api/settings",         get(settings_load).post(settings_save))
+        .route("/api/resume/save", post(resume_save))
+        .route("/api/resume/load", get(resume_load))
+        .route("/api/settings", get(settings_load).post(settings_save))
         .route("/api/macro/from_sequence", post(macro_from_sequence))
         .route("/api/macro/prune_candidates", post(macro_prune_candidates))
-        .route("/api/macro/swap_candidates",    post(macro_swap_candidates))
-        .route("/api/macro/tighten_candidates", post(macro_tighten_candidates))
-        .route("/api/macro/batch_simulate",  post(batch_simulate))
-        .route("/api/attrs/save",    post(attrs_save))
-        .route("/api/attrs/load",    get(attrs_load))
-        .route("/api/attrs/profiles",       get(attrs_profiles))
-        .route("/api/attrs/save_profile",   post(attrs_save_profile))
-        .route("/api/attrs/load_profile",   get(attrs_load_profile))
+        .route("/api/macro/swap_candidates", post(macro_swap_candidates))
+        .route(
+            "/api/macro/tighten_candidates",
+            post(macro_tighten_candidates),
+        )
+        .route("/api/macro/batch_simulate", post(batch_simulate))
+        .route("/api/attrs/save", post(attrs_save))
+        .route("/api/attrs/load", get(attrs_load))
+        .route("/api/attrs/profiles", get(attrs_profiles))
+        .route("/api/attrs/save_profile", post(attrs_save_profile))
+        .route("/api/attrs/load_profile", get(attrs_load_profile))
         .route("/api/attrs/delete_profile", delete(attrs_delete_profile))
-        .route("/api/macro/profiles",       get(macro_profiles))
-        .route("/api/macro/save_profile",   post(macro_save_profile))
-        .route("/api/macro/load_profile",   get(macro_load_profile))
+        .route("/api/macro/profiles", get(macro_profiles))
+        .route("/api/macro/save_profile", post(macro_save_profile))
+        .route("/api/macro/load_profile", get(macro_load_profile))
         .route("/api/macro/delete_profile", delete(macro_delete_profile))
         .route("/api/optimizer/analyze", post(optimizer_analyze))
-        .route("/api/optimizer/start",   post(optimizer::runtime::start_handler))
-        .route("/api/optimizer/stop",    post(optimizer::runtime::stop_handler))
-        .route("/api/optimizer/status",  get(optimizer::runtime::status_handler))
-        .route("/api/optimizer/stream",  get(optimizer::runtime::stream_handler))
-        .route("/api/optimizer/runs",    get(optimizer::runtime::list_runs_handler))
-        .route("/api/optimizer/runs/:id", get(optimizer::runtime::run_detail_handler))
-        .route("/api/optimizer/runs/:id/file", get(optimizer::runtime::run_file_handler))
+        .route(
+            "/api/optimizer/start",
+            post(optimizer::runtime::start_handler),
+        )
+        .route(
+            "/api/optimizer/stop",
+            post(optimizer::runtime::stop_handler),
+        )
+        .route(
+            "/api/optimizer/status",
+            get(optimizer::runtime::status_handler),
+        )
+        .route(
+            "/api/optimizer/stream",
+            get(optimizer::runtime::stream_handler),
+        )
+        .route(
+            "/api/optimizer/runs",
+            get(optimizer::runtime::list_runs_handler),
+        )
+        .route(
+            "/api/optimizer/runs/:id",
+            get(optimizer::runtime::run_detail_handler),
+        )
+        .route(
+            "/api/optimizer/runs/:id/file",
+            get(optimizer::runtime::run_file_handler),
+        )
         .route("/api/optimizer/candidates", get(optimizer_candidates))
         .route("/api/rl/rollout", post(rl_rollout))
-        .route("/api/rl/spec",                    get(rl::http::spec_handler))
-        .route("/api/rl/sessions",                get(rl::http::list_sessions_handler))
-        .route("/api/rl/env/create",              post(rl::http::create_handler))
-        .route("/api/rl/env/:id/reset",           post(rl::http::reset_handler))
-        .route("/api/rl/env/:id/step",            post(rl::http::step_handler))
-        .route("/api/rl/env/:id/step_advance",    post(rl::http::step_advance_handler))
-        .route("/api/rl/env/:id/advance",         post(rl::http::advance_handler))
-        .route("/api/rl/env/:id/macro_decision",  post(rl::http::macro_decision_handler))
-        .route("/api/rl/env/:id/info",            get(rl::http::info_handler))
-        .route("/api/rl/env/:id/close",           post(rl::http::close_handler))
-        .route("/api/rl/train/start",             post(rl::training::start_handler))
-        .route("/api/rl/train/stop",              post(rl::training::stop_handler))
-        .route("/api/rl/train/status",            get(rl::training::status_handler))
-        .route("/api/rl/train/stream",            get(rl::training::stream_handler))
-        .route("/api/rl/train/runs",              get(rl::training::list_runs_handler))
-        .route("/api/rl/train/params",            get(rl::training::get_runtime_params_handler).post(rl::training::set_runtime_params_handler))
-        .route("/api/rl/analyze/start",           post(rl::analysis::start_handler))
-        .route("/api/rl/analyze/stop",            post(rl::analysis::stop_handler))
-        .route("/api/rl/analyze/status",          get(rl::analysis::status_handler))
-        .route("/api/rl/analyze/stream",          get(rl::analysis::stream_handler))
-        .route("/api/rl/analyze/latest_actions",  get(rl::analysis::latest_actions_handler))
-        .route("/api/rl/pretrain/start",          post(rl::pretrain::start_handler))
-        .route("/api/rl/pretrain/stop",           post(rl::pretrain::stop_handler))
-        .route("/api/rl/pretrain/status",         get(rl::pretrain::status_handler))
-        .route("/api/rl/pretrain/stream",         get(rl::pretrain::stream_handler))
-        .route("/api/rl/pretrain/list",           get(rl::pretrain::list_handler))
+        .route("/api/rl/spec", get(rl::http::spec_handler))
+        .route("/api/rl/sessions", get(rl::http::list_sessions_handler))
+        .route("/api/rl/env/create", post(rl::http::create_handler))
+        .route("/api/rl/env/:id/reset", post(rl::http::reset_handler))
+        .route("/api/rl/env/:id/step", post(rl::http::step_handler))
+        .route(
+            "/api/rl/env/:id/step_advance",
+            post(rl::http::step_advance_handler),
+        )
+        .route("/api/rl/env/:id/advance", post(rl::http::advance_handler))
+        .route(
+            "/api/rl/env/:id/macro_decision",
+            post(rl::http::macro_decision_handler),
+        )
+        .route("/api/rl/env/:id/info", get(rl::http::info_handler))
+        .route("/api/rl/env/:id/close", post(rl::http::close_handler))
+        .route("/api/rl/train/start", post(rl::training::start_handler))
+        .route("/api/rl/train/stop", post(rl::training::stop_handler))
+        .route("/api/rl/train/status", get(rl::training::status_handler))
+        .route("/api/rl/train/stream", get(rl::training::stream_handler))
+        .route("/api/rl/train/runs", get(rl::training::list_runs_handler))
+        .route(
+            "/api/rl/train/params",
+            get(rl::training::get_runtime_params_handler)
+                .post(rl::training::set_runtime_params_handler),
+        )
+        .route("/api/rl/analyze/start", post(rl::analysis::start_handler))
+        .route("/api/rl/analyze/stop", post(rl::analysis::stop_handler))
+        .route("/api/rl/analyze/status", get(rl::analysis::status_handler))
+        .route("/api/rl/analyze/stream", get(rl::analysis::stream_handler))
+        .route(
+            "/api/rl/analyze/latest_actions",
+            get(rl::analysis::latest_actions_handler),
+        )
+        .route("/api/rl/pretrain/start", post(rl::pretrain::start_handler))
+        .route("/api/rl/pretrain/stop", post(rl::pretrain::stop_handler))
+        .route("/api/rl/pretrain/status", get(rl::pretrain::status_handler))
+        .route("/api/rl/pretrain/stream", get(rl::pretrain::stream_handler))
+        .route("/api/rl/pretrain/list", get(rl::pretrain::list_handler))
         // ── 配装器 ──
-        .route("/api/equip/search",     post(equip_search))
-        .route("/api/equip/detail",     post(equip_detail))
-        .route("/api/equip/enhances",   post(equip_enhances))
-        .route("/api/equip/enchants",   post(equip_enchants))
-        .route("/api/equip/stones",     post(equip_stones))
-        .route("/api/equip/calculate",  post(equip_calculate))
-        .route("/api/equip/meta",       get(equip_meta))
+        .route("/api/equip/search", post(equip_search))
+        .route("/api/equip/detail", post(equip_detail))
+        .route("/api/equip/enhances", post(equip_enhances))
+        .route("/api/equip/enchants", post(equip_enchants))
+        .route("/api/equip/stones", post(equip_stones))
+        .route("/api/equip/calculate", post(equip_calculate))
+        .route("/api/equip/meta", get(equip_meta))
         .route("/api/equip/haste_tiers", get(equip_haste_tiers))
         .route("/api/equip/auto_optimize", post(equip_auto_optimize))
-        .route("/api/equip/auto_optimize/progress", get(equip_auto_optimize_progress))
-        .route("/api/equip/auto_optimize/control", post(equip_auto_optimize_control))
+        .route(
+            "/api/equip/auto_optimize/progress",
+            get(equip_auto_optimize_progress),
+        )
+        .route(
+            "/api/equip/auto_optimize/control",
+            post(equip_auto_optimize_control),
+        )
         .route("/api/equip/fit_curve", post(equip_fit_curve))
-        .route("/api/auth/login",  post(auth::login))
+        .route("/api/auth/login", post(auth::login))
         .route("/api/auth/logout", post(auth::logout))
-        .route("/api/auth/me",     get(auth::me))
+        .route("/api/auth/me", get(auth::me))
         .route("/api/auth/reload", post(auth::reload))
         .fallback_service(ServeDir::new(data_path("../frontend", "frontend")))
         .with_state(state)
@@ -9595,20 +12154,33 @@ async fn main() {
 
     // 绑定地址/端口可由环境变量覆盖（worker 模式：JX3_BIND=127.0.0.1 私有口；JX3_PORT=动态端口）
     let bind_addr = std::env::var("JX3_BIND").unwrap_or_else(|_| "0.0.0.0".into());
-    let port: u16 = std::env::var("JX3_PORT").ok().and_then(|s| s.parse().ok()).unwrap_or(3005);
-    let listener = tokio::net::TcpListener::bind(format!("{bind_addr}:{port}")).await.unwrap();
+    let port: u16 = std::env::var("JX3_PORT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(3005);
+    let listener = tokio::net::TcpListener::bind(format!("{bind_addr}:{port}"))
+        .await
+        .unwrap();
     println!("Backend running on http://{bind_addr}:{port}");
 
     // 自动打开浏览器（worker 模式 JX3_NO_BROWSER=1 时跳过）
-    let open_browser = std::env::var("JX3_NO_BROWSER").map(|v| v.trim().is_empty()).unwrap_or(true);
+    let open_browser = std::env::var("JX3_NO_BROWSER")
+        .map(|v| v.trim().is_empty())
+        .unwrap_or(true);
     if open_browser {
         let url = format!("http://localhost:{port}");
         #[cfg(target_os = "windows")]
-        std::process::Command::new("cmd").args(["/C", "start", &url]).spawn().ok();
+        std::process::Command::new("cmd")
+            .args(["/C", "start", &url])
+            .spawn()
+            .ok();
         #[cfg(target_os = "macos")]
         std::process::Command::new("open").arg(&url).spawn().ok();
         #[cfg(target_os = "linux")]
-        std::process::Command::new("xdg-open").arg(&url).spawn().ok();
+        std::process::Command::new("xdg-open")
+            .arg(&url)
+            .spawn()
+            .ok();
     }
 
     axum::serve(listener, app).await.unwrap();
@@ -9653,7 +12225,7 @@ mod player_setter_tests {
         let g0 = p.decision_generation;
         p.set_rage(50);
         let g1 = p.decision_generation;
-        p.set_rage(50);  // 同值再调
+        p.set_rage(50); // 同值再调
         assert!(g1 > g0);
         assert!(p.decision_generation > g1);
     }
@@ -9664,8 +12236,10 @@ mod player_setter_tests {
         p.set_rage(95);
         p.add_rage(10);
         assert_eq!(p.rage, 100, "95+10=105 → 100");
+        assert_eq!(p.rage_overflow_total, 5, "应记录被上限截断的 5 点怒气");
         p.add_rage(-200);
         assert_eq!(p.rage, 0, "100-200=-100 → 0");
+        assert_eq!(p.rage_overflow_total, 5, "消耗怒气不应计入溢出");
     }
 
     #[test]
@@ -9674,13 +12248,20 @@ mod player_setter_tests {
         let mut p = mk();
         let mut state: u64 = 0xdeadbeef;
         for _ in 0..1000 {
-            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-            let init = (state % 200) as i32 - 50;       // -50..150
-            let delta = ((state >> 32) % 200) as i32 - 100;  // -100..100
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            let init = (state % 200) as i32 - 50; // -50..150
+            let delta = ((state >> 32) % 200) as i32 - 100; // -100..100
             p.set_rage(init);
             p.add_rage(delta);
-            assert!(p.rage >= 0 && p.rage <= 100,
-                "rage 越界: init={} delta={} → rage={}", init, delta, p.rage);
+            assert!(
+                p.rage >= 0 && p.rage <= 100,
+                "rage 越界: init={} delta={} → rage={}",
+                init,
+                delta,
+                p.rage
+            );
         }
     }
 

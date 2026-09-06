@@ -17,10 +17,10 @@
 use std::collections::HashMap;
 
 use crate::{
-    combo_buff_id, frames_to_sec, get_actual_frames, sec_to_frames, BUFF_CHENG_WU, BUFF_DUN_FEI,
-    BUFF_FENG_MING, BUFF_JIAN_DING, BUFF_JIE_HUA, BUFF_KUANG_JUE, BUFF_LIN_AN, BUFF_LIN_GUANG,
-    BUFF_LIU_XUE, BUFF_SHI_XUE, BUFF_XUE_NU, BUFF_XUE_NU_JY, BUFF_XUE_SHI_COUNT, BUFF_XU_RUO,
-    BUFF_YUAN_GE_ID, Player, SkillSpec, Stance,
+    combo_buff_id, frames_to_sec, get_actual_frames, sec_to_frames, Player, SkillSpec, Stance,
+    BUFF_CHENG_WU, BUFF_DUN_FEI, BUFF_FENG_MING, BUFF_JIAN_DING, BUFF_JIE_HUA, BUFF_KUANG_JUE,
+    BUFF_LIN_AN, BUFF_LIN_GUANG, BUFF_LIU_XUE, BUFF_SHI_XUE, BUFF_XUE_NU, BUFF_XUE_NU_JY,
+    BUFF_XUE_SHI_COUNT, BUFF_XU_RUO, BUFF_YUAN_GE_ID,
 };
 
 use super::action::{ACTION_COUNT, ACTION_SKILLS, WAIT_ACTION};
@@ -33,12 +33,7 @@ const COMBO_ZHEN_YUN_SEC: f64 = 720.0 / 16.0;
 /// - 盾击：基础 3 + 援戈奇穴(36058) +1 = 4
 /// - 盾飞 / 血怒：3
 /// - 阵云结晦：2
-const CHARGE_SKILLS: &[(&str, u32)] = &[
-    ("盾击", 4),
-    ("盾飞", 3),
-    ("血怒", 3),
-    ("阵云结晦", 2),
-];
+const CHARGE_SKILLS: &[(&str, u32)] = &[("盾击", 4), ("盾飞", 3), ("血怒", 3), ("阵云结晦", 2)];
 
 /// 单层自身 buff（贡献 1 维剩余时间）
 const SELF_BUFFS_SINGLE: &[u32] = &[
@@ -56,17 +51,15 @@ const SELF_BUFFS_SINGLE: &[u32] = &[
 
 /// 多层自身 buff（贡献 max_stacks 维 one-hot + 1 维剩余时间）
 const SELF_BUFFS_MULTI: &[(u32, u32)] = &[
-    (BUFF_XUE_NU, 3),       // 血怒
-    (BUFF_YUAN_GE_ID, 7),   // 援戈
+    (BUFF_XUE_NU, 3),     // 血怒
+    (BUFF_YUAN_GE_ID, 7), // 援戈
 ];
 
 /// 单层目标 debuff
 const TARGET_BUFFS_SINGLE: &[u32] = &[BUFF_XU_RUO, BUFF_LIU_XUE];
 
 /// 多层目标 debuff
-const TARGET_BUFFS_MULTI: &[(u32, u32)] = &[
-    (BUFF_XUE_SHI_COUNT, 2),
-];
+const TARGET_BUFFS_MULTI: &[(u32, u32)] = &[(BUFF_XUE_SHI_COUNT, 2)];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 维度计算（编译期常量，便于其他模块引用 OBS_DIM）
@@ -145,7 +138,9 @@ pub fn observe(
 
     // 18 动作的 CD 就绪度
     for (i, slot) in ACTION_SKILLS.iter().enumerate() {
-        let Some(name) = slot else { continue; };
+        let Some(name) = slot else {
+            continue;
+        };
         if let Some(ranks) = skill_map.get(name) {
             if let Some(spec) = ranks.first() {
                 obs[o + i] = cd_progress(player, spec);
@@ -185,8 +180,12 @@ pub fn observe(
     }
 
     // 阵云连段 buff 剩余（连续值）
-    let combo2 = player.buff_remaining(combo_buff_id("阵云_2")).unwrap_or(0.0);
-    let combo3 = player.buff_remaining(combo_buff_id("阵云_3")).unwrap_or(0.0);
+    let combo2 = player
+        .buff_remaining(combo_buff_id("阵云_2"))
+        .unwrap_or(0.0);
+    let combo3 = player
+        .buff_remaining(combo_buff_id("阵云_3"))
+        .unwrap_or(0.0);
     obs[o] = (combo2 / COMBO_ZHEN_YUN_SEC).clamp(0.0, 1.0) as f32;
     obs[o + 1] = (combo3 / COMBO_ZHEN_YUN_SEC).clamp(0.0, 1.0) as f32;
     o += COMBO_DIM;
@@ -226,8 +225,11 @@ pub fn observe(
 }
 
 fn buff_remaining_norm(player: &Player, remaining: Option<f64>, buff_id: u32) -> f32 {
-    let Some(r) = remaining else { return 0.0; };
-    let max_dur = player.buff_def(buff_id)
+    let Some(r) = remaining else {
+        return 0.0;
+    };
+    let max_dur = player
+        .buff_def(buff_id)
         .map(|d| d.duration_frames as f64 / 16.0)
         .unwrap_or(0.0);
     if r.is_finite() && max_dur > 0.0 {
@@ -240,19 +242,31 @@ fn buff_remaining_norm(player: &Player, remaining: Option<f64>, buff_id: u32) ->
 }
 
 fn gcd_progress(player: &Player) -> f64 {
-    let (gcd_end, total_base) = player.active_cds.iter()
+    let (gcd_end, total_base) = player
+        .active_cds
+        .iter()
         .filter(|(k, _)| k.starts_with("gcd_"))
         .fold((0.0_f64, 0.0_f64), |(best_end, best_total), (k, &v)| {
             if v > best_end {
-                let dur = k.strip_prefix("gcd_").and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
+                let dur = k
+                    .strip_prefix("gcd_")
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .unwrap_or(0.0);
                 (v, dur)
             } else {
                 (best_end, best_total)
             }
         });
-    if total_base <= 0.0 { return 0.0; }
-    let total_actual = frames_to_sec(get_actual_frames(sec_to_frames(total_base), player.effective_haste_level()));
-    if total_actual <= 0.0 { return 0.0; }
+    if total_base <= 0.0 {
+        return 0.0;
+    }
+    let total_actual = frames_to_sec(get_actual_frames(
+        sec_to_frames(total_base),
+        player.effective_haste_level(),
+    ));
+    if total_actual <= 0.0 {
+        return 0.0;
+    }
     let remaining = (gcd_end - player.current_time).max(0.0);
     (remaining / total_actual).clamp(0.0, 1.0)
 }
@@ -264,12 +278,16 @@ fn cd_progress(player: &Player, spec: &SkillSpec) -> f32 {
     }
     let mut worst: f32 = 1.0;
     for cd in &spec.cooldowns {
-        if !cd.cd_id.starts_with("cd_") { continue; }
+        if !cd.cd_id.starts_with("cd_") {
+            continue;
+        }
         let max = cd.duration.max(0.001);
         let expires = player.active_cds.get(&cd.cd_id).copied().unwrap_or(0.0);
         let remaining = (expires - player.current_time).max(0.0);
         let ready = (1.0 - (remaining / max)).clamp(0.0, 1.0) as f32;
-        if ready < worst { worst = ready; }
+        if ready < worst {
+            worst = ready;
+        }
     }
     worst
 }
@@ -282,11 +300,21 @@ pub fn legal_mask(
     mask[WAIT_ACTION] = true;
 
     for (i, slot) in ACTION_SKILLS.iter().enumerate() {
-        if i == WAIT_ACTION { continue; }
-        let Some(name) = slot else { continue; };
-        let Some(ranks) = skill_map.get(name) else { continue; };
-        let Some(spec) = player.pick_rank(ranks) else { continue; };
-        if !player.can_cast(spec) { continue; }
+        if i == WAIT_ACTION {
+            continue;
+        }
+        let Some(name) = slot else {
+            continue;
+        };
+        let Some(ranks) = skill_map.get(name) else {
+            continue;
+        };
+        let Some(spec) = player.pick_rank(ranks) else {
+            continue;
+        };
+        if !player.can_cast(spec) {
+            continue;
+        }
         let ready = player.next_cast_time(spec);
         if ready <= player.current_time + 1e-3 {
             mask[i] = true;

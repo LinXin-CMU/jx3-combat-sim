@@ -33,6 +33,6 @@ pub fn cast_skill(player: &mut Player, _em: &mut ScriptEmitter, _t: f64) {
         // 无调息：重置盾压 CD
         player.reset_cd("cd_盾压");
         // 怒气回复 +100%：盾压回15怒，再加15
-        player.add_rage(15);
+        player.add_rage_from(15, "盾压额外回怒");
     }
 }

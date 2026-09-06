@@ -10,8 +10,8 @@
 //!
 //! 驭焰橙武装备：1024 制累计 prob=205，触发"盾压·神兵"(25797)
 
-use crate::*;
 use crate::equip_effects::YU_YAN_WEAPON_IDS;
+use crate::*;
 
 pub fn cast_skill(player: &mut Player, em: &mut ScriptEmitter, t: f64) {
     // 封轻功
@@ -31,7 +31,7 @@ pub fn cast_skill(player: &mut Player, em: &mut ScriptEmitter, t: f64) {
         // 无调息：重置盾压 CD
         player.reset_cd("cd_盾压");
         // 怒气回复 +100%：盾压回15怒，再加15
-        player.add_rage(15);
+        player.add_rage_from(15, "盾压额外回怒");
     }
 
     // 驭焰装备特效：盾压·神兵 期望累计触发（prob=205/1024 ≈ 20%）

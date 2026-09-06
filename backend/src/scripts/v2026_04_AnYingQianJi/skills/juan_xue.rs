@@ -24,24 +24,51 @@ pub fn attack_coeff(haste_level: u32) -> f64 {
 /// 产出 (last_swing_time, to_time] 区间内所有平砍事件
 /// 仅生成 CastEvent（伤害字段空着，主流程通过 fill_event_damage 算）
 pub fn process_swings(player: &mut Player, to_time: f64) -> Vec<CastEvent> {
-    let last = match player.last_swing_time { Some(t) => t, None => return Vec::new() };
+    let last = match player.last_swing_time {
+        Some(t) => t,
+        None => return Vec::new(),
+    };
     let interval = frames_to_sec(interval_frames(player.effective_haste_level()));
-    if interval <= 0.0 { return Vec::new(); }
+    if interval <= 0.0 {
+        return Vec::new();
+    }
 
     let mut events = Vec::new();
     let mut t = last + interval;
     while t <= to_time + 0.0001 {
-        events.push(CastEvent {
-            name: "卷雪刀".into(),
+       events.push(CastEvent {
+            sequence_index: None,
+           name: "卷雪刀".into(),
             skill_id: 13039,
             cast_time: t,
             triggered: true,
-            gcd: 0.0, is_main: false, cd_wait: 0.0,
-            channel_ticks: None, max_channel_ticks: None, channel_duration: None,
-            timing_offset: None, max_timing_offset: None, available_buffs: None,
-            is_macro: false, rage_after: None, rage_delta: None, rage_cost: None,
-            state_before: None, state_after: None,
-            damage: None, damage_normal: None, damage_crit: None, damage_total: None,
+            gcd: 0.0,
+            is_main: false,
+            cd_wait: 0.0,
+            channel_ticks: None,
+            max_channel_ticks: None,
+            channel_duration: None,
+            timing_offset: None,
+            max_timing_offset: None,
+            available_buffs: None,
+            is_macro: false,
+            macro_page: None,
+            macro_line: None,
+            rage_after: None,
+            rage_delta: None,
+            rage_overflow: None,
+            rage_overflow_sources: Vec::new(),
+            rage_transactions: Vec::new(),
+            rage_generated: None,
+            rage_gained: None,
+            rage_spent: None,
+            rage_cost: None,
+            state_before: None,
+            state_after: None,
+            damage: None,
+            damage_normal: None,
+            damage_crit: None,
+            damage_total: None,
             runtime_recipes: Vec::new(),
             runtime_stats: None,
             override_attack_coeff: None,

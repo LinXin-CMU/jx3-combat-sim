@@ -2,21 +2,23 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::time::Instant;
 
-use super::provider::ToolDefinition;
 use super::equipment::{
     compare_focus, compare_strategies, inspect_workspace, search_catalog, EquipmentCatalogQueryV1,
-    EquipmentComparisonPresentationV1, EquipmentWorkspaceV1, COMPARE_FOCUSED_EQUIPMENT,
-    INSPECT_EQUIPMENT_WORKSPACE, SEARCH_EQUIPMENT_CATALOG, COMPARE_EQUIPMENT_STRATEGIES,
+    EquipmentComparisonPresentationV1, EquipmentWorkspaceV1, COMPARE_EQUIPMENT_STRATEGIES,
+    COMPARE_FOCUSED_EQUIPMENT, INSPECT_EQUIPMENT_WORKSPACE, SEARCH_EQUIPMENT_CATALOG,
 };
+use super::provider::ToolDefinition;
 use super::report::EvidenceStore;
+use super::tools::{summarize_simulation, SimulationExecution, SIMULATE_SCENARIO};
 use super::{
-    analyze_timeline, compare_scenarios, get_current_scenario, inspect_rotation_input,
-    simulate_scenario, AgentRuntime, CandidatePatchV1, EvidenceEnvelopeV1, KnowledgeAudience,
-    KnowledgeIndex, KnowledgeIndexError, KnowledgeMountScope, KnowledgeSearchQuery,
-    KnowledgeVersionContext, KnowledgeVersionScope, PatchValueV1, SavedArtifactError,
-    SavedArtifactKind, ScenarioPatchV1, ScenarioSnapshotV1, ToolBudget, ToolError,
-    COMPARE_SAVED_MACROS, COMPARE_SAVED_SCENARIOS, INSPECT_ROTATION_INPUT,
-    LIST_SAVED_ARTIFACTS, MAX_KNOWLEDGE_RESULTS, READ_SAVED_ARTIFACT,
+    analyze_timeline, compare_scenarios, compare_scenarios_with_baseline, get_current_scenario,
+    inspect_rotation_input, inspect_timeline_events, simulate_scenario, AgentRuntime,
+    CandidatePatchV1, EvidenceEnvelopeV1, KnowledgeAudience, KnowledgeIndex, KnowledgeIndexError,
+    KnowledgeMountScope, KnowledgeSearchQuery, KnowledgeVersionContext, KnowledgeVersionScope,
+    PatchValueV1, SavedArtifactError, SavedArtifactKind, ScenarioPatchV1, ScenarioSnapshotV1,
+    TimelineEventQueryV1, TimelineEventSelector, ToolBudget, ToolError, COMPARE_SAVED_MACROS,
+    COMPARE_SAVED_SCENARIOS, INSPECT_ROTATION_INPUT, INSPECT_TIMELINE_EVENTS, LIST_SAVED_ARTIFACTS,
+    MAX_KNOWLEDGE_RESULTS, READ_SAVED_ARTIFACT,
 };
 use crate::macro_parser::parse_macro_text;
 use crate::Mount;
@@ -33,6 +35,16 @@ pub struct AskUserQuestionArguments {
     pub reason: String,
     #[serde(default)]
     pub answer_hint: Option<String>,
+    #[serde(default)]
+    pub options: Vec<ClarificationOptionV1>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ClarificationOptionV1 {
+    pub label: String,
+    #[serde(default)]
+    pub description: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,13 +64,25 @@ pub struct AgentScenarioPatchV1 {
     pub sequence_edits: Option<Vec<AgentSequenceEditV1>>,
     pub sequence_splices: Option<Vec<AgentSequenceSpliceV1>>,
     pub network_delay: Option<u32>,
+    pub pauses: Option<Vec<(f64, f64)>>,
     pub initial_rage: Option<i32>,
     pub base_attack: Option<f64>,
     pub target_defense_bonus: Option<f64>,
     pub macro_text: Option<String>,
+    /// Exact, bounded edits against the frozen macro. Each `find` fragment must
+    /// occur exactly once so the model can test a local hypothesis without
+    /// copying or accidentally rewriting the whole macro.
+    pub macro_replacements: Option<Vec<AgentMacroReplacementV1>>,
     pub talents: Option<Vec<u32>>,
     pub recipes: Option<Vec<u32>>,
     pub equipment: Option<std::collections::HashMap<String, u32>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AgentMacroReplacementV1 {
+    pub find: String,
+    pub replace: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -104,6 +128,7 @@ pub struct AgentToolRegistry<'a> {
     knowledge_searches: u32,
     knowledge_audience: KnowledgeAudience,
     scenario_read: bool,
+    baseline_simulation: Option<SimulationExecution>,
     evidence: EvidenceStore,
     equipment_workspace: Option<EquipmentWorkspaceV1>,
     equipment_comparisons: Vec<EquipmentComparisonPresentationV1>,
@@ -146,6 +171,7 @@ impl<'a> AgentToolRegistry<'a> {
             knowledge_searches: 0,
             knowledge_audience: KnowledgeAudience::from_question("", Some(mount)),
             scenario_read: false,
+            baseline_simulation: None,
             evidence: EvidenceStore::new(),
             equipment_workspace,
             equipment_comparisons: Vec::new(),
@@ -160,8 +186,54 @@ impl<'a> AgentToolRegistry<'a> {
         self.knowledge_audience = KnowledgeAudience::from_question(question, Some(mount));
     }
 
+    fn ensure_baseline_simulation(
+        &mut self,
+        trace_id: &str,
+    ) -> Result<&SimulationExecution, ToolError> {
+        if self.baseline_simulation.is_none() {
+            let context = self.runtime.context();
+            self.baseline_simulation = Some(simulate_scenario(
+                trace_id,
+                self.scenario,
+                &context,
+                self.runtime.provenance(),
+                &mut self.budget,
+            )?);
+        }
+        Ok(self
+            .baseline_simulation
+            .as_ref()
+            .expect("baseline simulation was initialized"))
+    }
+
+    fn remember_comparison_baseline(
+        &mut self,
+        trace_id: &str,
+        response: crate::SimulateResponse,
+    ) -> Result<(), ToolError> {
+        if self.baseline_simulation.is_some() {
+            return Ok(());
+        }
+        let evidence = EvidenceEnvelopeV1::new(
+            trace_id,
+            SIMULATE_SCENARIO,
+            &self.scenario.scenario_hash,
+            serde_json::json!({"mode": "full"}),
+            summarize_simulation(&response),
+            self.runtime.provenance(),
+            0,
+        )?;
+        self.baseline_simulation = Some(SimulationExecution { evidence, response });
+        Ok(())
+    }
+
     pub fn definitions() -> Vec<ToolDefinition> {
         vec![
+            ToolDefinition {
+                name: super::distillation::DISTILL_MACRO.into(),
+                description: "Activate macro distillation: legacy generator followed by Workflow A algorithm tuning (cast-diff, safe pruning, adjacent swaps, threshold refinement), all simulated against the frozen environment. Returns the tested candidate, fit diagnostics, page lengths and iteration results. Optionally supply macro_text to tune your own revision; interpret remaining differences and use compare_scenarios for detailed validation.".into(),
+                parameters: super::distillation::arguments_schema(),
+            },
             ToolDefinition {
                 name: "get_current_scenario".to_string(),
                 description: "Read the immutable current scenario, resolved version and evidence identity.".to_string(),
@@ -169,12 +241,12 @@ impl<'a> AgentToolRegistry<'a> {
             },
             ToolDefinition {
                 name: ASK_USER_QUESTION.to_string(),
-                description: "Pause this run and ask the user for one essential decision or missing fact. Use when the answer materially changes the analysis and local tools cannot determine it. The next user message continues in the same session.".to_string(),
+                description: "Gather requirements, clarify ambiguity, or ask the user to choose among meaningful directions. Ask for goals, preferences, ambiguous objects, or user-only facts that materially change the analysis after considering available context and local data. Independently choose and execute useful lookups, event inspection, and in-scope simulation or A/B validation. Tool authorization belongs to the permission flow. Offer 2–4 options when useful, allowing a custom answer. The next user answer updates the original task in the same session.".to_string(),
                 parameters: ask_user_question_schema(),
             },
             ToolDefinition {
                 name: INSPECT_ROTATION_INPUT.to_string(),
-                description: "Search a manual rotation by skill name and return exact one-based line numbers with neighboring operations. Macro mode has no manual-operation rows; its complete parsed statements are provided by get_current_scenario. Results are paged at eight matches with next_start_index.".to_string(),
+                description: "Search a manual rotation by skill name and return exact stable operation occurrences with neighboring operations. These are logical operation numbers, never visual UI rows. Macro mode has no manual-operation rows; its complete parsed statements are provided by get_current_scenario.".to_string(),
                 parameters: inspect_rotation_schema(),
             },
             ToolDefinition {
@@ -184,13 +256,18 @@ impl<'a> AgentToolRegistry<'a> {
             },
             ToolDefinition {
                 name: "compare_scenarios".to_string(),
-                description: "Compare one to three typed candidate patches against the immutable baseline. Each patch contains the fields that change; omitted fields inherit the frozen baseline.".to_string(),
+                description: "Compare one to three typed candidate patches against the immutable baseline. Each patch contains only fields that change; omitted fields inherit the frozen baseline. For a local macro hypothesis, macro_replacements applies one to four exact find/replace edits server-side and rejects missing or ambiguous fragments. The result includes deterministic condition_semantics for changed bufftime thresholds; use its countdown direction when explaining timing.".to_string(),
                 parameters: compare_schema(),
             },
             ToolDefinition {
                 name: "analyze_timeline".to_string(),
-                description: "Run the immutable baseline and return deterministic timeline diagnosis evidence.".to_string(),
+                description: "Run the immutable baseline and return output structure, aggregate timeline diagnosis, per-cycle key skill/resource summaries, attempted/applied/spent rage and measured overflow attributed to its actual gain source, deterministic skill/effect observations, buff coverage separated from average active stacks, and macro statement execution counts with castability failure reasons. Prefer this single call for rotation diagnosis; use inspect_timeline_events when an aggregate signal needs exact event locations.".to_string(),
                 parameters: empty_object_schema(),
+            },
+            ToolDefinition {
+                name: INSPECT_TIMELINE_EVENTS.to_string(),
+                description: "Inspect exact executed cast windows around resource observations, semantic combat events, GCD gaps, recorded waits, a named skill, or a timestamp. match_index returns up to 64 lightweight occurrences in one call; read it before paging bounded neighboring windows. Returns stable event anchors, ordered resource transactions, macro source positions, neighboring skills and selected buffs. Selector meanings are deterministic simulator observations; current-version gameplay significance comes from knowledge evidence.".to_string(),
+                parameters: inspect_timeline_events_schema(),
             },
             ToolDefinition {
                 name: LIST_SAVED_ARTIFACTS.to_string(),
@@ -224,12 +301,12 @@ impl<'a> AgentToolRegistry<'a> {
             },
             ToolDefinition {
                 name: SEARCH_EQUIPMENT_CATALOG.to_string(),
-                description: "Search the local equipment catalog by exact name or common jargon. '四件套/4件套' means normal set pieces; '四切糕/4切糕' means crafted 切糕 set pieces. Results are candidates, not proof of DPS.".to_string(),
+                description: "Search the local equipment catalog by exact name, aliases resolved from the versioned terminology index, slot, set metadata, and item attributes. Results are candidates, not proof of DPS.".to_string(),
                 parameters: equipment_search_schema(),
             },
             ToolDefinition {
                 name: COMPARE_EQUIPMENT_STRATEGIES.to_string(),
-                description: "Build a current-catalog four-piece ordinary set and four-piece crafted 切糕 variant on the frozen workspace, recalculate both panels, and simulate both with the same rotation. Use only for 四件套 versus 四切糕 questions.".to_string(),
+                description: "Build two typed equipment strategies on the frozen workspace, recalculate both panels, and simulate both with the same rotation. The tool schema defines the currently supported strategy pair; user-language aliases are resolved by the terminology layer.".to_string(),
                 parameters: empty_object_schema(),
             },
         ]
@@ -293,11 +370,56 @@ impl<'a> AgentToolRegistry<'a> {
         }
 
         match tool_name {
+            super::distillation::DISTILL_MACRO => {
+                let args = match serde_json::from_value::<super::distillation::Arguments>(arguments.clone()) {
+                    Ok(args) => args, Err(_) => return invalid_arguments(tool_name),
+                };
+                if args.max_evaluations.is_some_and(|n| n == 0 || n > 512)
+                    || args.macro_text.as_ref().is_some_and(|text| text.len() > 8192 || parse_macro_text(text).is_err()) {
+                    return invalid_arguments(tool_name);
+                }
+                let started = Instant::now();
+                let execution = match self.ensure_baseline_simulation(trace_id) {
+                    Ok(value) => value.clone(),
+                    Err(error) => return tool_failure(tool_name, error),
+                };
+                let mut result = match super::distillation::generate(&execution) {
+                    Ok(result) => result,
+                    Err(error) => return tool_failure(tool_name, error),
+                };
+                let initial = args.macro_text.clone().unwrap_or_else(|| result["macro_text"].as_str().unwrap_or_default().to_string());
+                let allowance = args.max_evaluations.unwrap_or(384)
+                    .min(self.budget.remaining_simulations().saturating_sub(2) as usize);
+                let context = self.runtime.context();
+                let baseline = self.scenario.simulation.clone();
+                let duration = execution.response.fight_time.clamp(1.0, 3600.0);
+                let tuning = super::macro_tuning::tune(&initial, &execution.response, allowance, |text| {
+                    self.budget.reserve_simulations(1).ok()?;
+                    let mut simulation = baseline.clone();
+                    simulation.macro_duration = Some(duration);
+                    super::compare::configure_macro_rotation(&mut simulation, text.to_string());
+                    simulation.lite = true;
+                    simulation.lite_keep_timeline = true;
+                    Some(crate::simulate_core(&simulation, context.skills, context.game_version, context.mount,
+                        context.constants, context.recipes, context.team_buffs, context.formations))
+                });
+                result["initial_macro_text"] = json!(initial);
+                result["macro_text"] = tuning["macro_text"].clone();
+                result["pages"] = super::distillation::page_lengths(result["macro_text"].as_str().unwrap_or_default());
+                if tuning["final"].is_object() { result["candidate_status"] = json!("algorithm_tested"); }
+                result["tuning"] = tuning;
+                match EvidenceEnvelopeV1::new(trace_id, tool_name, &self.scenario.scenario_hash,
+                    json!({"generator_options":"legacy_defaults","max_chars_per_page":128,"request":arguments,"algorithm_allowance":allowance}),
+                    result, self.runtime.provenance(), started.elapsed().as_millis() as u64) {
+                    Ok(evidence) => self.success(tool_name, vec![serialize_evidence(execution.evidence), serialize_evidence(evidence)]),
+                    Err(error) => tool_failure(tool_name, ToolError::Evidence(error)),
+                }
+            }
             "get_current_scenario" => {
                 if serde_json::from_value::<EmptyArguments>(arguments).is_err() {
                     return invalid_arguments(tool_name);
                 }
-                match get_current_scenario(trace_id, self.scenario, self.runtime.provenance()) {
+                match get_current_scenario(trace_id, self.scenario, &self.runtime.context(), self.runtime.provenance()) {
                     Ok(evidence) => {
                         self.scenario_read = true;
                         self.success(tool_name, vec![serialize_evidence(evidence)])
@@ -332,6 +454,7 @@ impl<'a> AgentToolRegistry<'a> {
                     } else {
                         args.context_radius
                     },
+                    &self.runtime.context(),
                     self.runtime.provenance(),
                 ) {
                     Ok(evidence) => self.success(tool_name, vec![serialize_evidence(evidence)]),
@@ -342,16 +465,10 @@ impl<'a> AgentToolRegistry<'a> {
                 if serde_json::from_value::<EmptyArguments>(arguments).is_err() {
                     return invalid_arguments(tool_name);
                 }
-                let context = self.runtime.context();
-                match simulate_scenario(
-                    trace_id,
-                    self.scenario,
-                    &context,
-                    self.runtime.provenance(),
-                    &mut self.budget,
-                ) {
+                match self.ensure_baseline_simulation(trace_id) {
                     Ok(execution) => {
-                        self.success(tool_name, vec![serialize_evidence(execution.evidence)])
+                        let evidence = serialize_evidence(execution.evidence.clone());
+                        self.success(tool_name, vec![evidence])
                     }
                     Err(error) => tool_failure(tool_name, error),
                 }
@@ -386,15 +503,34 @@ impl<'a> AgentToolRegistry<'a> {
                     }
                 };
                 let context = self.runtime.context();
-                match compare_scenarios(
+                let cached_baseline = self
+                    .baseline_simulation
+                    .as_ref()
+                    .map(|simulation| simulation.response.clone());
+                match compare_scenarios_with_baseline(
                     trace_id,
                     self.scenario,
                     &candidates,
                     &context,
                     self.runtime.provenance(),
                     &mut self.budget,
+                    cached_baseline.as_ref(),
                 ) {
                     Ok(execution) => {
+                        if self
+                            .remember_comparison_baseline(
+                                trace_id,
+                                execution.baseline_response.clone(),
+                            )
+                            .is_err()
+                        {
+                            return failure(
+                                tool_name,
+                                "baseline_cache_failed",
+                                "comparison baseline could not be retained for later diagnosis",
+                                false,
+                            );
+                        }
                         self.success(tool_name, vec![serialize_evidence(execution.evidence)])
                     }
                     Err(error) => tool_failure(tool_name, error),
@@ -404,20 +540,99 @@ impl<'a> AgentToolRegistry<'a> {
                 if serde_json::from_value::<EmptyArguments>(arguments).is_err() {
                     return invalid_arguments(tool_name);
                 }
-                let context = self.runtime.context();
-                match simulate_scenario(
-                    trace_id,
-                    self.scenario,
-                    &context,
-                    self.runtime.provenance(),
-                    &mut self.budget,
-                ) {
+                let provenance = self.runtime.provenance().clone();
+                match self.ensure_baseline_simulation(trace_id) {
                     Ok(simulation) => {
                         let simulation_evidence = serialize_evidence(simulation.evidence.clone());
-                        match analyze_timeline(trace_id, &simulation, self.runtime.provenance()) {
+                        match analyze_timeline(trace_id, simulation, &provenance) {
                             Ok(timeline) => self.success(
                                 tool_name,
                                 vec![simulation_evidence, serialize_evidence(timeline.evidence)],
+                            ),
+                            Err(error) => tool_failure(tool_name, error),
+                        }
+                    }
+                    Err(error) => tool_failure(tool_name, error),
+                }
+            }
+            INSPECT_TIMELINE_EVENTS => {
+                let mut normalized_arguments = arguments;
+                // A filter name used as selector still expresses the same bounded
+                // skill query when both the skill and numeric filter are supplied.
+                if normalized_arguments.get("selector").and_then(Value::as_str) == Some("rage_cost_below")
+                    && normalized_arguments.get("skill_name").and_then(Value::as_str).is_some()
+                    && normalized_arguments.get("rage_cost_below").and_then(Value::as_u64).is_some_and(|value| value > 0 && value <= 101)
+                {
+                    normalized_arguments["selector"] = Value::from("skill");
+                }
+                if let Some(fields) = normalized_arguments.as_object_mut() {
+                    fields.entry("skill_name".to_string()).or_insert(Value::Null);
+                    fields.entry("time_seconds".to_string()).or_insert(Value::Null);
+                    fields.entry("start_match".to_string()).or_insert(Value::from(0));
+                    fields.entry("limit".to_string()).or_insert(Value::from(8));
+                    fields.entry("context_radius".to_string()).or_insert(Value::from(2));
+                    fields
+                        .entry("buff_names".to_string())
+                        .or_insert_with(|| Value::Array(Vec::new()));
+                }
+                // Some OpenAI-compatible providers copy the documented
+                // `match_index` capacity into the unrelated detailed-window
+                // limit. Preserve the safe intent by clamping only these
+                // bounded pagination knobs; the returned evidence records the
+                // effective query.
+                if normalized_arguments
+                    .get("limit")
+                    .and_then(Value::as_u64)
+                    .is_some_and(|limit| limit > 8 && limit <= 64)
+                {
+                    normalized_arguments["limit"] = Value::from(8);
+                }
+                if normalized_arguments
+                    .get("context_radius")
+                    .and_then(Value::as_u64)
+                    .is_some_and(|radius| radius > 4 && radius <= 8)
+                {
+                    normalized_arguments["context_radius"] = Value::from(4);
+                }
+                let query = match serde_json::from_value::<TimelineEventQueryV1>(
+                    normalized_arguments,
+                ) {
+                    Ok(query) => query,
+                    Err(_) => return invalid_arguments(tool_name),
+                };
+                let selector_arguments_valid = match query.selector {
+                    TimelineEventSelector::Skill => query.skill_name.as_ref().is_some_and(|name| {
+                        !name.trim().is_empty()
+                            && name.chars().count() <= 64
+                            && !name.chars().any(char::is_control)
+                    }),
+                    TimelineEventSelector::Time => query
+                        .time_seconds
+                        .is_some_and(|time| time.is_finite() && time >= 0.0),
+                    _ => true,
+                };
+                let buff_names_valid = query.buff_names.len() <= 8
+                    && query.buff_names.iter().all(|name| {
+                        !name.trim().is_empty()
+                            && name.chars().count() <= 64
+                            && !name.chars().any(char::is_control)
+                    });
+                if !selector_arguments_valid
+                    || !buff_names_valid
+                    || query.limit == 0
+                    || query.limit > 8
+                    || query.context_radius > 4
+                {
+                    return invalid_arguments(tool_name);
+                }
+                let provenance = self.runtime.provenance().clone();
+                match self.ensure_baseline_simulation(trace_id) {
+                    Ok(simulation) => {
+                        let simulation_evidence = serialize_evidence(simulation.evidence.clone());
+                        match inspect_timeline_events(trace_id, simulation, &query, &provenance) {
+                            Ok(inspection) => self.success(
+                                tool_name,
+                                vec![simulation_evidence, serialize_evidence(inspection.evidence)],
                             ),
                             Err(error) => tool_failure(tool_name, error),
                         }
@@ -537,17 +752,32 @@ impl<'a> AgentToolRegistry<'a> {
                     return invalid_arguments(tool_name);
                 }
                 let Some(workspace) = self.equipment_workspace.as_ref() else {
-                    return failure(tool_name, "equipment_workspace_unavailable", "open the equipment page and capture its current build first", false);
+                    return failure(
+                        tool_name,
+                        "equipment_workspace_unavailable",
+                        "open the equipment page and capture its current build first",
+                        false,
+                    );
                 };
                 let started = Instant::now();
-                let result = inspect_workspace(
-                    self.runtime,
-                    workspace,
-                    &self.scenario.simulation.talents,
-                );
-                match EvidenceEnvelopeV1::new(trace_id, tool_name, &self.scenario.scenario_hash, arguments, result, self.runtime.provenance(), started.elapsed().as_millis() as u64) {
+                let result =
+                    inspect_workspace(self.runtime, workspace, &self.scenario.simulation.talents);
+                match EvidenceEnvelopeV1::new(
+                    trace_id,
+                    tool_name,
+                    &self.scenario.scenario_hash,
+                    arguments,
+                    result,
+                    self.runtime.provenance(),
+                    started.elapsed().as_millis() as u64,
+                ) {
                     Ok(evidence) => self.success(tool_name, vec![serialize_evidence(evidence)]),
-                    Err(_) => failure(tool_name, "equipment_evidence_failed", "equipment evidence could not be created", false),
+                    Err(_) => failure(
+                        tool_name,
+                        "equipment_evidence_failed",
+                        "equipment evidence could not be created",
+                        false,
+                    ),
                 }
             }
             COMPARE_FOCUSED_EQUIPMENT => {
@@ -555,9 +785,20 @@ impl<'a> AgentToolRegistry<'a> {
                     return invalid_arguments(tool_name);
                 }
                 let Some(workspace) = self.equipment_workspace.as_ref() else {
-                    return failure(tool_name, "equipment_workspace_unavailable", "open the equipment page and focus a candidate first", false);
+                    return failure(
+                        tool_name,
+                        "equipment_workspace_unavailable",
+                        "open the equipment page and focus a candidate first",
+                        false,
+                    );
                 };
-                match compare_focus(trace_id, self.scenario, self.runtime, workspace, &mut self.budget) {
+                match compare_focus(
+                    trace_id,
+                    self.scenario,
+                    self.runtime,
+                    workspace,
+                    &mut self.budget,
+                ) {
                     Ok((evidence, presentation)) => {
                         self.equipment_comparisons.push(presentation);
                         self.success(tool_name, vec![serialize_evidence(evidence)])
@@ -566,15 +807,34 @@ impl<'a> AgentToolRegistry<'a> {
                 }
             }
             SEARCH_EQUIPMENT_CATALOG => {
-                let args = match serde_json::from_value::<EquipmentCatalogQueryV1>(arguments.clone()) {
-                    Ok(args) if !args.query.trim().is_empty() && args.query.chars().count() <= 80 => args,
-                    _ => return invalid_arguments(tool_name),
-                };
+                let args =
+                    match serde_json::from_value::<EquipmentCatalogQueryV1>(arguments.clone()) {
+                        Ok(args)
+                            if !args.query.trim().is_empty()
+                                && args.query.chars().count() <= 80 =>
+                        {
+                            args
+                        }
+                        _ => return invalid_arguments(tool_name),
+                    };
                 let started = Instant::now();
                 let result = search_catalog(self.runtime, &args);
-                match EvidenceEnvelopeV1::new(trace_id, tool_name, &self.scenario.scenario_hash, arguments, result, self.runtime.provenance(), started.elapsed().as_millis() as u64) {
+                match EvidenceEnvelopeV1::new(
+                    trace_id,
+                    tool_name,
+                    &self.scenario.scenario_hash,
+                    arguments,
+                    result,
+                    self.runtime.provenance(),
+                    started.elapsed().as_millis() as u64,
+                ) {
                     Ok(evidence) => self.success(tool_name, vec![serialize_evidence(evidence)]),
-                    Err(_) => failure(tool_name, "equipment_evidence_failed", "equipment evidence could not be created", false),
+                    Err(_) => failure(
+                        tool_name,
+                        "equipment_evidence_failed",
+                        "equipment evidence could not be created",
+                        false,
+                    ),
                 }
             }
             COMPARE_EQUIPMENT_STRATEGIES => {
@@ -582,9 +842,20 @@ impl<'a> AgentToolRegistry<'a> {
                     return invalid_arguments(tool_name);
                 }
                 let Some(workspace) = self.equipment_workspace.as_ref() else {
-                    return failure(tool_name, "equipment_workspace_unavailable", "open the equipment page and capture its current build first", false);
+                    return failure(
+                        tool_name,
+                        "equipment_workspace_unavailable",
+                        "open the equipment page and capture its current build first",
+                        false,
+                    );
                 };
-                match compare_strategies(trace_id, self.scenario, self.runtime, workspace, &mut self.budget) {
+                match compare_strategies(
+                    trace_id,
+                    self.scenario,
+                    self.runtime,
+                    workspace,
+                    &mut self.budget,
+                ) {
                     Ok((evidence, presentation)) => {
                         self.equipment_comparisons.push(presentation);
                         self.success(tool_name, vec![serialize_evidence(evidence)])
@@ -609,7 +880,7 @@ impl<'a> AgentToolRegistry<'a> {
                     Ok(args) => args,
                     Err(_) => return invalid_arguments(tool_name),
                 };
-                let query = match args.into_query() {
+                let mut query = match args.into_query() {
                     Ok(query) => query,
                     Err(error) => return knowledge_failure(tool_name, error),
                 };
@@ -621,6 +892,17 @@ impl<'a> AgentToolRegistry<'a> {
                         false,
                     );
                 };
+                if query.category.as_deref().is_some_and(|requested| {
+                    !knowledge
+                        .categories()
+                        .any(|known| known.eq_ignore_ascii_case(requested))
+                }) {
+                    // Models frequently put a school name such as "苍云" into the
+                    // optional document-category slot. The query text and audience
+                    // already carry that domain; dropping only the invalid facet is
+                    // a lossless recovery and keeps version filtering intact.
+                    query.category = None;
+                }
                 if self.knowledge_searches >= MAX_KNOWLEDGE_SEARCHES {
                     return failure(
                         tool_name,
@@ -713,9 +995,20 @@ impl<'a> AgentToolRegistry<'a> {
                 splices,
             )?)
         } else if let Some(edits) = patch.sequence_edits.as_deref() {
-            Some(apply_sequence_edits(&self.scenario.simulation.sequence, edits)?)
+            Some(apply_sequence_edits(
+                &self.scenario.simulation.sequence,
+                edits,
+            )?)
         } else {
             patch.sequence.clone()
+        };
+        let macro_text = if let Some(replacements) = patch.macro_replacements.as_deref() {
+            Some(apply_macro_replacements(
+                self.scenario.simulation.macro_text.as_deref(),
+                replacements,
+            )?)
+        } else {
+            patch.macro_text.clone()
         };
         let attributes = if let Some(base_attack) = patch.base_attack {
             let mut attributes = self
@@ -747,10 +1040,11 @@ impl<'a> AgentToolRegistry<'a> {
                 haste_level: patch.haste_level,
                 sequence,
                 network_delay: patch.network_delay,
+                pauses: patch.pauses,
                 initial_rage: patch.initial_rage.map(PatchValueV1::Set),
                 attributes,
                 target,
-                macro_text: patch.macro_text.map(PatchValueV1::Set),
+                macro_text: macro_text.map(PatchValueV1::Set),
                 talents: patch.talents,
                 recipes: patch.recipes,
                 equipment: patch.equipment,
@@ -788,11 +1082,27 @@ fn validate_agent_patch(patch: &AgentScenarioPatchV1) -> Result<(), &'static str
     if sequence_patch_kinds > 1 {
         return Err("conflicting_sequence_patch");
     }
+    if patch.macro_text.is_some() && patch.macro_replacements.is_some() {
+        return Err("conflicting_macro_patch");
+    }
     if patch.haste_level.is_some_and(|value| value > 10_000_000) {
         return Err("invalid_haste_level");
     }
     if patch.network_delay.is_some_and(|value| value > 5_000) {
         return Err("invalid_network_delay");
+    }
+    if patch.pauses.as_ref().is_some_and(|pauses| {
+        pauses.len() > 8
+            || pauses.iter().any(|(start, duration)| {
+                !start.is_finite()
+                    || !duration.is_finite()
+                    || *start < 0.0
+                    || *duration <= 0.0
+                    || *start > 3_600.0
+                    || *duration > 600.0
+            })
+    }) {
+        return Err("invalid_pauses");
     }
     if patch
         .initial_rage
@@ -824,7 +1134,7 @@ fn validate_agent_patch(patch: &AgentScenarioPatchV1) -> Result<(), &'static str
     }
     if patch.sequence_edits.as_ref().is_some_and(|edits| {
         edits.is_empty()
-            || edits.len() > 4
+            || edits.len() > 32
             || edits.iter().any(|edit| {
                 let valid_skill = edit.skill_name.as_deref().is_some_and(|skill| {
                     !skill.trim().is_empty()
@@ -833,7 +1143,7 @@ fn validate_agent_patch(patch: &AgentScenarioPatchV1) -> Result<(), &'static str
                 });
                 edit.line_number == 0
                     || match edit.op {
-                        AgentSequenceEditOperationV1::Remove => edit.skill_name.is_some(),
+                        AgentSequenceEditOperationV1::Remove => edit.skill_name.is_some() && !valid_skill,
                         _ => !valid_skill,
                     }
             })
@@ -867,6 +1177,22 @@ fn validate_agent_patch(patch: &AgentScenarioPatchV1) -> Result<(), &'static str
             return Err("invalid_macro_text");
         }
     }
+    if patch.macro_replacements.as_ref().is_some_and(|edits| {
+        edits.is_empty()
+            || edits.len() > 4
+            || edits.iter().any(|edit| {
+                edit.find.trim().is_empty()
+                    || edit.find.chars().count() > 512
+                    || edit.replace.chars().count() > 512
+                    || edit.find.chars().any(|character| character.is_control())
+                    || edit
+                        .replace
+                        .chars()
+                        .any(|character| character.is_control())
+            })
+    }) {
+        return Err("invalid_macro_replacements");
+    }
     for selection in [&patch.talents, &patch.recipes] {
         if selection.as_ref().is_some_and(|ids| {
             ids.len() > 128
@@ -890,6 +1216,26 @@ fn validate_agent_patch(patch: &AgentScenarioPatchV1) -> Result<(), &'static str
     Ok(())
 }
 
+fn apply_macro_replacements(
+    baseline: Option<&str>,
+    replacements: &[AgentMacroReplacementV1],
+) -> Result<String, &'static str> {
+    let mut macro_text = baseline.ok_or("missing_macro_text")?.to_string();
+    for replacement in replacements {
+        if macro_text.match_indices(&replacement.find).count() != 1 {
+            return Err("macro_replacement_not_unique");
+        }
+        macro_text = macro_text.replacen(&replacement.find, &replacement.replace, 1);
+    }
+    if macro_text.trim().is_empty()
+        || macro_text.chars().count() > 16_384
+        || parse_macro_text(&macro_text).is_err()
+    {
+        return Err("invalid_macro_text");
+    }
+    Ok(macro_text)
+}
+
 fn apply_sequence_edits(
     baseline: &[String],
     edits: &[AgentSequenceEditV1],
@@ -898,9 +1244,10 @@ fn apply_sequence_edits(
         return Err("missing_sequence");
     }
     let mut seen = std::collections::HashSet::new();
-    if edits.iter().any(|edit| {
-        edit.line_number > baseline.len() || !seen.insert(edit.line_number)
-    }) {
+    if edits
+        .iter()
+        .any(|edit| edit.line_number > baseline.len() || !seen.insert(edit.line_number))
+    {
         return Err("invalid_sequence_edit_line");
     }
     let mut ordered = edits.to_vec();
@@ -922,6 +1269,9 @@ fn apply_sequence_edits(
                 sequence[index] = edit.skill_name.ok_or("missing_sequence_edit_skill")?;
             }
             AgentSequenceEditOperationV1::Remove => {
+                if edit.skill_name.as_deref().is_some_and(|expected| expected.trim() != sequence[index].trim()) {
+                    return Err("sequence_edit_skill_mismatch");
+                }
                 sequence.remove(index);
             }
         }
@@ -1040,10 +1390,14 @@ impl KnowledgeArguments {
         } else {
             self.query
         };
+        let category = self.category.and_then(|category| {
+            let category = category.trim().to_string();
+            (!category.is_empty()).then_some(category)
+        });
         Ok(KnowledgeSearchQuery {
             query,
             version_scope,
-            category: self.category,
+            category,
             top_k: MAX_KNOWLEDGE_RESULTS,
         })
     }
@@ -1262,8 +1616,21 @@ fn ask_user_question_schema() -> Value {
         "required": ["question", "reason"],
         "properties": {
             "question": {"type": "string", "minLength": 1, "maxLength": 500},
-            "reason": {"type": "string", "minLength": 1, "maxLength": 500},
-            "answer_hint": {"type": ["string", "null"], "maxLength": 240}
+            "reason": {"type": "string", "minLength": 1, "maxLength": 500, "description": "说明缺少哪项用户目标、偏好或独有信息，以及答案如何改变分析方向。"},
+            "answer_hint": {"type": ["string", "null"], "maxLength": 240},
+            "options": {
+                "type": "array", "maxItems": 4,
+                "anyOf": [{"maxItems": 0}, {"minItems": 2}],
+                "description": "有明确备选答案时提供2至4项，label为用户要发送的完整答案，description简述选项含义；前端另有自行输入入口。自由回答问题可省略。",
+                "items": {
+                    "type": "object", "additionalProperties": false,
+                    "required": ["label", "description"],
+                    "properties": {
+                        "label": {"type": "string", "minLength": 1, "maxLength": 120},
+                        "description": {"type": "string", "maxLength": 240}
+                    }
+                }
+            }
         }
     })
 }
@@ -1278,6 +1645,34 @@ fn inspect_rotation_schema() -> Value {
             "context_radius": {"type": "integer", "minimum": 0, "maximum": 8}
         },
         "required": ["query", "start_index", "limit", "context_radius"],
+        "additionalProperties": false
+    })
+}
+
+fn inspect_timeline_events_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "rage_cost_below": {"type": ["integer", "null"], "minimum": 1, "maximum": 101,
+                "description": "只返回实际耗怒大于0且小于该值的事件，在分页前筛选。"},
+            "event_number": {"type": ["integer", "null"], "minimum": 1,
+                "description": "定位已知 ev 编号；返回 operation_number 可直接用于手动序列修改。"},
+            "selector": {
+                "type": "string",
+                "enum": ["rage_cap", "rage_overflow", "gcd_gap", "cooldown_wait", "skill", "time"]
+            },
+            "skill_name": {"type": ["string", "null"], "minLength": 1, "maxLength": 64},
+            "time_seconds": {"type": ["number", "null"], "minimum": 0},
+            "start_match": {"type": "integer", "minimum": 0},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 8},
+            "context_radius": {"type": "integer", "minimum": 0, "maximum": 4},
+            "buff_names": {
+                "type": "array",
+                "maxItems": 8,
+                "items": {"type": "string", "minLength": 1, "maxLength": 64}
+            }
+        },
+        "required": ["selector"],
         "additionalProperties": false
     })
 }
@@ -1300,9 +1695,10 @@ fn compare_schema() -> Value {
                                 "haste_level": {"type": ["integer", "null"], "minimum": 0, "maximum": 10000000},
                                 "sequence": {"type": ["array", "null"], "maxItems": 256, "items": {"type": "string", "maxLength": 128}},
                                 "sequence_edits": {
+                                    "description": "局部修改：line_number 全部引用同一原始冻结序列的 operation_number。服务端倒序应用，自动处理插入位移。先核对 state_before 的体态和技能施放条件。",
                                     "type": ["array", "null"],
                                     "minItems": 1,
-                                    "maxItems": 4,
+                                    "maxItems": 32,
                                     "items": {
                                         "type": "object",
                                         "properties": {
@@ -1330,10 +1726,35 @@ fn compare_schema() -> Value {
                                     }
                                 },
                                 "network_delay": {"type": ["integer", "null"], "minimum": 0, "maximum": 5000},
+                                "pauses": {
+                                    "type": ["array", "null"],
+                                    "maxItems": 8,
+                                    "items": {
+                                        "type": "array",
+                                        "items": {"type": "number", "minimum": 0, "maximum": 3600},
+                                        "minItems": 2,
+                                        "maxItems": 2
+                                    }
+                                },
                                 "initial_rage": {"type": ["integer", "null"], "minimum": -1000, "maximum": 1000},
                                 "base_attack": {"type": ["number", "null"], "minimum": 0, "maximum": 1000000000},
                                 "target_defense_bonus": {"type": ["number", "null"], "minimum": -100, "maximum": 1000}
                                 ,"macro_text": {"type": ["string", "null"], "minLength": 1, "maxLength": 16384}
+                                ,"macro_replacements": {
+                                    "type": ["array", "null"],
+                                    "description": "Test a reversible local macro hypothesis without resending the full macro. Copy one unique fragment from the parsed statement into find and put the valid replacement fragment in replace; all other scenario fields stay frozen.",
+                                    "minItems": 1,
+                                    "maxItems": 4,
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "find": {"type": "string", "description": "An exact fragment that occurs once in the frozen macro.", "minLength": 1, "maxLength": 512},
+                                            "replace": {"type": "string", "description": "The replacement fragment; the completed macro is parsed before simulation.", "maxLength": 512}
+                                        },
+                                        "required": ["find", "replace"],
+                                        "additionalProperties": false
+                                    }
+                                }
                                 ,"talents": {"type": ["array", "null"], "maxItems": 128, "items": {"type": "integer", "minimum": 1}}
                                 ,"recipes": {"type": ["array", "null"], "maxItems": 128, "items": {"type": "integer", "minimum": 1}}
                                 ,"equipment": {"type": ["object", "null"], "maxProperties": 32, "additionalProperties": {"type": "integer", "minimum": 1}}
@@ -1445,12 +1866,14 @@ mod tests {
         assert_eq!(
             names,
             vec![
+                "distill_macro",
                 "get_current_scenario",
                 "ask_user_question",
                 "inspect_rotation_input",
                 "simulate_scenario",
                 "compare_scenarios",
                 "analyze_timeline",
+                "inspect_timeline_events",
                 "list_saved_artifacts",
                 "read_saved_artifact",
                 "compare_saved_macros",
@@ -1487,7 +1910,7 @@ mod tests {
         ];
         let categories = vec!["基础".to_string(), "白皮书".to_string()];
         let definitions = AgentToolRegistry::definitions_with_knowledge(&seasons, &categories);
-        assert_eq!(definitions.len(), 15);
+        assert_eq!(definitions.len(), 17);
         let knowledge = definitions.last().unwrap();
         assert_eq!(knowledge.name, "search_knowledge_base");
         assert_eq!(knowledge.parameters["additionalProperties"], false);
@@ -1566,6 +1989,30 @@ mod tests {
             normalize_reference_query("谁是苍云玩家 dereck365？"),
             "dereck365"
         );
+
+        let blank_optional_category = KnowledgeArguments {
+            query: "绝刀循环".to_string(),
+            version_scope: "current_only".to_string(),
+            season: None,
+            category: Some("   ".to_string()),
+        }
+        .into_query()
+        .unwrap();
+        assert_eq!(blank_optional_category.category, None);
+    }
+
+    #[test]
+    fn event_cost_filter_alias_keeps_the_same_typed_query() {
+        let runtime = AgentRuntime::fixture();
+        let scenario = runtime.fixture_scenario();
+        let mut registry = AgentToolRegistry::new(&scenario, &runtime, 2);
+        registry.dispatch("filter-scenario", "get_current_scenario", json!({}));
+        let canonical = registry.dispatch("filter-canonical", INSPECT_TIMELINE_EVENTS,
+            json!({"selector":"skill","skill_name":"绝刀","rage_cost_below":50}));
+        let alias = registry.dispatch("filter-alias", INSPECT_TIMELINE_EVENTS,
+            json!({"selector":"rage_cost_below","skill_name":"绝刀","rage_cost_below":50}));
+        assert_eq!(alias.output["ok"], true);
+        assert_eq!(canonical.evidence_ids, alias.evidence_ids);
     }
 
     #[test]
@@ -1600,14 +2047,30 @@ mod tests {
             first.output["evidence"][0]["result"]["results"][0]["version_match"],
             "current_exact"
         );
+        let mut school_registry =
+            AgentToolRegistry::new_with_knowledge(&scenario, &runtime, 1, Some(&knowledge));
+        assert_eq!(
+            school_registry
+                .dispatch("knowledge-school-run", "get_current_scenario", json!({}))
+                .output["ok"],
+            true
+        );
+        let school_as_category = school_registry.dispatch(
+            "knowledge-run",
+            "search_knowledge_base",
+            json!({
+                "query": "盾飞劫刀流血",
+                "version_scope": "current_only",
+                "season": null,
+                "category": "苍云"
+            }),
+        );
+        assert_eq!(school_as_category.output["ok"], true);
         let second = registry.dispatch("knowledge-run", "search_knowledge_base", arguments.clone());
         assert_eq!(second.output["ok"], true);
         for _ in 2..MAX_KNOWLEDGE_SEARCHES {
-            let next = registry.dispatch(
-                "knowledge-run",
-                "search_knowledge_base",
-                arguments.clone(),
-            );
+            let next =
+                registry.dispatch("knowledge-run", "search_knowledge_base", arguments.clone());
             assert_eq!(next.output["ok"], true);
         }
         let exhausted = registry.dispatch("knowledge-run", "search_knowledge_base", arguments);
@@ -1653,7 +2116,152 @@ mod tests {
     }
 
     #[test]
+    fn baseline_read_analyze_and_inspect_share_one_simulation() {
+        let runtime = AgentRuntime::fixture();
+        let scenario = runtime.fixture_scenario();
+        let mut registry = AgentToolRegistry::new(&scenario, &runtime, 1);
+        assert_eq!(
+            registry
+                .dispatch("cache-run", "get_current_scenario", json!({}))
+                .output["ok"],
+            true
+        );
+
+        let analyzed = registry.dispatch("cache-run", "analyze_timeline", json!({}));
+        assert_eq!(analyzed.output["ok"], true, "{}", analyzed.output);
+        let inspected = registry.dispatch(
+            "cache-run",
+            INSPECT_TIMELINE_EVENTS,
+            json!({
+                "selector": "rage_overflow"
+            }),
+        );
+        assert_eq!(inspected.output["ok"], true, "{}", inspected.output);
+        let simulated = registry.dispatch("cache-run", SIMULATE_SCENARIO, json!({}));
+        assert_eq!(simulated.output["ok"], true, "{}", simulated.output);
+        assert_eq!(registry.used_simulations(), 1);
+    }
+
+    #[test]
+    fn distillation_uses_legacy_generator_and_reuses_frozen_baseline() {
+        let runtime = AgentRuntime::fixture();
+        let scenario = runtime.fixture_scenario();
+        let original = serde_json::to_value(&scenario).unwrap();
+        let mut registry = AgentToolRegistry::new(&scenario, &runtime, 1);
+        registry.dispatch("distill-test", "get_current_scenario", json!({}));
+        let output = registry.dispatch("distill-test", "distill_macro", json!({}));
+        assert_eq!(output.output["ok"], true, "{}", output.output);
+        assert_eq!(registry.used_simulations(), 1);
+        let repeated = registry.dispatch("distill-test", "distill_macro", json!({}));
+        assert_eq!(output.evidence_ids, repeated.evidence_ids);
+        assert_eq!(registry.used_simulations(), 1);
+        assert_eq!(serde_json::to_value(&scenario).unwrap(), original);
+        let envelope = output.output["evidence"].as_array().unwrap().iter()
+            .find(|item| item["tool_name"] == "distill_macro").unwrap();
+        let response = &registry.baseline_simulation.as_ref().unwrap().response;
+        let casts = serde_json::from_value::<Vec<crate::macro_gen::InputCast>>(serde_json::to_value(&response.timeline).unwrap()).unwrap();
+        let opts = serde_json::from_value(json!({})).unwrap();
+        let expected = crate::macro_gen::generate(&casts, &opts);
+        assert_eq!(envelope["result"]["macro_text"], expected.macro_text);
+        assert_eq!(envelope["result"]["candidate_status"], "generated_uncompared");
+        assert_eq!(registry.dispatch("distill-test", "distill_macro", json!({"write":true})).output["ok"], false);
+    }
+
+    #[test]
+    #[ignore = "Set JX3_MACRO_REPLAY_INPUT to a private run_input event; read-only local replay"]
+    fn replay_macro_distillation_from_private_scenario() {
+        let path = std::env::var("JX3_MACRO_REPLAY_INPUT").expect("private run_input path");
+        let event: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        let runtime = AgentRuntime::fixture();
+        let simulation = serde_json::from_value(event["payload"]["scenario"]["simulation"].clone()).unwrap();
+        let scenario = super::super::ScenarioSnapshotV1::capture(runtime.game_version(), runtime.mount(), simulation).unwrap();
+        let mut registry = AgentToolRegistry::new(&scenario, &runtime, 512);
+        registry.dispatch("replay", "get_current_scenario", json!({}));
+        {
+            let output = registry.dispatch("replay", "distill_macro", json!({}));
+            assert_eq!(output.output["ok"], true);
+            let result = &output.output["evidence"].as_array().unwrap().iter()
+                .find(|e| e["tool_name"] == "distill_macro").unwrap()["result"];
+            eprintln!("initial={} final={} evaluations={} status={} pages={} ratio={} macro={}",
+                result["tuning"]["initial"],result["tuning"]["final"],result["tuning"]["evaluations"],result["tuning"]["status"],result["pages"],result["tuning"]["dps_ratio_to_target"],result["macro_text"]);
+            let mut candidate = scenario.simulation.clone();
+            candidate.macro_duration = Some(registry.baseline_simulation.as_ref().unwrap().response.fight_time);
+            super::super::compare::configure_macro_rotation(&mut candidate,result["macro_text"].as_str().unwrap().into());
+            let context = runtime.context();
+            let independently_measured = crate::simulate_core(&candidate,context.skills,context.game_version,context.mount,context.constants,context.recipes,context.team_buffs,context.formations);
+            assert_eq!(result["tuning"]["final"]["dps"], independently_measured.dps);
+            assert_eq!(result["tuning"]["final"]["counts"], serde_json::to_value(super::super::macro_tuning::counts(&independently_measured)).unwrap());
+        }
+    }
+
+    #[test]
+    fn tuning_accounts_actual_simulations_and_matches_independent_final_run() {
+        let runtime = AgentRuntime::fixture();
+        let scenario = runtime.fixture_scenario();
+        let original = serde_json::to_value(&scenario).unwrap();
+        let mut registry = AgentToolRegistry::new(&scenario, &runtime, 16);
+        registry.dispatch("tune-test", "get_current_scenario", json!({}));
+        let output = registry.dispatch("tune-test", "distill_macro", json!({"max_evaluations":8}));
+        assert_eq!(output.output["ok"], true, "{}", output.output);
+        let result = &output.output["evidence"].as_array().unwrap().iter()
+            .find(|e| e["tool_name"] == "distill_macro").unwrap()["result"];
+        let evaluations = result["tuning"]["evaluations"].as_u64().unwrap();
+        assert!((1..=8).contains(&evaluations));
+        assert_eq!(registry.used_simulations(), 1 + evaluations as u32);
+        assert_eq!(result["candidate_status"], "algorithm_tested");
+        let mut simulation = scenario.simulation.clone();
+        simulation.macro_duration = Some(registry.baseline_simulation.as_ref().unwrap().response.fight_time.clamp(1.,3600.));
+        super::super::compare::configure_macro_rotation(&mut simulation,result["macro_text"].as_str().unwrap().into());
+        let context = runtime.context();
+        let response = crate::simulate_core(&simulation,context.skills,context.game_version,context.mount,context.constants,context.recipes,context.team_buffs,context.formations);
+        assert_eq!(result["tuning"]["final"]["dps"], response.dps);
+        assert_eq!(serde_json::to_value(&scenario).unwrap(),original);
+        assert_eq!(registry.dispatch("tune-test", "distill_macro", json!({"macro_text":"broken"})).output["ok"],false);
+        assert_eq!(registry.dispatch("tune-test", "distill_macro", json!({"max_evaluations":999})).output["ok"],false);
+    }
+
+    #[test]
+    fn comparison_reuses_cached_baseline_and_only_runs_candidates() {
+        let runtime = AgentRuntime::fixture();
+        let scenario = runtime.fixture_scenario();
+        let mut registry = AgentToolRegistry::new(&scenario, &runtime, 2);
+        assert_eq!(
+            registry
+                .dispatch("compare-cache-run", "get_current_scenario", json!({}))
+                .output["ok"],
+            true
+        );
+
+        let analyzed = registry.dispatch("compare-cache-run", "analyze_timeline", json!({}));
+        assert_eq!(analyzed.output["ok"], true, "{}", analyzed.output);
+        let compared = registry.dispatch(
+            "compare-cache-run",
+            "compare_scenarios",
+            json!({
+                "candidates": [{
+                    "label": "延迟单变量",
+                    "patch": {"network_delay": 80}
+                }]
+            }),
+        );
+        assert_eq!(compared.output["ok"], true, "{}", compared.output);
+        assert_eq!(registry.used_simulations(), 2);
+    }
+
+    #[test]
     fn one_based_sequence_edits_build_a_complete_candidate_server_side() {
+        let five = AgentScenarioPatchV1 {
+            sequence_edits: Some((1..=5).map(|line_number| AgentSequenceEditV1 {
+                op: AgentSequenceEditOperationV1::Remove, line_number, skill_name: None
+            }).collect()), ..Default::default()
+        };
+        assert!(validate_agent_patch(&five).is_ok());
+        let oversized = AgentScenarioPatchV1 {
+            sequence_edits: Some((1..=33).map(|line_number| AgentSequenceEditV1 {
+                op: AgentSequenceEditOperationV1::Remove, line_number, skill_name: None
+            }).collect()), ..Default::default()
+        };
+        assert_eq!(validate_agent_patch(&oversized), Err("invalid_sequence_edits"));
         let baseline = vec!["斩刀".to_string(), "绝刀".to_string(), "盾回".to_string()];
         let edited = apply_sequence_edits(
             &baseline,
@@ -1687,6 +2295,14 @@ mod tests {
         )
         .unwrap();
         assert_eq!(removed, vec!["斩刀", "盾回"]);
+        let named_remove = AgentSequenceEditV1 {
+            op: AgentSequenceEditOperationV1::Remove, line_number: 2,
+            skill_name: Some("绝刀".into())
+        };
+        let source = ["斩刀", "绝刀", "盾回"].map(str::to_string);
+        assert_eq!(apply_sequence_edits(&source, &[named_remove.clone()]).unwrap(), removed);
+        let wrong = AgentSequenceEditV1 { skill_name: Some("盾击".into()), ..named_remove };
+        assert_eq!(apply_sequence_edits(&source, &[wrong]), Err("sequence_edit_skill_mismatch"));
 
         let spliced = apply_sequence_splices(
             &["业火", "盾击", "盾击", "盾飞", "血怒", "绝刀"].map(str::to_string),
@@ -1700,7 +2316,10 @@ mod tests {
             }],
         )
         .unwrap();
-        assert_eq!(spliced, vec!["业火", "盾飞", "斩刀", "绝刀", "绝刀", "绝刀"]);
+        assert_eq!(
+            spliced,
+            vec!["业火", "盾飞", "斩刀", "绝刀", "绝刀", "绝刀"]
+        );
     }
 
     #[test]
@@ -1720,6 +2339,33 @@ mod tests {
         let mut invalid = patch;
         invalid.macro_text = Some("/cast [skill_energy:血怒>] 血怒".to_string());
         assert_eq!(validate_agent_patch(&invalid), Err("invalid_macro_text"));
+    }
+
+    #[test]
+    fn exact_macro_replacement_builds_a_parseable_candidate() {
+        let baseline = "/cast [bufftime:嗜血<5.3] 盾飞\n/cast 斩刀";
+        let edited = apply_macro_replacements(
+            Some(baseline),
+            &[AgentMacroReplacementV1 {
+                find: "bufftime:嗜血<5.3".to_string(),
+                replace: "bufftime:嗜血<5.0".to_string(),
+            }],
+        )
+        .unwrap();
+        assert!(edited.contains("bufftime:嗜血<5.0"));
+        assert!(!edited.contains("bufftime:嗜血<5.3"));
+
+        let ambiguous = "/cast [rage>50] 绝刀\n/cast [rage>50] 绝刀";
+        assert_eq!(
+            apply_macro_replacements(
+                Some(ambiguous),
+                &[AgentMacroReplacementV1 {
+                    find: "rage>50".to_string(),
+                    replace: "rage>60".to_string(),
+                }],
+            ),
+            Err("macro_replacement_not_unique")
+        );
     }
 
     fn knowledge_fixture() -> (PathBuf, KnowledgeIndex) {

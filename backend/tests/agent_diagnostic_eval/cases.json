@@ -1,0 +1,101 @@
+{
+  "schema_version": "agent-diagnostic-eval-cases/v1",
+  "cases": [
+    {
+      "id": "D01_strength_and_main_problem",
+      "question": "这套循环做得好的地方和最主要的问题是什么？",
+      "expected_tools_any": ["analyze_timeline"],
+      "answer_signals_any": ["绝刀", "援戈", "循环", "盾飞"],
+      "max_model_turns_target": 6,
+      "max_tool_calls_target": 7
+    },
+    {
+      "id": "D02_real_rage_loss",
+      "question": "这套宏是真的浪费怒气，还是只是在采样时看起来经常满怒？具体发生在哪些技能附近？",
+      "expected_tools_all": ["analyze_timeline"],
+      "answer_signals_any": ["溢出", "触顶", "怒气"],
+      "max_model_turns_target": 6,
+      "max_tool_calls_target": 7
+    },
+    {
+      "id": "D03_wait_cause",
+      "question": "为什么有些斩刀前会等？请区分正常冷却、宏条件等待和输入空档，并标出实际时间位置。",
+      "expected_tools_all": ["analyze_timeline", "inspect_timeline_events"],
+      "answer_signals_any": ["斩刀", "等待", "空档"],
+      "max_model_turns_target": 6,
+      "max_tool_calls_target": 7
+    },
+    {
+      "id": "D04_macro_execution",
+      "question": "这份宏每条语句实际命中了多少次？哪些条件经常通过却因为优先级或技能不可用没有释放？",
+      "expected_tools_any": ["analyze_timeline"],
+      "answer_signals_any": ["命中", "条件", "优先级"],
+      "max_model_turns_target": 5,
+      "max_tool_calls_target": 6
+    },
+    {
+      "id": "D05_white_blade",
+      "question": "按当前赛季攻略，这套循环哪里适合打白刀？先解释机制，再结合这份宏的实际循环判断。",
+      "expected_tools_all": ["search_knowledge_base", "analyze_timeline"],
+      "answer_signals_any": ["白刀", "援戈", "绝刀"],
+      "max_model_turns_target": 7,
+      "max_tool_calls_target": 8
+    },
+    {
+      "id": "D06_exact_occurrences",
+      "question": "具体到时间点：哪些绝刀最像白刀候选？同名技能有多处时分别列出来，不要只说技能名。",
+      "expected_tools_all": ["analyze_timeline", "inspect_timeline_events"],
+      "answer_signals_any": ["绝刀", "s", "秒"],
+      "max_model_turns_target": 7,
+      "max_tool_calls_target": 8
+    },
+    {
+      "id": "D07_threshold_ab",
+      "question": "把盾飞的嗜血阈值从 5.3 改成 5.0 会不会更好？直接做同场景对照后告诉我，不要只建议以后测试。",
+      "expected_tools_all": ["analyze_timeline", "compare_scenarios"],
+      "answer_signals_any": ["DPS", "5.3", "5.0"],
+      "max_model_turns_target": 7,
+      "max_tool_calls_target": 8
+    },
+    {
+      "id": "D08_latency_ab",
+      "question": "当前 60ms 延迟。如果变成 100ms，这套宏的 DPS、空档和核心技能次数实际变化多少？",
+      "expected_tools_all": ["compare_scenarios"],
+      "answer_signals_any": ["60", "100", "DPS"],
+      "max_model_turns_target": 6,
+      "max_tool_calls_target": 7
+    },
+    {
+      "id": "D09_pause_recovery",
+      "question": "在 120 秒处停手 10 秒后，这套宏如何恢复？请实际模拟并说明停手前后体态和输出差别。",
+      "expected_tools_all": ["compare_scenarios"],
+      "answer_signals_any": ["停手", "体态", "DPS"],
+      "max_model_turns_target": 7,
+      "max_tool_calls_target": 8
+    },
+    {
+      "id": "D10_saved_macro_clarification",
+      "question": "对比我保存的‘分山绝云’和‘宝宝宏’，告诉我各自优缺点。",
+      "expected_tools_any": ["list_saved_artifacts", "ask_user_question", "compare_saved_macros"],
+      "answer_signals_any": ["宏", "保存", "对比"],
+      "max_model_turns_target": 7,
+      "max_tool_calls_target": 8
+    },
+    {
+      "id": "D11_evidence_boundary",
+      "question": "你刚才关于循环问题的判断，哪些是模拟器实测，哪些来自攻略，哪些只是机制推断？",
+      "expected_tools_any": ["analyze_timeline", "search_knowledge_base"],
+      "answer_signals_any": ["实测", "攻略", "推断"],
+      "max_model_turns_target": 6,
+      "max_tool_calls_target": 7
+    },
+    {
+      "id": "D12_open_question",
+      "question": "不按预设模板，你自己判断这套循环现在最值得继续查什么；如果能验证就直接验证。",
+      "expected_tools_any": ["analyze_timeline", "inspect_timeline_events", "compare_scenarios", "search_knowledge_base"],
+      "answer_signals_any": ["循环", "验证", "判断"],
+      "max_model_turns_target": 8,
+      "max_tool_calls_target": 9
+    }
+  ]
+}

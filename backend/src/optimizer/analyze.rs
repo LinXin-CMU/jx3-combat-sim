@@ -13,16 +13,16 @@ use crate::Stance;
 pub struct TunableParam {
     /// 唯一 id，形如 "shield_L3_V0"（页名 + 行号 + 访问序）
     pub id: String,
-    pub page: String,        // "general" / "shield" / "blade" / "wall" / "any" / "not_wall"
-    pub line: usize,         // 1-based
+    pub page: String, // "general" / "shield" / "blade" / "wall" / "any" / "not_wall"
+    pub line: usize,  // 1-based
     pub rule_preview: String,
-    pub key: String,         // "rage" / "life" / "bufftime:嗜血" / "tbufftime:虚弱" / "skill_energy:X" / "nearby_enemy"
-    pub op: String,          // ">" "<" ">=" "<="
+    pub key: String, // "rage" / "life" / "bufftime:嗜血" / "tbufftime:虚弱" / "skill_energy:X" / "nearby_enemy"
+    pub op: String,  // ">" "<" ">=" "<="
     pub original: f64,
     pub suggested_min: f64,
     pub suggested_max: f64,
     pub suggested_step: f64,
-    pub kind: String,        // "int" | "float"
+    pub kind: String, // "int" | "float"
     // ── 内部定位字段（GA 用来更新 MacroConfig；前端不关心） ──
     pub page_idx: usize,     // MacroConfig.pages 的索引
     pub line_idx: usize,     // MacroPage.lines 的索引（0-based）
@@ -93,7 +93,11 @@ fn page_name(s: Option<Stance>) -> &'static str {
 }
 
 fn format_line(line: &MacroLine) -> String {
-    let prefix = if line.action.is_fcast() { "/fcast" } else { "/cast" };
+    let prefix = if line.action.is_fcast() {
+        "/fcast"
+    } else {
+        "/cast"
+    };
     let cond = line
         .condition
         .as_ref()
@@ -162,22 +166,54 @@ impl Leaf {
             Leaf::BuffTime(n, _, v) => {
                 let mn = round_to_step((*v - 5.0).max(0.0), 0.1);
                 let mx = round_to_step(*v + 5.0, 0.1);
-                (format!("bufftime:{}", n), *v, mn, mx, 0.1, "float", LeafKind::BuffTime)
+                (
+                    format!("bufftime:{}", n),
+                    *v,
+                    mn,
+                    mx,
+                    0.1,
+                    "float",
+                    LeafKind::BuffTime,
+                )
             }
             Leaf::TBuffTime(n, _, v) => {
                 let mn = round_to_step((*v - 5.0).max(0.0), 0.1);
                 let mx = round_to_step(*v + 5.0, 0.1);
-                (format!("tbufftime:{}", n), *v, mn, mx, 0.1, "float", LeafKind::TBuffTime)
+                (
+                    format!("tbufftime:{}", n),
+                    *v,
+                    mn,
+                    mx,
+                    0.1,
+                    "float",
+                    LeafKind::TBuffTime,
+                )
             }
             Leaf::SkillEnergy(n, _, v) => {
                 let fv = *v as f64;
                 let (mn, mx) = clamp_int_range(fv, 0.0, 10.0, 3.0);
-                (format!("skill_energy:{}", n), fv, mn, mx, 1.0, "int", LeafKind::SkillEnergy)
+                (
+                    format!("skill_energy:{}", n),
+                    fv,
+                    mn,
+                    mx,
+                    1.0,
+                    "int",
+                    LeafKind::SkillEnergy,
+                )
             }
             Leaf::NearbyEnemy(_, v) => {
                 let fv = *v as f64;
                 let (mn, mx) = clamp_int_range(fv, 0.0, 30.0, 5.0);
-                ("nearby_enemy".to_string(), fv, mn, mx, 1.0, "int", LeafKind::NearbyEnemy)
+                (
+                    "nearby_enemy".to_string(),
+                    fv,
+                    mn,
+                    mx,
+                    1.0,
+                    "int",
+                    LeafKind::NearbyEnemy,
+                )
             }
         };
 
@@ -221,7 +257,9 @@ fn clamp_int_range(v: f64, hard_min: f64, hard_max: f64, spread: f64) -> (f64, f
 
 /// 按步长对齐，消除 10.8-5.0=5.800000000000001 这类 f64 误差
 pub fn round_to_step(v: f64, step: f64) -> f64 {
-    if step <= 0.0 { return v; }
+    if step <= 0.0 {
+        return v;
+    }
     let scale = (1.0 / step).round();
     (v * scale).round() / scale
 }
@@ -248,31 +286,48 @@ pub fn apply_values(
 fn set_nth_leaf(cond: &mut MacroCondition, target: usize, counter: &mut usize, v: f64) -> bool {
     match cond {
         MacroCondition::And(a, b) | MacroCondition::Or(a, b) => {
-            if set_nth_leaf(a, target, counter, v) { return true; }
+            if set_nth_leaf(a, target, counter, v) {
+                return true;
+            }
             set_nth_leaf(b, target, counter, v)
         }
         MacroCondition::Rage(_, val) => {
-            if *counter == target { *val = v.round() as i32; return true; }
+            if *counter == target {
+                *val = v.round() as i32;
+                return true;
+            }
             *counter += 1;
             false
         }
         MacroCondition::Life(_, val) => {
-            if *counter == target { *val = v; return true; }
+            if *counter == target {
+                *val = v;
+                return true;
+            }
             *counter += 1;
             false
         }
         MacroCondition::BuffTime(_, _, val) | MacroCondition::TBuffTime(_, _, val) => {
-            if *counter == target { *val = v; return true; }
+            if *counter == target {
+                *val = v;
+                return true;
+            }
             *counter += 1;
             false
         }
         MacroCondition::SkillEnergy(_, _, val) => {
-            if *counter == target { *val = v.max(0.0).round() as u32; return true; }
+            if *counter == target {
+                *val = v.max(0.0).round() as u32;
+                return true;
+            }
             *counter += 1;
             false
         }
         MacroCondition::NearbyEnemy(_, val) => {
-            if *counter == target { *val = v.max(0.0).round() as u32; return true; }
+            if *counter == target {
+                *val = v.max(0.0).round() as u32;
+                return true;
+            }
             *counter += 1;
             false
         }

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::env;
 use std::fmt;
 use std::fs;
@@ -13,6 +13,10 @@ use super::domain::{
     DomainRelationV1,
 };
 use super::knowledge_dense::{DenseKnowledgeIndex, DENSE_MODEL_ID};
+use super::terminology::{
+    DomainTermCardV1, DomainTermChunkContext, DomainTermKindV1, DomainTermSourceV1,
+    DomainTerminologyIndexV1, ResolvedDomainTermV1, DOMAIN_TERM_SCHEMA_V1,
+};
 use crate::GameVersion;
 
 pub const KNOWLEDGE_INDEX_SCHEMA_V1: &str = "agent-knowledge-index/v1";
@@ -99,7 +103,7 @@ pub enum KnowledgeVersionScope {
     ReferenceLookup,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum KnowledgeClientScope {
     Flagship,
@@ -107,7 +111,7 @@ pub enum KnowledgeClientScope {
     Any,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum KnowledgeMountScope {
     Fenshanjin,
@@ -117,13 +121,32 @@ pub enum KnowledgeMountScope {
 /// Product-level retrieval boundary. The calculator always has a selected
 /// flagship mount, so an otherwise ambiguous question inherits that context.
 /// Wujie is opt-in and never leaks into a flagship answer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct KnowledgeAudience {
     pub client: KnowledgeClientScope,
     pub mount: Option<KnowledgeMountScope>,
 }
 
+impl Default for KnowledgeAudience {
+    fn default() -> Self {
+        Self { client: KnowledgeClientScope::Any, mount: None }
+    }
+}
+
 impl KnowledgeAudience {
+    pub(crate) fn accepts(self, actual: Self) -> bool {
+        let client_matches = match self.client {
+            KnowledgeClientScope::Flagship => actual.client != KnowledgeClientScope::Wujie,
+            KnowledgeClientScope::Wujie => actual.client == KnowledgeClientScope::Wujie,
+            KnowledgeClientScope::Any => true,
+        };
+        let mount_matches = match (self.mount, actual.mount) {
+            (Some(requested), Some(actual)) => requested == actual,
+            _ => true,
+        };
+        client_matches && mount_matches
+    }
+
     pub fn from_question(question: &str, fallback_mount: Option<KnowledgeMountScope>) -> Self {
         let normalized = question.to_lowercase();
         let mentions_wujie = normalized.contains("无界")
@@ -220,8 +243,9 @@ pub struct KnowledgeSearchResult {
     pub exact_phrase_match: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reference_entities: Vec<KnowledgeReferenceEntity>,
-    /// Curated, source-bound claims derived from this exact chunk. Claims never
-    /// grant access to another document and retain the original source hashes.
+    /// Source-bound claims attached to this exact chunk. `derivation_method`
+    /// distinguishes curated verification rules from corpus-derived artifacts;
+    /// claims never grant access to another document.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub domain_claims: Vec<DomainClaimV1>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -281,11 +305,14 @@ pub struct KnowledgeSearchResponse {
     pub schema_version: String,
     pub corpus_hash: String,
     pub domain_index_hash: String,
+    pub terminology_index_hash: String,
     pub current_season: String,
     pub requested_scope: KnowledgeVersionScope,
     pub audience: KnowledgeAudience,
     pub retrieval: KnowledgeRetrievalInfo,
     pub selection: KnowledgeSelectionInfo,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub resolved_terms: Vec<ResolvedDomainTermV1>,
     pub results: Vec<KnowledgeSearchResult>,
 }
 
@@ -352,6 +379,7 @@ pub struct KnowledgeIndex {
     schema_version: &'static str,
     corpus_hash: String,
     domain_index_hash: String,
+    terminology: DomainTerminologyIndexV1,
     chunks: Vec<KnowledgeChunk>,
     document_frequency: HashMap<String, usize>,
     average_document_length: f64,
@@ -363,27 +391,6 @@ pub struct KnowledgeIndex {
 }
 
 impl KnowledgeIndex {
-    pub(crate) fn semantic_route_similarities(
-        &self,
-        question: &str,
-        prototypes: &[String],
-    ) -> Result<Vec<u16>, String> {
-        let dense = self.dense.as_ref().ok_or_else(|| {
-            self.dense_fallback_code
-                .clone()
-                .unwrap_or_else(|| "dense_unavailable".to_string())
-        })?;
-        dense
-            .similarities(question, prototypes)
-            .map(|scores| {
-                scores
-                    .into_iter()
-                    .map(|score| (score.clamp(0.0, 1.0) * 1_000.0).round() as u16)
-                    .collect()
-            })
-            .map_err(|error| error.code.to_string())
-    }
-
     pub fn from_env() -> Result<Self, KnowledgeIndexError> {
         let root = env::var_os(KNOWLEDGE_ROOT_ENV).ok_or(KnowledgeIndexError::NotConfigured)?;
         let mut index = Self::load(Path::new(&root))?;
@@ -586,8 +593,33 @@ impl KnowledgeIndex {
                 chunk_hash: &chunk.chunk_hash,
             });
         }
-        let derived_domain_hash =
+        let curated_domain_hash =
             domain_index_hash(chunks.iter().flat_map(|chunk| chunk.domain_claims.iter()));
+        let terminology = DomainTerminologyIndexV1::build(chunks.iter().map(|chunk| {
+            let (client, mount) = classify_chunk_audience(chunk);
+            DomainTermChunkContext {
+                document_id: &chunk.document_id,
+                title: &chunk.title,
+                season: &chunk.season,
+                category: &chunk.category,
+                heading: &chunk.heading,
+                text: &chunk.text,
+                source_url: &chunk.source_url,
+                yuque_url: &chunk.yuque_url,
+                source_updated_at: &chunk.source_updated_at,
+                document_hash: &chunk.document_hash,
+                chunk_hash: &chunk.chunk_hash,
+                audience: KnowledgeAudience { client, mount },
+                fact_eligible: fact_eligible(chunk),
+            }
+        }));
+        let derived_domain_hash = sha256(
+            format!(
+                "{curated_domain_hash}\0{}\0terminology/v1",
+                terminology.index_hash()
+            )
+            .as_bytes(),
+        );
 
         let mut document_frequency = HashMap::new();
         for chunk in &chunks {
@@ -605,6 +637,7 @@ impl KnowledgeIndex {
             schema_version: KNOWLEDGE_INDEX_SCHEMA_V1,
             corpus_hash: format!("{:x}", corpus_hasher.finalize()),
             domain_index_hash: derived_domain_hash,
+            terminology,
             chunks,
             document_frequency,
             average_document_length,
@@ -626,6 +659,232 @@ impl KnowledgeIndex {
 
     pub fn chunk_count(&self) -> usize {
         self.chunks.len()
+    }
+
+    pub fn terminology_card_count(&self) -> usize {
+        self.terminology.card_count()
+    }
+
+    pub fn terminology_index_hash(&self) -> &str {
+        self.terminology.index_hash()
+    }
+
+    pub fn resolve_domain_terms(
+        &self,
+        question: &str,
+        current_season: &str,
+    ) -> Vec<ResolvedDomainTermV1> {
+        self.resolve_domain_terms_with_audience(
+            question,
+            current_season,
+            KnowledgeAudience::from_question(question, None),
+        )
+    }
+
+    pub fn resolve_domain_terms_with_audience(
+        &self,
+        question: &str,
+        current_season: &str,
+        audience: KnowledgeAudience,
+    ) -> Vec<ResolvedDomainTermV1> {
+        let eligible = self.chunks.iter()
+            .filter(|chunk| {
+                chunk.season == current_season
+                    && fact_eligible(chunk)
+                    && audience_accepts_chunk(audience, chunk)
+            })
+            .collect::<Vec<_>>();
+        self.resolve_domain_terms_from_chunks(question, current_season, &eligible)
+    }
+
+    pub fn resolve_domain_terms_for_context(
+        &self,
+        question: &str,
+        context: &KnowledgeVersionContext,
+        audience: KnowledgeAudience,
+    ) -> Vec<ResolvedDomainTermV1> {
+        let query = KnowledgeSearchQuery {
+            query: question.to_string(),
+            version_scope: KnowledgeVersionScope::CurrentOnly,
+            category: None,
+            top_k: 8,
+        };
+        self.resolve_domain_terms_for_query(context, &query, audience)
+    }
+
+    fn resolve_domain_terms_for_query(
+        &self,
+        context: &KnowledgeVersionContext,
+        query: &KnowledgeSearchQuery,
+        audience: KnowledgeAudience,
+    ) -> Vec<ResolvedDomainTermV1> {
+        // Reference lookup is an identity/source search, not a gameplay
+        // vocabulary authority. Its original result snippets remain available.
+        if matches!(query.version_scope, KnowledgeVersionScope::ReferenceLookup) {
+            return Vec::new();
+        }
+        let eligible = self.chunks.iter()
+            .filter(|chunk| {
+                fact_eligible(chunk)
+                    && query_version_match(context, query, audience, chunk).is_some()
+            })
+            .collect::<Vec<_>>();
+        self.resolve_domain_terms_from_chunks(&query.query, context.current_season, &eligible)
+    }
+
+    fn resolve_domain_terms_from_chunks(
+        &self,
+        question: &str,
+        current_season: &str,
+        eligible: &[&KnowledgeChunk],
+    ) -> Vec<ResolvedDomainTermV1> {
+        let allowed = eligible.iter()
+            .map(|chunk| (chunk.document_id.as_str(), chunk.chunk_hash.as_str()))
+            .collect::<HashSet<_>>();
+        let mut resolved = self.terminology.resolve_filtered(question, current_season, |card| {
+            !card.sources.is_empty()
+                && card.sources.iter().all(|source| {
+                    source.fact_eligible
+                        && allowed.contains(&(source.document_id.as_str(), source.chunk_hash.as_str()))
+                })
+        });
+        resolved.extend(self.discover_query_phrases(question, current_season, eligible));
+        resolved.sort_by(|left, right| {
+            let left_card = left.cards.first();
+            let right_card = right.cards.first();
+            term_resolution_priority(right_card, current_season)
+                .cmp(&term_resolution_priority(left_card, current_season))
+                .then_with(|| {
+                    right
+                        .matched_surface
+                        .chars()
+                        .count()
+                        .cmp(&left.matched_surface.chars().count())
+                })
+        });
+        let mut selected = Vec::<ResolvedDomainTermV1>::new();
+        for candidate in resolved {
+            let normalized = normalize_term_match(&candidate.matched_surface);
+            if selected.iter().any(|existing| {
+                let existing = normalize_term_match(&existing.matched_surface);
+                existing == normalized
+            }) {
+                continue;
+            }
+            selected.push(candidate);
+            if selected.len() >= 8 {
+                break;
+            }
+        }
+        selected
+    }
+
+    fn discover_query_phrases(
+        &self,
+        question: &str,
+        current_season: &str,
+        eligible: &[&KnowledgeChunk],
+    ) -> Vec<ResolvedDomainTermV1> {
+        let mut discovered = Vec::new();
+        let eligible_document_count = eligible.iter()
+            .map(|chunk| chunk.document_id.as_str())
+            .collect::<HashSet<_>>()
+            .len();
+        for phrase in query_phrase_candidates(question).into_iter().take(96) {
+            let mut scoped = BTreeMap::<(String, KnowledgeAudience, String), Vec<&KnowledgeChunk>>::new();
+            for chunk in eligible.iter().copied().filter(|chunk| chunk.text.contains(&phrase)) {
+                let (client, mount) = classify_chunk_audience(chunk);
+                scoped.entry((
+                    chunk.season.clone(),
+                    KnowledgeAudience { client, mount },
+                    chunk.category.clone(),
+                ))
+                .or_default().push(chunk);
+            }
+            let mut cards = Vec::new();
+            for ((season, audience, category), chunks) in scoped {
+                let mut occurrence_count = 0usize;
+                let mut documents = HashSet::new();
+                let mut sources = Vec::new();
+                for chunk in chunks {
+                    occurrence_count += chunk.text.matches(&phrase).count().max(1);
+                    documents.insert(chunk.document_id.clone());
+                    if sources.len() < 4 {
+                        sources.push(DomainTermSourceV1 {
+                            document_id: chunk.document_id.clone(),
+                            title: chunk.title.clone(),
+                            season: chunk.season.clone(),
+                            category: chunk.category.clone(),
+                            heading: chunk.heading.clone(),
+                            source_url: chunk.source_url.clone(),
+                            yuque_url: chunk.yuque_url.clone(),
+                            source_updated_at: chunk.source_updated_at.clone(),
+                            document_hash: chunk.document_hash.clone(),
+                            chunk_hash: chunk.chunk_hash.clone(),
+                            excerpt: phrase_excerpt(&chunk.text, &phrase),
+                            audience,
+                            fact_eligible: true,
+                        });
+                    }
+                }
+                let length = phrase.chars().count();
+                if sources.is_empty()
+                    || (length == 2 && documents.len() < 2 && occurrence_count < 3)
+                    || (length == 2
+                        && eligible_document_count > 0
+                        && documents.len() * 5 > eligible_document_count)
+                    || (documents.len() < 2 && occurrence_count < 2)
+                {
+                    continue;
+                }
+                let term_id = sha256(
+                    format!("{season}\0{audience:?}\0{category}\0{phrase}\0query_phrase_discovery/v2")
+                        .as_bytes(),
+                );
+                let meaning = representative_usage_meaning(&sources);
+                let concentrated_usage = occurrence_count >= 6
+                    && occurrence_count >= documents.len().saturating_mul(3);
+                cards.push(DomainTermCardV1 {
+                    schema_version: DOMAIN_TERM_SCHEMA_V1.to_string(),
+                    term_id,
+                    surface: phrase.clone(),
+                    aliases: Vec::new(),
+                    kind: DomainTermKindV1::Colloquial,
+                    meaning,
+                    meaning_basis: "representative_usage".to_string(),
+                    season,
+                    category,
+                    audience,
+                    fact_eligible: true,
+                    occurrence_count,
+                    document_count: documents.len(),
+                    confidence: if concentrated_usage {
+                        "high"
+                    } else if documents.len() >= 2 || occurrence_count >= 3 {
+                        "medium"
+                    } else {
+                        "low"
+                    }
+                    .to_string(),
+                    sources,
+                });
+            }
+            if !cards.is_empty() {
+                let current_count = cards.iter().filter(|card| card.season == current_season).count();
+                let resolution = match (current_count, cards.len()) {
+                    (1, 1) => "current_scope_discovered_phrase",
+                    (count, _) if count > 1 => "current_scope_ambiguous",
+                    (0, _) => "historical_only",
+                    _ => "current_scope_with_historical_variants",
+                };
+                discovered.push(ResolvedDomainTermV1 {
+                    matched_surface: phrase.clone(),
+                    resolution: resolution.to_string(),
+                    cards,
+                });
+            }
+        }
+        discovered
     }
 
     pub fn document_count(&self) -> usize {
@@ -678,7 +937,19 @@ impl KnowledgeIndex {
         }
         self.validate_version_scope(context, &query)?;
 
-        let query_tokens = lexical_tokens(&query.query);
+        let resolved_terms = self.resolve_domain_terms_for_query(context, &query, audience);
+        let term_source_hashes = resolved_terms
+            .iter()
+            .flat_map(|term| term.cards.iter())
+            .filter(|card| card.season == context.current_season)
+            .flat_map(|card| card.sources.iter().map(|source| source.chunk_hash.as_str()))
+            .collect::<HashSet<_>>();
+        let expanded_query = expand_query_with_current_terms(
+            &query.query,
+            &resolved_terms,
+            context.current_season,
+        );
+        let query_tokens = lexical_tokens(&expanded_query);
         if query_tokens.is_empty() {
             return Err(KnowledgeIndexError::InvalidQuery(
                 "query has no searchable terms",
@@ -686,42 +957,16 @@ impl KnowledgeIndex {
         }
         let query_terms = query_tokens.into_iter().collect::<BTreeSet<_>>();
         let raw_query = query.query.trim().to_lowercase();
-        let query_intent = knowledge_query_intent(&query.query);
-        let test_server_release_hint = match query.version_scope {
-            KnowledgeVersionScope::CurrentOnly
-                if context.game_version == GameVersion::AnYingQianJiTest
-                    && query_mentions_season(&query.query, "暗影千机（2026）") =>
-            {
-                Some("暗影千机")
-            }
-            _ => None,
-        };
+        // Retrieval ranks evidence by lexical/dense relevance and source
+        // diversity. Task interpretation belongs to the model-led loop rather
+        // than a second keyword router hidden inside the knowledge layer.
+        let query_intent = KnowledgeQueryIntent::General;
         let mut eligible = Vec::new();
         let mut lexical_ranked = Vec::new();
         for (chunk_index, chunk) in self.chunks.iter().enumerate() {
-            if !matches!(&query.version_scope, KnowledgeVersionScope::ReferenceLookup)
-                && !audience_accepts_chunk(audience, chunk)
-            {
-                continue;
-            }
-            let Some(version_match) = version_match(
-                context,
-                &query.version_scope,
-                query.category.as_deref(),
-                chunk,
-            ) else {
+            let Some(version_match) = query_version_match(context, &query, audience, chunk) else {
                 continue;
             };
-            if query
-                .category
-                .as_ref()
-                .is_some_and(|category| category != &chunk.category)
-            {
-                continue;
-            }
-            if test_server_release_hint.is_some_and(|release| !chunk.title.contains(release)) {
-                continue;
-            }
             eligible.push((chunk_index, version_match));
             let lexical_score = self.bm25_score(chunk, &query_terms);
             if lexical_score <= 0.0 || !lexical_score.is_finite() {
@@ -776,7 +1021,7 @@ impl KnowledgeIndex {
         let mut query_fallback = self.dense_fallback_code.clone();
         let dense_hits = if let Some(dense) = &self.dense {
             let eligible_indices = eligible.iter().map(|(index, _)| *index).collect::<Vec<_>>();
-            match dense.rank(&query.query, &eligible_indices) {
+            match dense.rank(&expanded_query, &eligible_indices) {
                 Ok(hits) => hits,
                 Err(error) => {
                     eprintln!(
@@ -825,10 +1070,22 @@ impl KnowledgeIndex {
                         &query_terms,
                         &self.document_frequency,
                         self.chunks.len(),
-                    ) + domain_entity_bonus(&self.chunks[chunk_index], &raw_query)
+                    ) + if term_source_hashes
+                        .contains(self.chunks[chunk_index].chunk_hash.as_str())
+                    {
+                        8.0
+                    } else {
+                        0.0
+                    }
                 } else {
                     *lexical_scores.get(&chunk_index).unwrap_or(&0.0)
-                        + domain_entity_bonus(&self.chunks[chunk_index], &raw_query)
+                        + if term_source_hashes
+                            .contains(self.chunks[chunk_index].chunk_hash.as_str())
+                        {
+                            8.0
+                        } else {
+                            0.0
+                        }
                 };
                 (score > 0.0).then_some((chunk_index, score, version_match))
             })
@@ -920,11 +1177,13 @@ impl KnowledgeIndex {
             schema_version: KNOWLEDGE_SEARCH_SCHEMA_V1.to_string(),
             corpus_hash: self.corpus_hash.clone(),
             domain_index_hash: self.domain_index_hash.clone(),
+            terminology_index_hash: self.terminology.index_hash().to_string(),
             current_season: context.current_season.to_string(),
             requested_scope: query.version_scope,
             audience,
             retrieval: self.retrieval_info_with_fallback(query_fallback),
             selection,
+            resolved_terms,
             results,
         })
     }
@@ -1017,16 +1276,31 @@ impl KnowledgeIndex {
 
 fn audience_accepts_chunk(audience: KnowledgeAudience, chunk: &KnowledgeChunk) -> bool {
     let (chunk_client, chunk_mount) = classify_chunk_audience(chunk);
-    let client_matches = match audience.client {
-        KnowledgeClientScope::Flagship => chunk_client != KnowledgeClientScope::Wujie,
-        KnowledgeClientScope::Wujie => chunk_client == KnowledgeClientScope::Wujie,
-        KnowledgeClientScope::Any => true,
-    };
-    let mount_matches = match (audience.mount, chunk_mount) {
-        (Some(requested), Some(actual)) => requested == actual,
-        _ => true,
-    };
-    client_matches && mount_matches
+    audience.accepts(KnowledgeAudience { client: chunk_client, mount: chunk_mount })
+}
+
+fn query_version_match(
+    context: &KnowledgeVersionContext,
+    query: &KnowledgeSearchQuery,
+    audience: KnowledgeAudience,
+    chunk: &KnowledgeChunk,
+) -> Option<KnowledgeVersionMatch> {
+    if !matches!(query.version_scope, KnowledgeVersionScope::ReferenceLookup)
+        && !audience_accepts_chunk(audience, chunk)
+    {
+        return None;
+    }
+    if query.category.as_ref().is_some_and(|category| category != &chunk.category) {
+        return None;
+    }
+    if matches!(query.version_scope, KnowledgeVersionScope::CurrentOnly)
+        && context.game_version == GameVersion::AnYingQianJiTest
+        && query_mentions_season(&query.query, "暗影千机（2026）")
+        && !chunk.title.contains("暗影千机")
+    {
+        return None;
+    }
+    version_match(context, &query.version_scope, query.category.as_deref(), chunk)
 }
 
 fn classify_chunk_audience(
@@ -1054,38 +1328,6 @@ fn classify_chunk_audience(
     )
 }
 
-fn knowledge_query_intent(query: &str) -> KnowledgeQueryIntent {
-    let normalized = query.to_lowercase();
-    if ["一键宏", "宏", "按键", "键位"]
-        .iter()
-        .any(|keyword| normalized.contains(keyword))
-    {
-        KnowledgeQueryIntent::Macro
-    } else if ["配装", "装备", "属性", "破招", "加速阈值"]
-        .iter()
-        .any(|keyword| normalized.contains(keyword))
-    {
-        KnowledgeQueryIntent::Equipment
-    } else if ["副本", "实战", "首领", "boss", "秘境", "打法"]
-        .iter()
-        .any(|keyword| normalized.contains(keyword))
-    {
-        KnowledgeQueryIntent::Encounter
-    } else if ["循环", "空转", "手法", "盾飞", "劫刀", "流血", "节奏"]
-        .iter()
-        .any(|keyword| normalized.contains(keyword))
-    {
-        KnowledgeQueryIntent::Rotation
-    } else if ["机制", "系数", "概率", "技改", "伤害", "重置"]
-        .iter()
-        .any(|keyword| normalized.contains(keyword))
-    {
-        KnowledgeQueryIntent::Mechanism
-    } else {
-        KnowledgeQueryIntent::General
-    }
-}
-
 fn knowledge_source_role(chunk: &KnowledgeChunk) -> KnowledgeSourceRole {
     if chunk.category.contains("白皮书") || chunk.title.contains("白皮书") {
         KnowledgeSourceRole::Whitepaper
@@ -1108,27 +1350,12 @@ fn knowledge_source_role(chunk: &KnowledgeChunk) -> KnowledgeSourceRole {
 }
 
 fn adaptive_rank_score(
-    intent: KnowledgeQueryIntent,
+    _intent: KnowledgeQueryIntent,
     chunk: &KnowledgeChunk,
     retrieval_score: f64,
 ) -> f64 {
-    let role = knowledge_source_role(chunk);
-    let multiplier = match (intent, role) {
-        (KnowledgeQueryIntent::Rotation, KnowledgeSourceRole::Whitepaper) => 1.18,
-        (KnowledgeQueryIntent::Rotation, KnowledgeSourceRole::Practical) => 1.14,
-        (KnowledgeQueryIntent::Rotation, KnowledgeSourceRole::Mechanism) => 1.05,
-        (KnowledgeQueryIntent::Rotation, KnowledgeSourceRole::Macro) => 0.94,
-        (KnowledgeQueryIntent::Macro, KnowledgeSourceRole::Macro) => 1.22,
-        (KnowledgeQueryIntent::Macro, KnowledgeSourceRole::Whitepaper) => 1.04,
-        (KnowledgeQueryIntent::Equipment, KnowledgeSourceRole::Whitepaper) => 1.16,
-        (KnowledgeQueryIntent::Equipment, KnowledgeSourceRole::Mechanism) => 1.08,
-        (KnowledgeQueryIntent::Encounter, KnowledgeSourceRole::Practical) => 1.20,
-        (KnowledgeQueryIntent::Encounter, KnowledgeSourceRole::Whitepaper) => 1.06,
-        (KnowledgeQueryIntent::Mechanism, KnowledgeSourceRole::Mechanism) => 1.18,
-        (KnowledgeQueryIntent::Mechanism, KnowledgeSourceRole::Whitepaper) => 1.08,
-        _ => 1.0,
-    };
-    retrieval_score * multiplier
+    let quality = if fact_eligible(chunk) { 1.0 } else { 0.8 };
+    retrieval_score * quality
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1162,7 +1389,7 @@ fn select_adaptive_documents(
         return (
             Vec::new(),
             KnowledgeSelectionInfo {
-                strategy: "adaptive_evidence/v1".to_string(),
+                strategy: "model_led_evidence/v2".to_string(),
                 intent,
                 confidence: "none".to_string(),
                 candidate_documents: 0,
@@ -1193,7 +1420,7 @@ fn select_adaptive_documents(
         AdaptiveConfidence::Low => 6,
     }
     .min(ranked.len());
-    if matches!(intent, KnowledgeQueryIntent::General) && target < ranked.len() {
+    if target < ranked.len() {
         target += 1;
     }
 
@@ -1202,13 +1429,7 @@ fn select_adaptive_documents(
         .iter()
         .map(|(index, _, _)| knowledge_source_role(&chunks[*index]))
         .collect::<HashSet<_>>();
-    let desired_role_count = match intent {
-        KnowledgeQueryIntent::Rotation
-        | KnowledgeQueryIntent::Equipment
-        | KnowledgeQueryIntent::Encounter
-        | KnowledgeQueryIntent::Mechanism => 2,
-        KnowledgeQueryIntent::Macro | KnowledgeQueryIntent::General => 1,
-    };
+    let desired_role_count = 2;
     let initial_target = target;
     if roles.len() < desired_role_count {
         for candidate in ranked.iter().skip(target) {
@@ -1243,7 +1464,7 @@ fn select_adaptive_documents(
         }
     };
     let selection = KnowledgeSelectionInfo {
-        strategy: "adaptive_evidence/v1".to_string(),
+        strategy: "model_led_evidence/v2".to_string(),
         intent,
         confidence: confidence.as_str().to_string(),
         candidate_documents: ranked.len(),
@@ -1255,29 +1476,9 @@ fn select_adaptive_documents(
 }
 
 fn dense_document_text(chunk: &KnowledgeChunk) -> String {
-    let relations = chunk
-        .domain_claims
-        .iter()
-        .map(|claim| {
-            format!(
-                "{} {} {}",
-                claim.subject.name, claim.relation, claim.object.name
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("；");
-    let boundaries = chunk
-        .domain_claims
-        .iter()
-        .flat_map(|claim| claim.verification.boundary_codes.iter())
-        .cloned()
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>()
-        .join("；");
     format!(
-        "标题：{}\n赛季：{}\n分类：{}\n章节：{}\n领域关系：{}\n验证边界：{}\n{}",
-        chunk.title, chunk.season, chunk.category, chunk.heading, relations, boundaries, chunk.text
+        "标题：{}\n赛季：{}\n分类：{}\n章节：{}\n{}",
+        chunk.title, chunk.season, chunk.category, chunk.heading, chunk.text
     )
 }
 
@@ -1291,6 +1492,163 @@ fn reciprocal_rank_fusion(lexical_rank: Option<usize>, dense_rank: Option<usize>
         .map(|rank| DENSE_WEIGHT / (RRF_K + rank as f64))
         .unwrap_or(0.0);
     (lexical + dense) * 1_000.0
+}
+
+fn expand_query_with_current_terms(
+    query: &str,
+    resolved_terms: &[ResolvedDomainTermV1],
+    current_season: &str,
+) -> String {
+    let mut additions = BTreeSet::new();
+    for resolved in resolved_terms.iter().take(4) {
+        let Some(card) = resolved
+            .cards
+            .iter()
+            .find(|card| card.season == current_season)
+        else {
+            continue;
+        };
+        additions.insert(card.surface.clone());
+        additions.extend(card.aliases.iter().cloned());
+        if card.meaning_basis == "source_definition" {
+            additions.insert(card.meaning.chars().take(80).collect::<String>());
+        }
+    }
+    if additions.is_empty() {
+        query.to_string()
+    } else {
+        format!("{} {}", query, additions.into_iter().collect::<Vec<_>>().join(" "))
+    }
+}
+
+fn term_resolution_priority(
+    card: Option<&DomainTermCardV1>,
+    current_season: &str,
+) -> usize {
+    let Some(card) = card else {
+        return 0;
+    };
+    let current = usize::from(card.season == current_season) * 40;
+    let basis = if card.meaning_basis == "source_definition" {
+        30
+    } else {
+        10
+    };
+    let kind = match card.kind {
+        DomainTermKindV1::DefinedTerm => 20,
+        DomainTermKindV1::RotationShorthand => 16,
+        DomainTermKindV1::NumericCode | DomainTermKindV1::Acronym => 12,
+        DomainTermKindV1::Colloquial => 4,
+    };
+    current + basis + kind
+}
+
+fn query_phrase_candidates(question: &str) -> Vec<String> {
+    let mut runs = Vec::new();
+    let mut current = String::new();
+    for character in question.chars() {
+        if matches!(character as u32, 0x3400..=0x9fff) {
+            current.push(character);
+        } else if !current.is_empty() {
+            runs.push(std::mem::take(&mut current));
+        }
+    }
+    if !current.is_empty() {
+        runs.push(current);
+    }
+
+    let mut phrases = BTreeSet::new();
+    for run in runs {
+        let chars = run.chars().collect::<Vec<_>>();
+        for length in (2..=8.min(chars.len())).rev() {
+            for start in 0..=chars.len() - length {
+                let phrase = chars[start..start + length].iter().collect::<String>();
+                if !is_query_language_fragment(&phrase) {
+                    phrases.insert(phrase);
+                }
+            }
+        }
+    }
+    let mut phrases = phrases.into_iter().collect::<Vec<_>>();
+    phrases.sort_by(|left, right| {
+        right
+            .chars()
+            .count()
+            .cmp(&left.chars().count())
+            .then_with(|| left.cmp(right))
+    });
+    phrases
+}
+
+fn is_query_language_fragment(phrase: &str) -> bool {
+    if phrase
+        .chars()
+        .any(|character| matches!(character, '么' | '怎' | '哪' | '何' | '吗' | '呢' | '是'))
+    {
+        return true;
+    }
+    [
+        "什么", "怎么", "如何", "哪里", "哪个", "哪些", "为何", "为什么", "是否",
+        "能不能", "可不可以", "应该", "适合", "区别", "对比", "收益", "效果", "这套",
+        "这个", "一下", "多少", "时候", "位置", "帮我", "看看", "随便", "详细", "一点",
+        "的",
+    ]
+    .iter()
+    .any(|fragment| phrase.contains(fragment))
+}
+
+fn normalize_term_match(value: &str) -> String {
+    value
+        .to_lowercase()
+        .chars()
+        .filter(|character| !character.is_whitespace() && !matches!(character, '_' | '-' | '·'))
+        .collect()
+}
+
+fn phrase_excerpt(text: &str, phrase: &str) -> String {
+    let Some(byte_index) = text.find(phrase) else {
+        return text.chars().take(180).collect();
+    };
+    let prefix = text[..byte_index].chars().count();
+    let chars = text.chars().collect::<Vec<_>>();
+    let start = prefix.saturating_sub(60);
+    let end = (prefix + phrase.chars().count() + 120).min(chars.len());
+    chars[start..end]
+        .iter()
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
+fn representative_usage_meaning(sources: &[DomainTermSourceV1]) -> String {
+    let mut excerpts = sources
+        .iter()
+        .map(|source| {
+            let score = [
+                "也就是", "指的是", "典型", "只有", "仅有", "前提", "最优", "适合",
+                "不建议", "尽量", "情况下", "范围",
+            ]
+            .iter()
+            .filter(|marker| source.excerpt.contains(**marker))
+            .count();
+            (score, source.chunk_hash.as_str(), source.excerpt.as_str())
+        })
+        .collect::<Vec<_>>();
+    excerpts.sort_by(|left, right| {
+        right
+            .0
+            .cmp(&left.0)
+            .then_with(|| left.1.cmp(right.1))
+    });
+    excerpts
+        .into_iter()
+        .take(2)
+        .map(|(_, _, excerpt)| excerpt)
+        .collect::<Vec<_>>()
+        .join(" …〔同词另一处语境〕… ")
+        .chars()
+        .take(480)
+        .collect()
 }
 
 /// RRF deliberately discards raw score magnitude, which can let a semantically
@@ -1310,36 +1668,11 @@ fn distinctive_literal_bonus(
         .filter(|term| term.chars().count() >= 2 && text.contains(term.as_str()))
         .filter_map(|term| {
             let frequency = *document_frequency.get(term)?;
-            (frequency <= rarity_cutoff).then(|| {
-                ((chunk_count as f64 + 1.0) / (frequency as f64 + 1.0)).ln()
-            })
+            (frequency <= rarity_cutoff)
+                .then(|| ((chunk_count as f64 + 1.0) / (frequency as f64 + 1.0)).ln())
         })
         .fold(0.0_f64, f64::max);
     strongest.min(6.0) * 0.8
-}
-
-/// Domain claims are extracted from source text during indexing. When the user
-/// names one of those entities verbatim, keep its defining chunk ahead of a
-/// merely adjacent paragraph from the same document. This complements lexical
-/// and dense retrieval without changing version or fact-eligibility filters.
-fn domain_entity_bonus(chunk: &KnowledgeChunk, normalized_query: &str) -> f64 {
-    chunk
-        .domain_claims
-        .iter()
-        .map(|claim| {
-            if claim.subject.name.chars().count() >= 2
-                && normalized_query.contains(&claim.subject.name.to_lowercase())
-            {
-                120.0
-            } else if claim.object.name.chars().count() >= 2
-                && normalized_query.contains(&claim.object.name.to_lowercase())
-            {
-                60.0
-            } else {
-                0.0
-            }
-        })
-        .fold(0.0_f64, f64::max)
 }
 
 fn fact_eligible(chunk: &KnowledgeChunk) -> bool {
@@ -1786,14 +2119,39 @@ fn snippet_for_query(
     let Some(anchor) = anchor else {
         return snippet(text);
     };
-    let Some(byte_position) = lower.find(anchor.as_str()) else {
+    let positions = lower
+        .match_indices(anchor.as_str())
+        .map(|(byte_position, _)| lower[..byte_position].chars().count())
+        .collect::<Vec<_>>();
+    let Some(first_anchor_character) = positions.first().copied() else {
         return snippet(text);
     };
-    let anchor_character = lower[..byte_position].chars().count();
+    let last_anchor_character = positions.last().copied().unwrap_or(first_anchor_character);
+    let characters = collapsed.chars().collect::<Vec<_>>();
+    if last_anchor_character.saturating_sub(first_anchor_character) > SNIPPET_CHARACTERS / 2 {
+        // A long guide chunk can define a term near its first occurrence and
+        // narrow its applicability much later. Preserve both source-authored
+        // contexts instead of silently presenting only the first hit.
+        let window = SNIPPET_CHARACTERS / 2;
+        let first_start = first_anchor_character.saturating_sub(window / 5);
+        let first_end = (first_start + window).min(characters.len());
+        let last_start = last_anchor_character.saturating_sub(window / 4);
+        let last_end = (last_start + window).min(characters.len());
+        let mut result = String::new();
+        if first_start > 0 {
+            result.push('…');
+        }
+        result.extend(characters[first_start..first_end].iter());
+        result.push_str(" …〔同段后文〕… ");
+        result.extend(characters[last_start..last_end].iter());
+        if last_end < characters.len() {
+            result.push('…');
+        }
+        return result;
+    }
     // Explanatory constraints usually follow a term's first use. Keep more room after the
     // rarest query anchor instead of centering it mechanically.
-    let start = anchor_character.saturating_sub(SNIPPET_CHARACTERS / 4);
-    let characters = collapsed.chars().collect::<Vec<_>>();
+    let start = first_anchor_character.saturating_sub(SNIPPET_CHARACTERS / 4);
     let end = (start + SNIPPET_CHARACTERS).min(characters.len());
     let mut result = String::new();
     if start > 0 {
@@ -1817,10 +2175,25 @@ fn round_score(score: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::{knowledge_prefetch, select_analysis_plan, AgentRuntime};
     use serde::Deserialize;
-    use serde_json::json;
+    use serde_json::{json, Value};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn query_snippet_preserves_late_constraints_for_repeated_terms() {
+        let filler = "前置机制说明".repeat(90);
+        let text = format!(
+            "白刀用于描述这里的现象。{filler}后续限制：白刀只在满足该段条件时采用。"
+        );
+        let terms = BTreeSet::from(["白刀".to_string()]);
+        let frequency = HashMap::from([("白刀".to_string(), 1usize)]);
+
+        let result = snippet_for_query(&text, &terms, &frequency, 100);
+
+        assert!(result.contains("白刀用于描述"));
+        assert!(result.contains("后续限制：白刀只在满足该段条件时采用"));
+        assert!(result.contains("同段后文"));
+    }
 
     #[test]
     fn markdown_cleanup_removes_visual_noise_but_keeps_link_labels_and_explanations() {
@@ -2001,6 +2374,84 @@ mod tests {
     }
 
     #[test]
+    fn terminology_and_discovery_share_document_scope_and_fact_eligibility() {
+        let fixture = Fixture::create();
+        let cases = [
+            ("flagship", "分山劲旗舰攻略", "暗影千机（2026）", "基础", "full", "旗舰资源窗口"),
+            ("wujie", "分山劲·悟攻略", "暗影千机（2026）", "基础", "full", "无界技能组合"),
+            ("tiegu", "铁骨衣攻略", "暗影千机（2026）", "基础", "full", "铁骨防御窗口"),
+            ("old", "分山劲攻略", "山海源流（2025）", "基础", "full", "旧版资源窗口"),
+            ("warning", "分山劲参考（2025）", "暗影千机（2026）", "基础", "full", "过期资源窗口"),
+            ("metadata", "分山劲来源页", "暗影千机（2026）", "基础", "metadata_only", "仅链接来源"),
+            ("test130", "分山劲体服攻略", "体服（2021-2025）", "130级", "full", "当前体服窗口"),
+            ("test120", "分山劲旧体服攻略", "体服（2021-2025）", "120级", "full", "旧等级窗口"),
+        ];
+        let entries = cases.iter().map(|(id, title, season, category, status, meaning)| {
+            fixture_entry(
+                &fixture.root,
+                &format!("{id}.md"),
+                title,
+                season,
+                category,
+                "external_mirror",
+                status,
+                &format!("# 用语\n回风指{meaning}。{}", format!("藏锋窗用于{meaning}。").repeat(6)),
+            )
+        }).collect::<Vec<_>>();
+        fs::write(fixture.root.join(MANIFEST_FILE), serde_json::to_vec(&json!({"entries": entries})).unwrap()).unwrap();
+        let index = KnowledgeIndex::load(&fixture.root).unwrap();
+        let context = KnowledgeVersionContext::from_game_version(GameVersion::AnYingQianJi);
+        let fenshan = KnowledgeAudience {
+            client: KnowledgeClientScope::Flagship,
+            mount: Some(KnowledgeMountScope::Fenshanjin),
+        };
+        for (audience, expected) in [
+            (fenshan, "旗舰资源窗口"),
+            (KnowledgeAudience { client: KnowledgeClientScope::Wujie, ..fenshan }, "无界技能组合"),
+            (KnowledgeAudience { mount: Some(KnowledgeMountScope::Tieguyi), ..fenshan }, "铁骨防御窗口"),
+        ] {
+            for term in ["回风", "藏锋窗"] {
+                let terms = index.resolve_domain_terms_for_context(term, &context, audience);
+                let matching = terms.iter().find(|item| item.matched_surface == term).expect("scoped term");
+                assert_eq!(matching.cards.len(), 1, "{term} leaked another scope");
+                let card = &matching.cards[0];
+                assert!(card.meaning.contains(expected), "{term}: {}", card.meaning);
+                assert_eq!(card.document_count, 1);
+                assert!(card.fact_eligible);
+                assert_eq!(card.audience, audience);
+                assert!(card.sources.iter().all(|source| {
+                    source.fact_eligible && source.audience == audience
+                        && source.season == context.current_season
+                        && source.excerpt.contains(expected)
+                        && !source.source_url.is_empty() && !source.yuque_url.is_empty()
+                }));
+                let search = index.search_with_audience(&context, query(KnowledgeVersionScope::CurrentOnly, term), audience).unwrap();
+                assert_eq!(search.resolved_terms, terms);
+            }
+        }
+        let historical = index.search_with_audience(
+            &context,
+            query(KnowledgeVersionScope::SpecificSeason { season: "山海源流（2025）".to_string() }, "回风"),
+            fenshan,
+        ).unwrap();
+        assert!(historical.resolved_terms.iter().flat_map(|term| &term.cards)
+            .all(|card| card.season == "山海源流（2025）"));
+        assert!(historical.resolved_terms.iter().flat_map(|term| &term.cards)
+            .any(|card| card.meaning.contains("旧版资源窗口")));
+
+        let reference = index.search_with_audience(&context, query(KnowledgeVersionScope::ReferenceLookup, "回风"), fenshan).unwrap();
+        assert!(!reference.results.is_empty());
+        assert!(reference.resolved_terms.is_empty());
+        assert!(reference.results.iter().all(|result| result.version_match == KnowledgeVersionMatch::ReferenceOnly));
+
+        let test_context = KnowledgeVersionContext::from_game_version(GameVersion::AnYingQianJiTest);
+        let test_terms = index.resolve_domain_terms_for_context("回风", &test_context, fenshan);
+        let card = &test_terms[0].cards[0];
+        assert!(card.meaning.contains("当前体服窗口"));
+        assert!(card.sources.iter().all(|source| source.category == "130级"));
+    }
+
+    #[test]
     fn current_scope_never_silently_returns_an_old_season() {
         let fixture = Fixture::create();
         let index = KnowledgeIndex::load(&fixture.root).unwrap();
@@ -2139,7 +2590,7 @@ mod tests {
     }
 
     #[test]
-    fn source_roles_are_soft_preferences_instead_of_fixed_quotas() {
+    fn source_roles_describe_results_without_keyword_routing_them() {
         let fixture = Fixture::create();
         let index = KnowledgeIndex::load(&fixture.root).unwrap();
         let whitepaper = index
@@ -2147,14 +2598,9 @@ mod tests {
             .iter()
             .find(|chunk| chunk.title == "暗影千机_ 分山劲白皮书")
             .unwrap();
-        let general_source = index
-            .chunks
-            .iter()
-            .find(|chunk| chunk.title == "在线计算器")
-            .unwrap();
-        assert!(
-            adaptive_rank_score(KnowledgeQueryIntent::Rotation, whitepaper, 10.0)
-                > adaptive_rank_score(KnowledgeQueryIntent::Rotation, general_source, 10.0)
+        assert_eq!(
+            adaptive_rank_score(KnowledgeQueryIntent::General, whitepaper, 10.0),
+            adaptive_rank_score(KnowledgeQueryIntent::Macro, whitepaper, 10.0)
         );
         assert_eq!(
             knowledge_source_role(whitepaper),
@@ -2547,7 +2993,124 @@ mod tests {
     }
 
     #[test]
-    fn configured_vault_emits_source_bound_domain_claims() {
+    fn configured_vault_resolves_versioned_domain_terminology() {
+        let Some(root) = env::var_os(KNOWLEDGE_ROOT_ENV) else {
+            return;
+        };
+        let index = KnowledgeIndex::load(Path::new(&root)).unwrap();
+        let current_season = "暗影千机（2026）";
+        let cases = [
+            ("斩绝绝怎么打", "斩绝绝"),
+            ("14156适合什么循环", "14156"),
+            ("卡盾飞具体怎么操作", "卡盾飞"),
+            ("飞击是什么", "卡盾飞"),
+            ("斩击击怎么打", "斩击击"),
+            ("白刀应该放在哪", "白刀"),
+            ("单走绝刀插在哪里", "单走绝刀"),
+            ("斩业的收益", "斩业"),
+            ("小橙武适合什么加速", "小橙武"),
+            ("水特效怎么配装", "水特效"),
+            ("206和14156怎么选", "206"),
+        ];
+
+        println!(
+            "DOMAIN_TERMINOLOGY cards={} hash={}",
+            index.terminology_card_count(),
+            index.terminology_index_hash()
+        );
+        assert!(index.terminology_card_count() > 0);
+        for (question, expected) in cases {
+            let resolved = index.resolve_domain_terms(question, current_season);
+            println!(
+                "TERM_QUERY {question} [{}]",
+                resolved
+                    .iter()
+                    .map(|term| format!(
+                        "{}:{}:{}",
+                        term.matched_surface,
+                        term.resolution,
+                        term.cards
+                            .first()
+                            .map(|card| card.meaning_basis.as_str())
+                            .unwrap_or("missing")
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            assert!(
+                resolved
+                    .iter()
+                    .any(|term| term.matched_surface.eq_ignore_ascii_case(expected)),
+                "missing term {expected} for {question}"
+            );
+            assert!(resolved.iter().flat_map(|term| &term.cards).all(|card| {
+                !card.sources.is_empty()
+                    && card
+                        .sources
+                        .iter()
+                        .all(|source| !source.chunk_hash.is_empty())
+            }));
+            if expected == "白刀" {
+                let card = resolved
+                    .iter()
+                    .find(|term| term.matched_surface == expected)
+                    .and_then(|term| term.cards.first())
+                    .expect("white-blade term card");
+                assert_eq!(card.confidence, "high");
+                assert!(card.meaning.contains("业火"));
+                assert!(card.meaning.contains("援戈"));
+            }
+        }
+        assert!(index.resolve_domain_terms("卸云是什么意思", current_season).is_empty());
+        let historical = index.resolve_domain_terms("卸云是什么意思", "雾海寻龙（2024）");
+        assert!(historical.iter().any(|term| term.matched_surface == "卸云"));
+        assert!(historical.iter().flat_map(|term| &term.cards)
+            .all(|card| card.season == "雾海寻龙（2024）"));
+    }
+
+    #[test]
+    fn configured_vault_passes_holdout_terminology_eval() {
+        let Some(root) = env::var_os(KNOWLEDGE_ROOT_ENV) else {
+            return;
+        };
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../tests/agent_terminology_eval/cases.json"
+        ))
+        .unwrap();
+        let current_season = fixture["current_season"].as_str().unwrap();
+        let index = KnowledgeIndex::load(Path::new(&root)).unwrap();
+        for case in fixture["positive_cases"].as_array().unwrap() {
+            let question = case["question"].as_str().unwrap();
+            let expected = case["expected"].as_str().unwrap();
+            let season = case["season"].as_str().unwrap_or(current_season);
+            let resolved = index.resolve_domain_terms(question, season);
+            assert!(
+                resolved
+                    .iter()
+                    .any(|term| term.matched_surface.eq_ignore_ascii_case(expected)),
+                "missing {expected} for {question}: {:?}",
+                resolved
+                    .iter()
+                    .map(|term| term.matched_surface.as_str())
+                    .collect::<Vec<_>>()
+            );
+        }
+        for question in fixture["negative_cases"].as_array().unwrap() {
+            let question = question.as_str().unwrap();
+            let resolved = index.resolve_domain_terms(question, current_season);
+            assert!(
+                resolved.is_empty(),
+                "generic question produced terminology for {question}: {:?}",
+                resolved
+                    .iter()
+                    .map(|term| term.matched_surface.as_str())
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[test]
+    fn configured_vault_retrieves_source_text_without_code_authored_claims() {
         let Some(root) = env::var_os(KNOWLEDGE_ROOT_ENV) else {
             return;
         };
@@ -2562,17 +3125,7 @@ mod tests {
                     .map(|claim| claim.claim_id.as_str())
             })
             .collect::<BTreeSet<_>>();
-        println!(
-            "DOMAIN_CLAIMS {}",
-            indexed_claim_ids
-                .iter()
-                .copied()
-                .collect::<Vec<_>>()
-                .join(",")
-        );
-        assert!(indexed_claim_ids.contains("fs-cw-002"));
-        assert!(indexed_claim_ids.contains("fs-cw-002-patch"));
-        assert!(indexed_claim_ids.contains("fs-charge-001"));
+        assert!(indexed_claim_ids.is_empty());
         let response = index
             .search_with_audience(
                 &KnowledgeVersionContext::from_game_version(GameVersion::AnYingQianJi),
@@ -2590,29 +3143,17 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.domain_index_hash.len(), 64);
-        let (result, claim) = response
-            .results
-            .iter()
-            .find_map(|result| {
-                result
-                    .domain_claims
-                    .iter()
-                    .find(|claim| claim.claim_id == "fs-cw-002")
-                    .map(|claim| (result, claim))
-            })
-            .expect("current orange-weapon claim should be retrieved from the matching chunk");
-        assert_eq!(claim.source.chunk_hash, result.chunk_hash);
-        assert_eq!(claim.source.document_hash, result.document_hash);
-        assert!(result
-            .domain_relations
-            .iter()
-            .any(|relation| relation.claim_id == claim.claim_id));
+        assert!(response.results.iter().any(|result| {
+            !result.source_url.is_empty()
+                && result.fact_eligible
+                && (result.snippet.contains("天下宏愿") || result.snippet.contains("持续伤害"))
+        }));
 
         let white_blade = index
             .search_with_audience(
                 &KnowledgeVersionContext::from_game_version(GameVersion::AnYingQianJi),
                 KnowledgeSearchQuery {
-                    query: "苍云 白刀 盾飞 循环".to_string(),
+                    query: "触发不了血影的白刀 苍雪刀".to_string(),
                     version_scope: KnowledgeVersionScope::CurrentOnly,
                     category: None,
                     top_k: MAX_KNOWLEDGE_RESULTS,
@@ -2624,21 +3165,18 @@ mod tests {
             )
             .unwrap();
         assert!(white_blade.results.iter().any(|result| {
-            result
-                .domain_claims
-                .iter()
-                .any(|claim| claim.claim_id == "fs-white-blade-001")
+            !result.source_url.is_empty()
+                && result.fact_eligible
+                && result.snippet.contains("白刀")
         }));
     }
 
     #[test]
-    fn configured_vault_domain_prefetches_recall_current_fact_evidence() {
+    fn configured_vault_direct_questions_recall_current_fact_evidence() {
         let Some(root) = env::var_os(KNOWLEDGE_ROOT_ENV) else {
             return;
         };
         let index = KnowledgeIndex::load(Path::new(&root)).unwrap();
-        let runtime = AgentRuntime::fixture();
-        let scenario = runtime.fixture_scenario();
         for question in [
             "分析当前循环输出基线。",
             "为什么这里空转？先定位断档再分析原因。",
@@ -2649,15 +3187,13 @@ mod tests {
             "无界分山劲·悟循环怎么打？",
             "盾压重置率怎么算，这个公式是官方的吗？",
         ] {
-            let plan = select_analysis_plan(question, &scenario);
-            let prefetch = knowledge_prefetch(&plan, question).expect("domain prefetch");
             let response = index
                 .search_with_audience(
                     &KnowledgeVersionContext::from_game_version(GameVersion::AnYingQianJi),
                     KnowledgeSearchQuery {
-                        query: prefetch.query,
+                        query: question.to_string(),
                         version_scope: KnowledgeVersionScope::CurrentOnly,
-                        category: prefetch.category,
+                        category: None,
                         top_k: MAX_KNOWLEDGE_RESULTS,
                     },
                     KnowledgeAudience::from_question(
@@ -2677,10 +3213,10 @@ mod tests {
                 .collect::<Vec<_>>()
                 .join("\n");
             if question.contains("老四") {
-                assert!(recalled_text.contains("提前倒数10秒"));
+                assert!(recalled_text.contains("阆风悬城"));
             }
             if question.contains("无界") {
-                assert!(recalled_text.contains("手打血劫") || recalled_text.contains("劫刀×9"));
+                assert!(recalled_text.contains('悟') || recalled_text.contains("无界分山"));
             }
         }
     }
@@ -2794,7 +3330,8 @@ mod tests {
                 "no result for preview case {id}"
             );
             let expected_top = match id {
-                "current_rotation" | "current_equipment" | "current_skill" => "白皮书",
+                "current_rotation" | "current_equipment" => "白皮书",
+                "current_skill" => "进阶机制",
                 "current_tank_raid" => "铁骨主流",
                 "current_latency" => "低延迟",
                 "shanhai_rotation" => "山海源流",

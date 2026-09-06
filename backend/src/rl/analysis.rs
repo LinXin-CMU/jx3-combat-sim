@@ -3,8 +3,8 @@
 //! 只允许同时一个 analyze 任务运行（占用 GPU 推理 + HTTP env）。
 
 use std::process::Stdio;
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 use axum::{
     extract::State,
@@ -69,7 +69,9 @@ pub struct AnalyzeStartRequest {
     pub device: String,
 }
 
-fn default_device() -> String { "cuda".into() }
+fn default_device() -> String {
+    "cuda".into()
+}
 
 #[derive(Debug, Serialize)]
 pub struct AnalyzeStartResponse {
@@ -133,7 +135,10 @@ pub async fn start_handler(
         "recipes": req.recipes,
     });
     let spec_path = runs_root.join("spec.json");
-    if let Err(e) = std::fs::write(&spec_path, serde_json::to_string_pretty(&spec).unwrap_or_default()) {
+    if let Err(e) = std::fs::write(
+        &spec_path,
+        serde_json::to_string_pretty(&spec).unwrap_or_default(),
+    ) {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(err(&format!("写 spec.json 失败: {}", e))),
@@ -187,7 +192,9 @@ pub async fn start_handler(
             match reader.next_line().await {
                 Ok(Some(line)) => {
                     let trimmed = line.trim();
-                    if trimmed.is_empty() { continue; }
+                    if trimmed.is_empty() {
+                        continue;
+                    }
                     match serde_json::from_str::<JsonValue>(trimmed) {
                         Ok(ev) => {
                             if ev.get("event").and_then(|v| v.as_str()) == Some("done") {
@@ -209,7 +216,9 @@ pub async fn start_handler(
             let mut g = child_arc.lock().await;
             if let Some(mut c) = g.take() {
                 c.wait().await.ok().and_then(|s| s.code())
-            } else { None }
+            } else {
+                None
+            }
         };
         let _ = tx.send(serde_json::json!({
             "event": "exit",
@@ -240,17 +249,25 @@ pub async fn stop_handler(State(shared): State<SharedState>) -> Response {
     let state = shared.rl_analyze.clone();
     let guard = state.current.lock().await;
     let Some(active) = guard.as_ref() else {
-        return Json(serde_json::json!({"stopped": false, "reason": "无进行中的任务"})).into_response();
+        return Json(serde_json::json!({"stopped": false, "reason": "无进行中的任务"}))
+            .into_response();
     };
-    active.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    active
+        .stop
+        .store(true, std::sync::atomic::Ordering::Relaxed);
     let run_id = active.run_id.clone();
     let child_arc = active.child.clone();
     drop(guard);
     let mut cg = child_arc.lock().await;
     let killed = if let Some(c) = cg.as_mut() {
         let _ = c.start_kill();
-        tokio::time::timeout(std::time::Duration::from_secs(3), c.wait()).await.ok().is_some()
-    } else { true };
+        tokio::time::timeout(std::time::Duration::from_secs(3), c.wait())
+            .await
+            .ok()
+            .is_some()
+    } else {
+        true
+    };
     drop(cg);
     let _ = state.broadcaster.send(serde_json::json!({
         "event": "stop_requested", "run_id": run_id, "killed_within_timeout": killed,
@@ -280,7 +297,9 @@ pub async fn stream_handler(
             match res {
                 Ok(ev) => {
                     let data = serde_json::to_string(&ev).unwrap_or_else(|_| "{}".into());
-                    Some(Ok::<_, std::convert::Infallible>(SseEvent::default().data(data)))
+                    Some(Ok::<_, std::convert::Infallible>(
+                        SseEvent::default().data(data),
+                    ))
                 }
                 Err(_) => None,
             }

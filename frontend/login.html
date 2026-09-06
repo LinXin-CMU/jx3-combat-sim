@@ -53,12 +53,12 @@
       <label for="u">用户名</label>
       <input id="u" name="username" type="text" placeholder="给自己起个名字" maxlength="40" required>
       <label for="p">密码</label>
-      <input id="p" name="password" type="password" placeholder="首次登入填发布密码 / 已设专属密码填它">
-      <div class="hint">首次用某用户名登入需填<b>发布密码</b>创建账号；之后同名再登入：设过专属密码就填它，没设则免密。</div>
+      <input id="p" name="password" type="password" placeholder="免密账号留空；其他账号填密码或邀请码">
+      <div class="hint">原免密账号只填用户名即可登录。已有密码的账号填写个人密码；新账号填写邀请码，并在下方设置个人密码。</div>
 
-      <label for="sp">设置专属密码 <span style="color:var(--muted);font-weight:400">（可选）</span></label>
-      <input id="sp" name="set_password" type="password" placeholder="想保护账号就填，留空＝免密">
-      <div class="hint">填了之后，以后用这个用户名登入就必须输入它（防止别人冒用你的名字）。也可日后登入时再设。</div>
+      <label for="sp">设置个人密码 <span style="color:var(--muted);font-weight:400">（新账号必填）</span></label>
+      <input id="sp" name="set_password" type="password" placeholder="至少 12 个字符；已有账号不改密码可留空">
+      <div class="hint">以后使用用户名和个人密码登录。已有账号填写此项，可在验证当前密码后更换密码。</div>
 
       <div class="err" id="err"></div>
       <button id="btn" type="submit">登 入</button>

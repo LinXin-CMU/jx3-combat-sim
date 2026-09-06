@@ -1,7 +1,7 @@
 //! 运行时：HTTP 处理器 + 单实例运行状态 + SSE 广播
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use axum::{
     extract::{Path, Query, State},
@@ -16,13 +16,13 @@ use std::collections::HashMap;
 use tokio::sync::{broadcast, Mutex};
 
 use super::analyze::extract_tunables;
-use super::archive::{list_runs, list_archive_subdir, read_archive_file, read_meta, ArchiveWriter};
+use super::archive::{list_archive_subdir, list_runs, read_archive_file, read_meta, ArchiveWriter};
 use super::ga::{EffectiveTunable, Event as GaEvent, FitnessCtx, GaParams, GaRun, ProgressSink};
 use super::loop_config::LoopConfig;
 use super::rule_pool::{build_pool, CandidateRuleInput};
 use super::struct_ga::{StructCtx, StructGaRun};
 
-use crate::{Attributes, TargetConfig, SharedState};
+use crate::{Attributes, SharedState, TargetConfig};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 全局状态（在 main.rs 中构造并放入 AppState）
@@ -94,7 +94,9 @@ pub struct StartRequest {
     pub scenarios: Option<Vec<crate::optimizer::ga::ScenarioSpec>>,
 }
 
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}
 
 #[derive(Debug, Deserialize)]
 pub struct TunableOverride {
@@ -117,7 +119,9 @@ pub struct GaParamsReq {
     pub fitness_dps_mode: bool,
 }
 
-fn default_fitness_dps_mode() -> bool { true }
+fn default_fitness_dps_mode() -> bool {
+    true
+}
 
 #[derive(Debug, Serialize)]
 pub struct StartResponse {
@@ -147,7 +151,11 @@ pub async fn start_handler(
     // 1. 独占锁：同时只允许一个运行
     let mut guard = opt.current.lock().await;
     if guard.is_some() {
-        return (StatusCode::CONFLICT, Json(err_body("已有正在运行的优化任务"))).into_response();
+        return (
+            StatusCode::CONFLICT,
+            Json(err_body("已有正在运行的优化任务")),
+        )
+            .into_response();
     }
 
     // Phase 3 分支：规则结构搜索
@@ -159,43 +167,72 @@ pub async fn start_handler(
     // 2. 分析宏
     let analyze_res = match extract_tunables(&req.macro_text) {
         Ok(r) => r,
-        Err(e) => return (StatusCode::BAD_REQUEST, Json(err_body(&format!("宏解析失败: {}", e)))).into_response(),
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(err_body(&format!("宏解析失败: {}", e))),
+            )
+                .into_response()
+        }
     };
     let all_tunables = analyze_res.params;
 
     // 3. 合并 overrides
-    let override_map: HashMap<String, &TunableOverride> =
-        req.tunable_overrides.iter().map(|o| (o.id.clone(), o)).collect();
+    let override_map: HashMap<String, &TunableOverride> = req
+        .tunable_overrides
+        .iter()
+        .map(|o| (o.id.clone(), o))
+        .collect();
     let mut enabled_tunables: Vec<EffectiveTunable> = Vec::new();
     for p in all_tunables.iter() {
         match override_map.get(&p.id) {
             Some(ov) if !ov.enabled => continue,
             Some(ov) => enabled_tunables.push(EffectiveTunable {
                 param: p.clone(),
-                min: ov.min, max: ov.max, step: ov.step.max(1e-6),
+                min: ov.min,
+                max: ov.max,
+                step: ov.step.max(1e-6),
             }),
             None => enabled_tunables.push(EffectiveTunable {
                 param: p.clone(),
-                min: p.suggested_min, max: p.suggested_max, step: p.suggested_step.max(1e-6),
+                min: p.suggested_min,
+                max: p.suggested_max,
+                step: p.suggested_step.max(1e-6),
             }),
         }
     }
     if enabled_tunables.is_empty() {
-        return (StatusCode::BAD_REQUEST, Json(err_body("至少要启用一个可调阈值"))).into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(err_body("至少要启用一个可调阈值")),
+        )
+            .into_response();
     }
 
     // 4. 再次解析宏作为 baseline MacroConfig
     let baseline_macro = match crate::macro_parser::parse_macro_text(&req.macro_text) {
         Ok(c) => c,
-        Err(e) => return (StatusCode::BAD_REQUEST, Json(err_body(&format!("宏解析失败: {}", e)))).into_response(),
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(err_body(&format!("宏解析失败: {}", e))),
+            )
+                .into_response()
+        }
     };
 
     // 5. GA 参数
     let mut ga_params = GaParams::default();
     if let Some(p) = req.ga_params {
-        if let Some(v) = p.pop_size { ga_params.pop_size = v.max(8); }
-        if let Some(v) = p.generations { ga_params.generations = v.max(1); }
-        if let Some(v) = p.top_n { ga_params.top_n = v.max(1); }
+        if let Some(v) = p.pop_size {
+            ga_params.pop_size = v.max(8);
+        }
+        if let Some(v) = p.generations {
+            ga_params.generations = v.max(1);
+        }
+        if let Some(v) = p.top_n {
+            ga_params.top_n = v.max(1);
+        }
         ga_params.fitness_dps_mode = p.fitness_dps_mode;
     }
 
@@ -227,7 +264,13 @@ pub async fn start_handler(
     // 8. 创建存档器 + 存入 baseline
     let mut archive = match ArchiveWriter::new(run_id.clone(), &meta, &req.base_loop) {
         Ok(a) => a,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(err_body(&format!("存档创建失败: {}", e)))).into_response(),
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(err_body(&format!("存档创建失败: {}", e))),
+            )
+                .into_response()
+        }
     };
 
     // 9. FitnessCtx
@@ -261,7 +304,10 @@ pub async fn start_handler(
 
     // 11. 广播 Started
     let tx = opt.broadcaster.clone();
-    let enabled_ids: Vec<String> = enabled_tunables.iter().map(|t| t.param.id.clone()).collect();
+    let enabled_ids: Vec<String> = enabled_tunables
+        .iter()
+        .map(|t| t.param.id.clone())
+        .collect();
     let _ = tx.send(GaEvent::Started {
         run_id: run_id.clone(),
         total_gens: ga_params.generations,
@@ -298,7 +344,9 @@ pub async fn start_handler(
         let (best_dps, gens_completed) = match result {
             Ok((_ind, best, gens)) => (best, gens),
             Err(_) => {
-                let _ = tx.send(GaEvent::Error { message: "GA 运行异常崩溃".into() });
+                let _ = tx.send(GaEvent::Error {
+                    message: "GA 运行异常崩溃".into(),
+                });
                 (0.0, 0)
             }
         };
@@ -314,38 +362,47 @@ pub async fn start_handler(
             handle.block_on(async {
                 let mut g = opt_state_clone.current.lock().await;
                 if let Some(r) = g.as_ref() {
-                    if r.run_id == run_id_clone { *g = None; }
+                    if r.run_id == run_id_clone {
+                        *g = None;
+                    }
                 }
             });
         } else {
             // 没有当前 tokio 运行时（spawn_blocking 场景外）：启动一个临时 current_thread runtime 清状态
-            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
             rt.block_on(async {
                 let mut g = opt_state_clone.current.lock().await;
                 if let Some(r) = g.as_ref() {
-                    if r.run_id == run_id_clone { *g = None; }
+                    if r.run_id == run_id_clone {
+                        *g = None;
+                    }
                 }
             });
         }
     });
 
-    let enabled_ids_resp: Vec<String> = enabled_tunables.iter().map(|t| t.param.id.clone()).collect();
+    let enabled_ids_resp: Vec<String> = enabled_tunables
+        .iter()
+        .map(|t| t.param.id.clone())
+        .collect();
     Json(StartResponse {
         run_id,
         n_params: enabled_tunables.len(),
         pop_size: ga_params.pop_size,
         generations: ga_params.generations,
         enabled_ids: enabled_ids_resp,
-    }).into_response()
+    })
+    .into_response()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 处理器：/api/optimizer/stop
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub async fn stop_handler(
-    State(shared): State<SharedState>,
-) -> impl IntoResponse {
+pub async fn stop_handler(State(shared): State<SharedState>) -> impl IntoResponse {
     let opt = shared.optimizer.clone();
     let guard = opt.current.lock().await;
     if let Some(r) = guard.as_ref() {
@@ -360,9 +417,7 @@ pub async fn stop_handler(
 // 处理器：/api/optimizer/status
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub async fn status_handler(
-    State(shared): State<SharedState>,
-) -> impl IntoResponse {
+pub async fn status_handler(State(shared): State<SharedState>) -> impl IntoResponse {
     let opt = shared.optimizer.clone();
     let guard = opt.current.lock().await;
     match guard.as_ref() {
@@ -372,7 +427,9 @@ pub async fn status_handler(
             total_gens: Some(r.total_gens),
         }),
         None => Json(StatusResponse {
-            running: false, run_id: None, total_gens: None,
+            running: false,
+            run_id: None,
+            total_gens: None,
         }),
     }
 }
@@ -386,16 +443,19 @@ pub async fn stream_handler(
 ) -> Sse<impl Stream<Item = Result<SseEvent, std::convert::Infallible>>> {
     let opt = shared.optimizer.clone();
     let rx = opt.broadcaster.subscribe();
-    let stream = tokio_stream::wrappers::BroadcastStream::new(rx)
-        .filter_map(|res: Result<GaEvent, _>| async move {
+    let stream = tokio_stream::wrappers::BroadcastStream::new(rx).filter_map(
+        |res: Result<GaEvent, _>| async move {
             match res {
                 Ok(ev) => {
                     let data = serde_json::to_string(&ev).unwrap_or_else(|_| "{}".into());
-                    Some(Ok::<_, std::convert::Infallible>(SseEvent::default().data(data)))
+                    Some(Ok::<_, std::convert::Infallible>(
+                        SseEvent::default().data(data),
+                    ))
                 }
                 Err(_) => None,
             }
-        });
+        },
+    );
     use futures_util::StreamExt;
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
@@ -411,7 +471,11 @@ pub async fn stream_handler(
 pub async fn list_runs_handler() -> Response {
     match list_runs() {
         Ok(ids) => Json(serde_json::json!({ "runs": ids })).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(err_body(&e.to_string()))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(err_body(&e.to_string())),
+        )
+            .into_response(),
     }
 }
 
@@ -427,7 +491,8 @@ pub async fn run_detail_handler(Path(id): Path<String>) -> Response {
         "meta": meta,
         "milestones": milestones,
         "topN": topn,
-    })).into_response()
+    }))
+    .into_response()
 }
 
 #[derive(Debug, Deserialize)]
@@ -435,15 +500,13 @@ pub struct FileQuery {
     pub path: String,
 }
 
-pub async fn run_file_handler(
-    Path(id): Path<String>,
-    Query(q): Query<FileQuery>,
-) -> Response {
+pub async fn run_file_handler(Path(id): Path<String>, Query(q): Query<FileQuery>) -> Response {
     match read_archive_file(&id, &q.path) {
         Ok(text) => (
             [(axum::http::header::CONTENT_TYPE, "application/json")],
             text,
-        ).into_response(),
+        )
+            .into_response(),
         Err(e) => (StatusCode::NOT_FOUND, Json(err_body(&e.to_string()))).into_response(),
     }
 }
@@ -468,8 +531,8 @@ fn new_run_id(prefix: &str) -> String {
 }
 
 // 复用 ga.rs 里的 fitness/EffectiveTunable（重导出避免循环依赖）
-pub use super::ga::EffectiveTunable as _ReexportEffective;
 pub use super::analyze::TunableParam as _ReexportTunable;
+pub use super::ga::EffectiveTunable as _ReexportEffective;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Phase 3：规则结构搜索 start handler
@@ -479,7 +542,11 @@ async fn start_struct_handler(shared: SharedState, req: StartRequest) -> Respons
     let opt = shared.optimizer.clone();
     let mut guard = opt.current.lock().await;
     if guard.is_some() {
-        return (StatusCode::CONFLICT, Json(err_body("已有正在运行的优化任务"))).into_response();
+        return (
+            StatusCode::CONFLICT,
+            Json(err_body("已有正在运行的优化任务")),
+        )
+            .into_response();
     }
 
     // 1. 构建规则池
@@ -492,18 +559,25 @@ async fn start_struct_handler(shared: SharedState, req: StartRequest) -> Respons
     let (param_keys, tunables) = StructCtx::build_param_table(&pool);
 
     // 3. 合并 overrides（按 tunable id 查找覆盖 min/max/step / 禁用）
-    let override_map: HashMap<String, &TunableOverride> =
-        req.tunable_overrides.iter().map(|o| (o.id.clone(), o)).collect();
+    let override_map: HashMap<String, &TunableOverride> = req
+        .tunable_overrides
+        .iter()
+        .map(|o| (o.id.clone(), o))
+        .collect();
     let mut keep_mask = Vec::with_capacity(tunables.len());
     let mut effective: Vec<EffectiveTunable> = Vec::new();
     let mut kept_keys: Vec<(String, usize)> = Vec::new();
     for (t, k) in tunables.iter().zip(param_keys.iter()) {
         match override_map.get(&t.param.id) {
-            Some(ov) if !ov.enabled => { keep_mask.push(false); }
+            Some(ov) if !ov.enabled => {
+                keep_mask.push(false);
+            }
             Some(ov) => {
                 effective.push(EffectiveTunable {
                     param: t.param.clone(),
-                    min: ov.min, max: ov.max, step: ov.step.max(1e-6),
+                    min: ov.min,
+                    max: ov.max,
+                    step: ov.step.max(1e-6),
                 });
                 kept_keys.push(k.clone());
                 keep_mask.push(true);
@@ -519,19 +593,31 @@ async fn start_struct_handler(shared: SharedState, req: StartRequest) -> Respons
     // 4. GA 参数
     let mut ga_params = GaParams::default();
     if let Some(p) = req.ga_params {
-        if let Some(v) = p.pop_size { ga_params.pop_size = v.max(8); }
-        if let Some(v) = p.generations { ga_params.generations = v.max(1); }
-        if let Some(v) = p.top_n { ga_params.top_n = v.max(1); }
+        if let Some(v) = p.pop_size {
+            ga_params.pop_size = v.max(8);
+        }
+        if let Some(v) = p.generations {
+            ga_params.generations = v.max(1);
+        }
+        if let Some(v) = p.top_n {
+            ga_params.top_n = v.max(1);
+        }
         ga_params.fitness_dps_mode = p.fitness_dps_mode;
     }
 
     let run_id = new_run_id("phase3");
 
     // 规则池摘要（写入 meta，前端 TopN 反查时可用）
-    let pool_summary: Vec<_> = pool.rules.values().map(|r| serde_json::json!({
-        "id": r.id, "name": r.name, "page": r.page,
-        "source": r.source, "locked": r.locked, "line_text": r.line_text,
-    })).collect();
+    let pool_summary: Vec<_> = pool
+        .rules
+        .values()
+        .map(|r| {
+            serde_json::json!({
+                "id": r.id, "name": r.name, "page": r.page,
+                "source": r.source, "locked": r.locked, "line_text": r.line_text,
+            })
+        })
+        .collect();
 
     let meta = serde_json::json!({
         "run_id": run_id,
@@ -559,7 +645,13 @@ async fn start_struct_handler(shared: SharedState, req: StartRequest) -> Respons
 
     let mut archive = match ArchiveWriter::new(run_id.clone(), &meta, &req.base_loop) {
         Ok(a) => a,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(err_body(&format!("存档创建失败: {}", e)))).into_response(),
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(err_body(&format!("存档创建失败: {}", e))),
+            )
+                .into_response()
+        }
     };
 
     // 5. StructCtx
@@ -607,7 +699,9 @@ async fn start_struct_handler(shared: SharedState, req: StartRequest) -> Respons
     tokio::task::spawn_blocking(move || {
         let sink: ProgressSink = {
             let tx = tx.clone();
-            Box::new(move |ev: GaEvent| { let _ = tx.send(ev); })
+            Box::new(move |ev: GaEvent| {
+                let _ = tx.send(ev);
+            })
         };
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -625,27 +719,39 @@ async fn start_struct_handler(shared: SharedState, req: StartRequest) -> Respons
         let (best_dps, gens_completed) = match result {
             Ok((_ind, best, gens)) => (best, gens),
             Err(_) => {
-                let _ = tx.send(GaEvent::Error { message: "GA 运行异常崩溃".into() });
+                let _ = tx.send(GaEvent::Error {
+                    message: "GA 运行异常崩溃".into(),
+                });
                 (0.0, 0)
             }
         };
 
-        let _ = tx.send(GaEvent::Done { best_dps, total_gens: gens_completed });
+        let _ = tx.send(GaEvent::Done {
+            best_dps,
+            total_gens: gens_completed,
+        });
 
         let rt = tokio::runtime::Handle::try_current();
         if let Ok(handle) = rt {
             handle.block_on(async {
                 let mut g = opt_state_clone.current.lock().await;
                 if let Some(r) = g.as_ref() {
-                    if r.run_id == run_id_clone { *g = None; }
+                    if r.run_id == run_id_clone {
+                        *g = None;
+                    }
                 }
             });
         } else {
-            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
             rt.block_on(async {
                 let mut g = opt_state_clone.current.lock().await;
                 if let Some(r) = g.as_ref() {
-                    if r.run_id == run_id_clone { *g = None; }
+                    if r.run_id == run_id_clone {
+                        *g = None;
+                    }
                 }
             });
         }
@@ -657,5 +763,6 @@ async fn start_struct_handler(shared: SharedState, req: StartRequest) -> Respons
         pop_size: ga_params.pop_size,
         generations: ga_params.generations,
         enabled_ids,
-    }).into_response()
+    })
+    .into_response()
 }

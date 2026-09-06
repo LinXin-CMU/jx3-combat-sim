@@ -5,33 +5,36 @@ pub mod team_buffs;
 
 pub mod buff_dun_fei;
 pub mod buff_dun_fei_delay;
-pub mod buff_xu_ruo_delay;
-pub mod buff_liu_xue;
-pub mod buff_zhan_jue;
 pub mod buff_han_jia;
 pub mod buff_lin_guang;
+pub mod buff_liu_xue;
+pub mod buff_xu_ruo_delay;
+pub mod buff_zhan_jue;
 
-use crate::{BUFF_DUN_FEI, BUFF_DUN_FEI_DELAY, BUFF_XU_RUO_DELAY, BUFF_LIU_XUE, BUFF_ZHAN_JUE, BUFF_HAN_JIA, BUFF_JIAN_TIE, BUFF_LIN_GUANG};
 use super::super::SkillScriptFn;
+use crate::{
+    BUFF_DUN_FEI, BUFF_DUN_FEI_DELAY, BUFF_HAN_JIA, BUFF_JIAN_TIE, BUFF_LIN_GUANG, BUFF_LIU_XUE,
+    BUFF_XU_RUO_DELAY, BUFF_ZHAN_JUE,
+};
 
 pub fn get_buff_on_tick(buff_id: u32) -> Option<SkillScriptFn> {
     match buff_id {
-        BUFF_DUN_FEI  => Some(buff_dun_fei::on_tick),
-        BUFF_LIU_XUE  => Some(buff_liu_xue::on_tick),
+        BUFF_DUN_FEI => Some(buff_dun_fei::on_tick),
+        BUFF_LIU_XUE => Some(buff_liu_xue::on_tick),
         BUFF_ZHAN_JUE => Some(buff_zhan_jue::on_tick),
-        BUFF_HAN_JIA  => Some(buff_han_jia::on_tick),
+        BUFF_HAN_JIA => Some(buff_han_jia::on_tick),
         _ => None,
     }
 }
 
 pub fn get_buff_on_expire(buff_id: u32) -> Option<SkillScriptFn> {
     match buff_id {
-        BUFF_DUN_FEI       => Some(buff_dun_fei::on_expire),
+        BUFF_DUN_FEI => Some(buff_dun_fei::on_expire),
         BUFF_DUN_FEI_DELAY => Some(buff_dun_fei_delay::on_expire),
-        BUFF_XU_RUO_DELAY  => Some(buff_xu_ruo_delay::on_expire),
-        BUFF_ZHAN_JUE      => Some(buff_zhan_jue::on_expire),
-        BUFF_HAN_JIA       => Some(buff_han_jia::on_expire),
-        BUFF_LIN_GUANG     => Some(buff_lin_guang::on_expire),
+        BUFF_XU_RUO_DELAY => Some(buff_xu_ruo_delay::on_expire),
+        BUFF_ZHAN_JUE => Some(buff_zhan_jue::on_expire),
+        BUFF_HAN_JIA => Some(buff_han_jia::on_expire),
+        BUFF_LIN_GUANG => Some(buff_lin_guang::on_expire),
         _ => None,
     }
 }

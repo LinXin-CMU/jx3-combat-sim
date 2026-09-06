@@ -1,5 +1,6 @@
 param(
   [int]$Port = 3005,
+  [string]$ExePath = '',
   [string]$ConfigPath = '',
   [string]$UserdataPath = '',
   [string]$KnowledgeRoot = '',
@@ -15,7 +16,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $backendRoot = Join-Path $repoRoot 'backend'
-$exe = Join-Path $backendRoot 'target\release\jx3-combat-sim.exe'
+$exe = if ($ExePath) { $ExePath } else { Join-Path $backendRoot 'target\release\jx3-combat-sim.exe' }
 if (-not $ConfigPath) { $ConfigPath = Join-Path $repoRoot 'agent.providers.toml' }
 if (-not $UserdataPath) { $UserdataPath = Join-Path $backendRoot 'userdata' }
 if (-not $KnowledgeRoot) {

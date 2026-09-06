@@ -1,0 +1,118 @@
+{
+  "schema_version": "agent-report-content/v1",
+  "summary": "你当前讨论的三段加速手动轴可以拆成双页宏：盾面页负责回怒与铺增益，刀面页在盾飞进入刀面后打出斩刀→血怒→绝刀×3→盾回。宏稿如下（未跑 A/B 前，怒气阈值与盾飞触发条件是基于布局位置的估算，见 limitations）。",
+  "findings": [
+    {
+      "title": "盾面页只做回怒与增益铺垫，绝刀不在盾面触发",
+      "explanation": "场景 0-4 是连续盾击，第 5 个操作是业火麟光，随后在 sequence:8 盾飞、sequence:9 斩刀。盾回事件 sequence:24 之后紧跟 sequence:25 阵云结晦、sequence:26 月照连营，说明盾回后进入回怒铺增益段，业火麟光在这种体态下无 GCD 且应尽快放。盾面页因此不需要包含任何绝刀/斩刀逻辑，它们由刀面页负责。",
+      "evidence_ids": [
+        "a5fb4d3bc7a713a828835d97a1c44e274cde1450",
+        "5e89b84362b493b39677c5cc842e5dfd90991aeb04c9bee6fcebae1fb10fc8c3",
+        "a2d261b520c65c62344294395cb38c9427d5d103d0519ac44b20750a10b67615"
+      ],
+      "metrics": [
+        {
+          "label": "盾回后相邻技能",
+          "value": "阵云结晦、月照连营",
+          "unit": "sequence",
+          "evidence_id": "5e89b84362b493b39677c5cc842e5dfd90991aeb04c9bee6fcebae1fb10fc8c3",
+          "json_pointer": "/result/matches/0/after"
+        },
+        {
+          "label": "手动轴总操作",
+          "value": 313,
+          "unit": "count",
+          "evidence_id": "a2d261b520c65c62344294395cb38c9427d5d103d0519ac44b20750a10b67615",
+          "json_pointer": "/rotation_input/manual_operations/length"
+        }
+      ]
+    },
+    {
+      "title": "刀面是斩刀先手、血怒衔接、三发 50 怒绝刀再由盾回收尾",
+      "explanation": "时间轴定位到的每轮刀面都是同一形态：斩刀命中获得狂绝 → 血怒补怒与增益 → 连续三发绝刀·50怒 → 盾回。绝刀·50怒在总伤害里占 33.28%，是这套轴伤害成立的绝对核心。狂绝未被消耗时，免费绝刀必须吃到最高档位，后续付费绝刀也要尽量落在 50 怒档，因此刀面页不能无条件无脑打绝刀。",
+      "evidence_ids": [
+        "483fef5184974b987f063c2b140b5c951618cbbc11d96e4b45355a208fd878cb",
+        "1480f14ff6d5641bdfe3b901f1fdaade7c425a81e9894fe5e75d72a685125374"
+      ],
+      "metrics": [
+        {
+          "label": "绝刀·50怒总次数",
+          "value": 80,
+          "unit": "count",
+          "evidence_id": "1480f14ff6d5641bdfe3b901f1fdaade7c425a81e9894fe5e75d72a685125374",
+          "json_pointer": "/rotation_cycles/absolute_knives_by_rage_cost/50怒"
+        },
+        {
+          "label": "绝刀·50怒伤害占比",
+          "value": 33.28,
+          "unit": "percent",
+          "evidence_id": "e0e154c81f0cc218fbb37a22081ccd555ff3c92dba8b84879dfc79b1486ea604",
+          "json_pointer": "/result/skills/12/damage_share"
+        },
+        {
+          "label": "斩刀后相邻技能",
+          "value": "血怒、绝刀·50怒",
+          "unit": "sequence",
+          "evidence_id": "483fef5184974b987f063c2b140b5c951618cbbc11d96e4b45355a208fd878cb",
+          "json_pointer": "/result/match_index_table/rows/0/local_sequence"
+        }
+      ]
+    },
+    {
+      "title": "知识库当前版本有可供比对的紫武一键宏",
+      "explanation": "知识检索返回了🔗暗影千机_分山紫武一键宏，其核心盾面语句是「/cast [buff:阵云结晦=2|bufftime:嗜血>8&buff:血怒·惊涌] 阵云结晦」与「/cast 盾击」「/cast rage>64&bufftime:嗜血」等。说明`rage>64`这类怒气条件是当前版本实战可用的触发形式。推荐在真正写宏时把免费绝刀和付费绝刀分别用狂绝/怒气条件区分，而不是只写一个无条件绝刀。",
+      "evidence_ids": [
+        "24a905adb8279548e26b8d1356fe2985e328a17d8a82bd00dc667b65f8bab992"
+      ],
+      "metrics": []
+    }
+  ],
+  "recommendations": [
+    {
+      "title": "盾面页只放回怒与增益，盾飞条件先行",
+      "rationale": "盾击、阵云结晦、月照连营、业火麟光都是盾面回怒/铺增益的动作。盾飞已足够怒气时离开盾面进入刀面，所以把它放在页首并用怒气阈值约束。业火麟光无 GCD，可在页内靠条件尽快释放，不占 GCD 空档。",
+      "evidence_ids": [
+        "5e89b84362b493b39677c5cc842e5dfd90991aeb04c9bee6fcebae1fb10fc8c3",
+        "24a905adb8279548e26b8d1356fe2985e328a17d8a82bd00dc667b65f8bab992"
+      ]
+    },
+    {
+      "title": "刀面页让斩刀先于绝刀，用狂绝驱动绝刀连打",
+      "rationale": "狂绝是免费绝刀的钥匙。斩刀放在最前面，在无狂绝时可打；有狂绝且怒气足够时打绝刀。血怒负责在绝刀前补足怒气与惊涌层数，让三发尽量都落在 50 怒档。盾回在三发后收尾，让体态回盾面供下一轮回怒。",
+      "evidence_ids": [
+        "483fef5184974b987f063c2b140b5c951618cbbc11d96e4b45355a208fd878cb",
+        "1480f14ff6d5641bdfe3b901f1fdaade7c425a81e9894fe5e75d72a685125374"
+      ]
+    },
+    {
+      "title": "提交后用同场景 A/B 锁怒气阈值",
+      "rationale": "手动轴刀面血怒前怒气普遍落在 50-90 之间，单纯用固定阈值可能过早或过晚转刀面。以这段手动轴为基准，分别验证 `rage>64&bufftime:嗜血中放盾飞`、连打 2/3 发绝刀再盾回，能确认宏循环的总时长与 DPS 与手动相差多少，再微调条件。",
+      "evidence_ids": [
+        "1480f14ff6d5641bdfe3b901f1fdaade7c425a81e9894fe5e75d72a685125374",
+        "e0e154c81f0cc218fbb37a22081ccd555ff3c92dba8b84879dfc79b1486ea604"
+      ]
+    }
+  ],
+  "rotation_changes": [
+    {
+      "change_type": "add_macro_page",
+      "edit_operation": "new_two_page_macro",
+      "target": "宏配置",
+      "current": "手动操作序列 313 条，双体态混排",
+      "proposed": "#page shield\n/cast [rage>64&bufftime:嗜血] 盾飞\n/cast 盾击\n/cast [buff:阵云结晦=2|bufftime:嗜血>8&buff:血怒·惊涌] 阵云结晦\n/cast 月照连营\n/cast 业火麟光\n\n#page blade\n/cast [nobuff:狂绝] 斩刀\n/cast [buff:狂绝&buff:血怒·惊涌] 绝刀\n/cast [buff:狂绝&buff:血怒·惊涌&rage>50] 绝刀\n/cast [buff:狂绝&buff:血怒·惊涌] 血怒\n/cast [rage<20] 盾回",
+      "rationale": "盾面页负责蓄怒铺增益并触发盾飞；刀面页以狂绝状态为优先条件打出斩刀与连续绝刀，绝刀在最高档位时伤害占比最高。盾回条件保留为低怒兜底，避免刀面结束后停滞。",
+      "evidence_ids": [
+        "a5fb4d3bc7a713a828835d97a1c44e274cde1450",
+        "483fef5184974b987f063c2b140b5c951618cbbc11d96e4b45355a208fd878cb",
+        "24a905adb8279548e26b8d1356fe2985e328a17d8a82bd00dc667b65f8bab992"
+      ]
+    }
+  ],
+  "limitations": [
+    "尚未在本场景执行宏的 A/B 模拟，`rage>64`、连发 3 发绝刀后盾回等条件仍是基于手动序列与知识库现成宏的经验估计，需要同场景运行后才能判定损耗。",
+    "实战页序以模拟器分页声明为准，游戏客户端若对分体态多页宏有额外限制，需要按客户端实际机制调整。",
+    "宏中 50 怒档与免费绝刀的具体持续判定依赖狂绝、嗜血的层数与剩余时间细节，本轮没有逐条展开 Buff 定义；差异可能引起不同位置的连打数量。",
+    "援戈与业火麟光在盾面的层数/冷却条件未纳入简化稿，长战斗中的覆盖与额外回怒会影响怒气阈值取值。"
+  ],
+  "refusal_reason": null
+}
