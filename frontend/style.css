@@ -1747,6 +1747,45 @@ body.sim-fullheight #page-sim .sim-timeline-panel[data-resized="1"] {
   filter: drop-shadow(0 1px 0 rgba(0,0,0,0.5));
 }
 
+/* 测试服分山劲暴怒：橙金刀刃自下向上充能，数值独立实时更新。 */
+.sim-berserk-column { width: 34px; gap: 1px; }
+/* updateBerserkValue 显示资源时清空 inline display，保持两条资源栏右端对齐。 */
+.sim-status-panel:has(.sim-berserk-column[style=""]) .sim-gcd-block-spacer { width: 36px; }
+.sim-berserk-bar {
+  position: relative;
+  width: 34px;
+  height: 31px;
+  flex-shrink: 0;
+  filter: drop-shadow(0 1px 1px rgba(0,0,0,0.8));
+}
+.sim-berserk-blade {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  display: block;
+  width: 34px;
+  height: 31px;
+}
+.sim-berserk-blade-empty { filter: grayscale(1) brightness(0.32); }
+.sim-berserk-fill {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  overflow: hidden;
+}
+.sim-berserk-fill.berserk-high {
+  filter: brightness(1.12) drop-shadow(0 0 2px rgba(255,192,39,0.55));
+}
+.sim-berserk-value {
+  font-size: 13px;
+  font-weight: normal;
+  background: none;
+  -webkit-text-fill-color: #c5e52d;
+  color: #c5e52d;
+  text-shadow: 0 0 3px rgba(190,225,39,0.3);
+}
+
 /* Buff 列表 */
 .sim-buff-list {
   display: flex;
@@ -1971,6 +2010,7 @@ body.sim-fullheight #page-sim .sim-timeline-panel[data-resized="1"] {
 /* 技能序列区域 */
 .sim-sequence-panel {
   margin-bottom: 0;
+  padding-bottom: 4px;
   flex-shrink: 1;
   height: 400px;
   overflow: hidden;
@@ -1985,39 +2025,43 @@ body.sim-fullheight #page-sim .sim-timeline-panel[data-resized="1"] {
    hover 触发条件：⚙ 自身、伪元素 hover-bridge（覆盖 ⚙ 到 body 间隙）、body 自身
    动画：opacity + translateY，方向 从下往上 */
 .seq-floating-toolbar {
-  position: absolute;
-  bottom: 4px;
-  left: 4px;
+  position: relative;
+  flex: 0 0 20px;
+  align-self: flex-start;
+  margin: 4px 4px 0;
   z-index: 10;                      /* 高于序列项角标（z-index 6）和插入指示器（z-index 5）*/
-  width: 18px;
-  height: 18px;                     /* 紧贴 ⚙ 字形，body 距离按视觉边界算 */
+  width: max-content;
+  height: 20px;
   font-family: var(--font-ui);
 }
 /* hover-bridge：⚙ 右侧 8px 透明区，覆盖到 body 的 2px gap */
 .seq-floating-toolbar::after {
   content: "";
   position: absolute;
-  left: 100%;
-  top: 0;
-  height: 100%;
-  width: 8px;
+  left: 0;
+  top: -8px;
+  height: 8px;
+  width: 100%;
   pointer-events: auto;
 }
 .seq-toolbar-handle {
-  width: 18px;
-  height: 18px;
-  border: none;
-  background: transparent;
-  color: var(--text-muted);
+  width: max-content;
+  height: 20px;
+  border: 1px solid var(--gold-dim);
+  background: var(--surface);
+  color: var(--gold);
   cursor: pointer;
-  font-size: 16px;
+  font-size: 11px;
   line-height: 1;
-  padding: 0;
+  padding: 0 4px;
   border-radius: 4px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  opacity: 0.7;
+  opacity: 1;
+  gap: 2px;
+  white-space: nowrap;
+  box-shadow: none;
   transition: opacity 0.15s, color 0.15s, transform 0.25s cubic-bezier(.4,.0,.2,1);
 }
 /* 展开态（hover 或 JS 设置的 .toolbar-open）：⚙ 高亮 + 旋转 */
@@ -2025,17 +2069,17 @@ body.sim-fullheight #page-sim .sim-timeline-panel[data-resized="1"] {
 .seq-floating-toolbar.toolbar-open .seq-toolbar-handle {
   opacity: 1;
   color: var(--gold);
-  transform: rotate(60deg);
+  border-color: var(--gold);
 }
 /* body：绝对定位浮在 ⚙ 右侧（left: 100% + 2px gap，bottom 对齐 ⚙ 底边）
    收回态：opacity 0 + translateX(-6) 左移半步、pointer-events none
    展开态：opacity 1 + translateX(0)、pointer-events auto */
 .seq-toolbar-body {
   position: absolute;
-  left: calc(100% + 2px);
-  bottom: 0;
+  left: 0;
+  bottom: calc(100% + 6px);
   display: flex;
-  flex-wrap: nowrap;            /* 单行展示，宽度按内容自动撑开 */
+  flex-wrap: wrap;            /* 单行展示，宽度按内容自动撑开 */
   align-items: center;
   gap: 6px;
   padding: 5px 8px;
@@ -2047,21 +2091,26 @@ body.sim-fullheight #page-sim .sim-timeline-panel[data-resized="1"] {
   box-shadow: 0 2px 8px rgba(0,0,0,0.18);
 
   opacity: 0;
+  visibility: hidden;
   transform: translateX(-6px);
   pointer-events: none;
   transition: opacity 0.18s ease, transform 0.22s cubic-bezier(.4,.0,.2,1);
 }
 /* 展开态（hover 任一区 或 JS 设置的 .toolbar-open 状态）：body 向右滑入 + 淡入 */
-.seq-floating-toolbar:hover .seq-toolbar-body,
-.seq-toolbar-body:hover,
 .seq-floating-toolbar.toolbar-open .seq-toolbar-body {
   opacity: 1;
+  visibility: visible;
   transform: translateX(0);
   pointer-events: auto;
 }
 .seq-toolbar-label {
   color: var(--text-muted);
   font-size: 11px;
+}
+.seq-toolbar-help {
+  max-width: min(300px, calc(100vw - 40px));
+  white-space: normal;
+  line-height: 1.6;
 }
 .seq-toolbar-divider {
   width: 1px;
@@ -2539,6 +2588,12 @@ body.light-theme .seq-select-popup-btn.primary { background: #c9a847; }
   vertical-align: baseline;
   background: rgba(var(--gold-rgb), 0.55);
   color: #fff;
+}
+
+/* 阵云释放前暴怒：复用怒气角标尺寸和位置，以紫色区分。 */
+.seq-berserk-chip {
+  background: #6d28d9;
+  color: #f3e8ff;
 }
 
 /* ── 序列块显示模式：text(默认) / icon / iconext ─────────────────────────
@@ -3251,6 +3306,15 @@ body.seq-helpers-off .seq-yuange-badge { display: none !important; }
 .talent-btn.disabled {
   opacity: .35;
   cursor: not-allowed;
+}
+
+.talent-core-requirement {
+  display: block;
+  margin-top: 3px;
+  font-size: 10px;
+  line-height: 1.2;
+  font-weight: normal;
+  opacity: 0.75;
 }
 
 .talent-tier-mixed .talent-options {
@@ -11068,3 +11132,6 @@ body.wizard-mode .container {
   outline-offset: -1px;
 }
 
+
+.seq-floating-toolbar button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.seq-toolbar-body button.seq-zoom-value { border: none; background: transparent; color: inherit; font-family: inherit; padding: 0; cursor: pointer; }

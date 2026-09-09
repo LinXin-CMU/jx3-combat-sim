@@ -41,6 +41,10 @@ pub struct InputState {
     #[serde(default)]
     pub rage: i32,
     #[serde(default)]
+    pub berserk_value: Option<i32>,
+    #[serde(default)]
+    pub block_value: Option<i32>,
+    #[serde(default)]
     pub stance: Stance,
     #[serde(default)]
     pub buffs: Vec<InputBuff>,
@@ -1237,6 +1241,11 @@ fn eval_cond<'a>(c: &MacroCondition, s: &Sample<'a>) -> bool {
     let st = s.state;
     match c {
         MacroCondition::Rage(op, v) => op.compare_i32(st.rage, *v),
+        MacroCondition::Energy(op, v) => {
+            // 快照仅为铁骨衣公开格挡值；分山劲隐藏的旧格挡资源恒为基础满值。
+            op.compare_i32(st.block_value.unwrap_or(100), *v)
+        }
+        MacroCondition::Berserk(op, v) => op.compare_i32(st.berserk_value.unwrap_or(0), *v),
         MacroCondition::Buff(n) => st.buffs.iter().any(|b| &b.name == n),
         MacroCondition::NoBuff(n) => !st.buffs.iter().any(|b| &b.name == n),
         MacroCondition::BuffTime(n, op, v) => st

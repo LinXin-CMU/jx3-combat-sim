@@ -239,6 +239,12 @@ fn macro_condition_ast(condition: &crate::macro_engine::MacroCondition) -> serde
         MacroCondition::Rage(op, value) => serde_json::json!({
             "kind": "rage", "operator": op.symbol(), "value": value
         }),
+        MacroCondition::Energy(op, value) => serde_json::json!({
+            "kind": "energy", "operator": op.symbol(), "value": value
+        }),
+        MacroCondition::Berserk(op, value) => serde_json::json!({
+            "kind": "sun", "operator": op.symbol(), "value": value
+        }),
         MacroCondition::Life(op, value) => serde_json::json!({
             "kind": "life", "operator": op.symbol(), "value": value
         }),

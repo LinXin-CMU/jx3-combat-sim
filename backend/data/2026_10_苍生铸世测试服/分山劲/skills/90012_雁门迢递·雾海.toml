@@ -1,0 +1,36 @@
+﻿id   = 90012
+name = "雁门迢递·雾海"
+icon = "https://icon.jx3box.com/icon/17159.png"
+description = "雾海寻龙·阵云三段 / 20尺突进 / +60%非侠 / 追加5段绝国"
+
+stance          = "not_wall"
+requires_talent = 30769
+
+[[cooldowns]]
+cd_id    = "gcd_1.5"
+duration = 1.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_1.0"
+duration = 1.0
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_0.5"
+duration = 0.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[ranks]]
+rank           = 1
+name           = "雁门迢递·雾海"
+icon = "https://icon.jx3box.com/icon/17159.png"
+requires_combo = "雾海_3"
+base_damage    = 124.5       # (120 + 129) / 2
+attack_coeff   = 2.25000
+weapon_coeff   = 1.0
+defense_ignore = 1.0
+# 5段绝国由脚本 emit

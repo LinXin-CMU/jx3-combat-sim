@@ -44,6 +44,10 @@ impl MacroAction {
 pub enum MacroCondition {
     // 自身资源
     Rage(CmpOp, i32),
+    /// energy：格挡值。
+    Energy(CmpOp, i32),
+    /// 苍生铸世分山劲「阵云结晦」暴怒值；与怒气独立。
+    Berserk(CmpOp, i32),
     Life(CmpOp, f64),
 
     // 自身 buff
@@ -196,6 +200,8 @@ impl MacroCondition {
     pub fn display_string(&self) -> String {
         match self {
             MacroCondition::Rage(op, v) => format!("rage{}{}", op.symbol(), v),
+            MacroCondition::Energy(op, v) => format!("energy{}{}", op.symbol(), v),
+            MacroCondition::Berserk(op, v) => format!("sun{}{}", op.symbol(), v),
             MacroCondition::Life(op, v) => format!("life{}{}", op.symbol(), v),
             MacroCondition::Buff(n) => format!("buff:{}", n),
             MacroCondition::NoBuff(n) => format!("nobuff:{}", n),

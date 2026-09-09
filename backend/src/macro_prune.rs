@@ -116,6 +116,8 @@ fn remove_leaf(c: &MacroCondition, path: &[char]) -> Option<MacroCondition> {
 fn clone_cond(c: &MacroCondition) -> MacroCondition {
     match c {
         MacroCondition::Rage(op, v) => MacroCondition::Rage(*op, *v),
+        MacroCondition::Energy(op, v) => MacroCondition::Energy(*op, *v),
+        MacroCondition::Berserk(op, v) => MacroCondition::Berserk(*op, *v),
         MacroCondition::Life(op, v) => MacroCondition::Life(*op, *v),
         MacroCondition::Buff(n) => MacroCondition::Buff(n.clone()),
         MacroCondition::NoBuff(n) => MacroCondition::NoBuff(n.clone()),
@@ -297,13 +299,15 @@ pub struct TightenCandidate {
 
 fn tighten_leaf(c: &MacroCondition) -> Vec<MacroCondition> {
     match c {
-        MacroCondition::Rage(op, v) => {
+        MacroCondition::Rage(op, v) | MacroCondition::Energy(op, v) => {
+            let is_energy = matches!(c, MacroCondition::Energy(..));
+            let max_value = if is_energy { 200 } else { 100 };
             let deltas = [5, 10, -5, -10];
             deltas
                 .iter()
                 .filter_map(|d| {
-                    let nv = v + d;
-                    if nv < 0 || nv > 100 || nv == *v {
+                    let nv = v.checked_add(*d)?;
+                    if nv < 0 || nv > max_value || nv == *v {
                         return None;
                     }
                     // 收紧 = 缩小匹配范围：GtEq/Gt → 增大阈值，Lt → 减小阈值
@@ -315,7 +319,11 @@ fn tighten_leaf(c: &MacroCondition) -> Vec<MacroCondition> {
                     if !is_tighter {
                         return None;
                     }
-                    Some(MacroCondition::Rage(*op, nv))
+                    Some(if is_energy {
+                        MacroCondition::Energy(*op, nv)
+                    } else {
+                        MacroCondition::Rage(*op, nv)
+                    })
                 })
                 .collect()
         }

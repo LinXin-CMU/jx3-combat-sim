@@ -1,0 +1,41 @@
+﻿id   = 13070
+name = "盾壁"
+
+icon = "https://icon.jx3box.com/icon/6334.png"
+# 生存技 / CD: 120秒
+# 每秒增加2%最大气血吸收盾，最多20%，持续8秒
+# 奇穴[过涯] 拥有吸收盾时每0.5秒对3尺内3目标造成伤害
+
+[[cooldowns]]
+cd_id    = "gcd_1.5"
+duration = 1.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_1.0"
+duration = 1.0
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "cd_盾壁"
+duration = 120.0
+mode     = "check_and_trigger"
+haste    = false
+
+[[ranks]]
+rank         = 1
+name         = "盾壁"
+icon = "https://icon.jx3box.com/icon/6334.png"
+base_damage  = 0
+attack_coeff = 0
+weapon_coeff = 0
+
+[[ranks]]
+rank         = 2
+name         = "盾壁·过涯每跳"
+icon = "https://icon.jx3box.com/icon/6334.png"
+base_damage  = 54.5       # (54 + 55) / 2
+attack_coeff = 0.8250
+weapon_coeff = 0

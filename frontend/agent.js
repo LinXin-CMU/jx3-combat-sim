@@ -981,7 +981,7 @@
             details.appendChild(element('p', '', '当前结果没有该状态快照，请运行完整模拟后查看。'));
             return;
           }
-          details.appendChild(element('p', '', `怒气 ${snapshot.rage}${skill.rageCost != null ? ` · 本次消耗 ${skill.rageCost}` : ''}${snapshot.block_value != null ? ` · 盾值 ${snapshot.block_value}` : ''}`));
+          details.appendChild(element('p', '', `怒气 ${snapshot.rage}${skill.rageCost != null ? ` · 本次消耗 ${skill.rageCost}` : ''}${snapshot.block_value != null ? ` · 盾值 ${snapshot.block_value}` : ''}${snapshot.berserk_value != null ? ` · 暴怒 ${snapshot.berserk_value}${snapshot.max_berserk_value != null ? ' / ' + snapshot.max_berserk_value : ''}` : ''}`));
           const damage = [['命中', skill.damageNormal], ['会心', skill.damageCrit], ['期望', skill.damage]]
             .filter(([, value]) => value != null).map(([label, value]) => `${label} ${typeof formatDamage === 'function' ? formatDamage(Number(value)) : Number(value).toLocaleString('zh-CN', {maximumFractionDigits: 0})}`);
           if (damage.length) details.appendChild(element('p', '', `伤害：${damage.join(' / ')}`));

@@ -1,0 +1,42 @@
+﻿id   = 13046
+name = "盾猛"
+icon = "https://icon.jx3box.com/icon/6324.png"
+description = "擎盾 / CD15秒 / 12尺突进 / 回复15怒气 / 击倒目标3秒"
+
+# 姿态: 擎盾 / 距离: 12尺突进 / CD: 15秒 / GCD: 1.5秒
+# 回复 15 怒气 / 将目标击倒 3秒
+
+stance    = "shield"
+rage_gain = 15
+
+[[cooldowns]]
+cd_id    = "gcd_1.5"
+duration = 1.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_1.0"
+duration = 1.0
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_0.5"
+duration = 0.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "cd_盾猛"
+duration = 15.0
+mode     = "check_and_trigger"
+haste    = false
+
+[[ranks]]
+rank         = 1
+name         = "盾猛"
+icon = "https://icon.jx3box.com/icon/6324.png"
+base_damage  = 136.0      # (130 + 142) / 2
+attack_coeff = 6.26875
+weapon_coeff = 1.0

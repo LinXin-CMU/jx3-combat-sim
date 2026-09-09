@@ -1,3 +1,4 @@
+mod berserk;
 use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
 use axum::{
     extract::{Json, State},
@@ -31,6 +32,9 @@ pub mod optimizer;
 pub mod rl;
 mod router;
 mod scripts;
+#[cfg(test)]
+#[path = "../tests/cangsheng/resource_state.rs"]
+mod cangsheng_tests;
 
 pub use buffs::*;
 pub use equip_effects::*;
@@ -431,6 +435,8 @@ pub enum GameVersion {
     AnYingQianJi,
     /// 暗影千机·测试服（基于 2026.04，独立目录供实验）
     AnYingQianJiTest,
+    /// 苍生铸世测试服（2026.10），独立分山劲规则集。
+    CangShengZhuShiTest,
 }
 impl Default for GameVersion {
     fn default() -> Self {
@@ -628,11 +634,12 @@ fn data_path(dev: &str, release: &str) -> &'static str {
 }
 
 /// 版本目录名（对齐 `scripts/v{version}/` 命名风格）。
-/// 测试服枚举保留用于旧存档兼容；测试服归档未作为可选版本公开，运行时回退正式服数据。
+/// 暗影千机测试服枚举只保留旧存档兼容；苍生铸世测试服使用独立目录。
 pub fn version_dir_name(v: GameVersion) -> &'static str {
     match v {
         GameVersion::ShanHaiYuanLiu => "2025_10_山海源流",
         GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest => "2026_04_暗影千机",
+        GameVersion::CangShengZhuShiTest => "2026_10_苍生铸世测试服",
     }
 }
 
@@ -1542,10 +1549,15 @@ fn calc_stats_cached(
 /// 绝刀：分发到 jue_dao 脚本（按当前怒气段）
 /// 血誓：触发时由 xue_shi 脚本通过 emit_with_recipes 直接绑事件（不走这里）
 pub fn compute_runtime_recipes(skill: &SkillSpec, player: &Player) -> Vec<u32> {
-    match skill.skill_id {
+    let mut result = match skill.skill_id {
         13055 => scripts::jue_dao_runtime_recipes(player),
         _ => Vec::new(),
+    };
+    if player.version == GameVersion::CangShengZhuShiTest && player.mount == Mount::FenShanJin {
+        result.extend(scripts::v2026_10_CangShengZhuShiTest::runtime_recipes(skill, player));
+        result.extend(scripts::v2026_10_CangShengZhuShiTest::skills::zhen_yun::runtime_recipes(skill, player));
     }
+    result
 }
 
 /// 抓取 DoT 快照（斩刀添加/刷新流血时调用）
@@ -1614,7 +1626,12 @@ fn calc_damage_with_snapshot(
         (spec.base_damage + spec.attack_coeff * snap.panel_attack + spec.weapon_coeff * weapon_dmg)
             .floor() as i64;
 
-    // Step 2: 流血无秘籍增伤（spec.skill_id=8249 不在任何秘籍 skill_filter）
+    // Step 2: 与 calc_damage 使用同一秘籍字段及取整位置。
+    // 旧版流血无此秘籍；测试服角斗场的流血增伤按实时场状态生效。
+    let damage_pct = recipes.iter().map(|r| r.damage_pct).sum::<f64>();
+    if damage_pct != 0.0 {
+        damage = ((damage as f64) * (1.0 + damage_pct)).floor() as i64;
+    }
     // Step 3: 破防实时、无双快照
     if rt_live.overcome != 0.0 {
         damage = ((damage as f64) * (1.0 + rt_live.overcome)).floor() as i64;
@@ -2152,6 +2169,10 @@ pub struct EventState {
     pub rage: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub block_value: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub berserk_value: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_berserk_value: Option<i32>,
     pub stance: Stance,
     pub buffs: Vec<EventBuff>,
     pub target_buffs: Vec<EventBuff>,
@@ -2217,6 +2238,12 @@ pub struct SimulateResponse {
     /// 格挡值上限（铁骨衣基础 100；坚韧奇穴 13363 → 200）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_block_value: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub berserk_value: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_berserk_value: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub berserk_transactions: Option<Vec<berserk::BerserkTransaction>>,
     pub timeline: Vec<CastEvent>,
     pub buffs: Vec<BuffSnapshot>,
     /// 当前状态下可施展的技能名列表
@@ -2420,6 +2447,13 @@ pub struct Player {
     pub rage_spent_current: u32,
     /// 当前格挡值 (0~100)（铁骨衣资源；寒啸千军等消耗）
     pub block_value: i32,
+    /// 苍生铸世测试服分山劲专属暴怒资源。
+    pub berserk_value: i32,
+    /// 已推进到的整秒，保证多入口推进不会重复回复暴怒。
+    berserk_regen_second: u64,
+    /// 最近一次阵云一段消耗量，供本次伤害及后续段读取。
+    pub zhen_yun_berserk_cost: u32,
+    pub berserk_transactions: Vec<berserk::BerserkTransaction>,
     /// 肃驾累积消耗怒气余量（每满 11 兑 1 格挡值）
     pub rage_spent_accumulator: u32,
     /// 脚本请求的时间推进量（秒），由 simulate 循环在脚本执行后处理
@@ -2582,6 +2616,11 @@ impl Player {
         talents: Vec<u32>,
         recipes: Vec<u32>,
     ) -> Self {
+        let talents = if version == GameVersion::CangShengZhuShiTest && mount == Mount::FenShanJin {
+            scripts::v2026_10_CangShengZhuShiTest::normalize_talents(talents)
+        } else {
+            talents
+        };
         let mut p = Player {
             mount,
             version,
@@ -2607,6 +2646,10 @@ impl Player {
             rage_gained_current: 0,
             rage_spent_current: 0,
             block_value: 100,
+            berserk_value: 0,
+            berserk_regen_second: 0,
+            zhen_yun_berserk_cost: 0,
+            berserk_transactions: Vec::new(),
             rage_spent_accumulator: 0,
             pending_advance: 0.0,
             last_rage_cost: 0,
@@ -2640,6 +2683,10 @@ impl Player {
         p.set_stance(Stance::Shield);
         // 按奇穴计算格挡值上限（坚韧 13363 给 +100 max）并初始化为满值
         p.block_value = p.max_block_value();
+        // 测试服默认完成脱战准备；120 点需要 12 秒脱战回复。
+        if p.uses_berserk() {
+            p.set_berserk_value(p.max_berserk_value());
+        }
         p
     }
 
@@ -2651,6 +2698,58 @@ impl Player {
         } else {
             base
         }
+    }
+
+    pub fn uses_berserk(&self) -> bool {
+        self.version == GameVersion::CangShengZhuShiTest
+            && self.mount == Mount::FenShanJin
+            && self.has_talent(30769)
+    }
+
+    pub fn max_berserk_value(&self) -> i32 {
+        if self.uses_berserk() { 120 } else { 0 }
+    }
+
+    pub fn set_berserk_value(&mut self, value: i32) {
+        self.berserk_value = value.clamp(0, self.max_berserk_value());
+        self.bump_decision_gen();
+    }
+
+    pub fn add_berserk_value(&mut self, delta: i32) {
+        self.add_berserk_value_from(delta, "暴怒调整");
+    }
+
+    /// 战斗时钟按整秒回复；不归以外的流派不在战斗中自动回复。
+    fn advance_berserk_to(&mut self, time: f64) {
+        if !self.uses_berserk() || !self.has_talent(91001) || !time.is_finite() {
+            return;
+        }
+        let second = time.max(0.0).floor() as u64;
+        if second > self.berserk_regen_second {
+            if self.lite_mode {
+                let gain = (second - self.berserk_regen_second).min(60) as i32 * 2;
+                self.add_berserk_value_from(gain, "不归每秒回复");
+            } else {
+                for tick in self.berserk_regen_second + 1..=second {
+                    self.apply_berserk_delta(2, "不归每秒回复", tick as f64);
+                }
+            }
+            self.berserk_regen_second = second;
+        }
+    }
+
+    pub fn effective_berserk_cost(&self, skill: &SkillSpec) -> u32 {
+        if self.uses_berserk() && skill.skill_id == 30769 {
+            if self.berserk_value >= 100 { 100 } else { 50 }
+        } else {
+            0
+        }
+    }
+
+    /// 宏及手动轴先按母招式选 rank，再解析 combo_follow；后续段不再消耗暴怒。
+    fn is_zhen_yun_followup_entry(&self, skill: &SkillSpec) -> bool {
+        self.uses_berserk() && skill.skill_id == 30769 && self.has_talent(91002)
+            && (self.has_buff(combo_buff_id("阵云_2")) || self.has_buff(combo_buff_id("阵云_3")))
     }
 
     /// 通用装备查询：返回 position 上的 equip_id（未装备 = 0）。
@@ -2804,6 +2903,12 @@ impl Player {
                 *next = t;
             }
         };
+
+        if self.uses_berserk() && self.has_talent(91001)
+            && self.berserk_value < self.max_berserk_value()
+        {
+            consider(&mut next, cur.floor() + 1.0);
+        }
 
         // 1. 所有 active_cds 的到期时刻
         for &t in self.active_cds.values() {
@@ -3906,6 +4011,12 @@ impl Player {
         charges
     }
 
+    /// 盾压两本减调息秘籍各减少一秒；同一秘籍只计一次。
+    fn dunya_cooldown_duration(&self, base: f64) -> f64 {
+        (base - u32::from(self.has_recipe(4005)) as f64
+            - u32::from(self.has_recipe(4006)) as f64).max(0.0)
+    }
+
     /// 计算奇穴/秘籍修正后的实际充能 CD
     pub fn effective_charge_cd(&self, skill: &SkillSpec) -> f64 {
         let mut cd = skill.charge_cd;
@@ -3923,9 +4034,16 @@ impl Player {
             }
             // 血怒：JJC 套 4 件套 atSetEquipmentRecipe 1929 — 充能 CD -3 秒
             13040 => {
+                if self.uses_berserk() && self.has_talent(91001) {
+                    cd -= 3.0;
+                }
                 if self.count_equip_in(crate::equip_effects::CY_JJC_SET_IDS) >= 4 {
                     cd -= 3.0;
                 }
+            }
+            13050 if self.version == GameVersion::CangShengZhuShiTest
+                && self.mount == Mount::FenShanJin && self.has_talent(22897) => {
+                cd -= 6.0;
             }
             _ => {}
         }
@@ -3951,6 +4069,16 @@ impl Player {
     }
 
     pub fn can_cast(&self, skill: &SkillSpec) -> bool {
+        if self.version == GameVersion::CangShengZhuShiTest {
+            if !scripts::v2026_10_CangShengZhuShiTest::skill_allowed(self, skill) {
+                return false;
+            }
+            if self.berserk_value < self.effective_berserk_cost(skill) as i32
+                && !self.is_zhen_yun_followup_entry(skill)
+            {
+                return false;
+            }
+        }
         fn is_zhan_jue_allowed(id: u32) -> bool {
             matches!(id, 13052 | 13053 | 13054 | 13055 | 90001 | 90002)
         }
@@ -4026,6 +4154,15 @@ impl Player {
 
     /// 返回技能不可释放的原因（可释放返回 None）
     pub fn reject_reason(&self, skill: &SkillSpec) -> Option<String> {
+        if self.version == GameVersion::CangShengZhuShiTest {
+            if !scripts::v2026_10_CangShengZhuShiTest::skill_allowed(self, skill) {
+                return Some("需要苍生铸世分山劲对应核心奇穴及连招奇穴".into());
+            }
+            let cost = self.effective_berserk_cost(skill);
+            if self.berserk_value < cost as i32 && !self.is_zhen_yun_followup_entry(skill) {
+                return Some(format!("暴怒值不足（需要{}，当前{}）", cost, self.berserk_value));
+            }
+        }
         if skill.skill_id == 90001 {
             let has = self.active_buffs.iter().any(|b| {
                 if b.expires_at != 0.0 && b.expires_at <= self.current_time {
@@ -4120,6 +4257,11 @@ impl Player {
     // ── 施展后状态更新 ──
 
     pub fn apply_cast_effects(&mut self, skill: &SkillSpec) {
+        let berserk_cost = self.effective_berserk_cost(skill);
+        if berserk_cost > 0 {
+            self.zhen_yun_berserk_cost = berserk_cost;
+            self.add_berserk_value_from(-(berserk_cost as i32), "阵云结晦消耗");
+        }
         // 怒气
         let eff_cost = self.effective_rage_cost(skill);
         self.last_rage_cost = eff_cost;
@@ -4318,6 +4460,7 @@ impl Player {
         }
 
         // 卷雪刀（平砍）：在区间 (last_swing_time, to_time] 内按当前加速产卡
+        self.advance_berserk_to(to_time);
         events.extend(scripts::juan_xue_process_swings(self, to_time));
         // 坚铁/寒甲 期望分布推进 + 同步合成 buff 层数
         self.advance_expectation();
@@ -4626,7 +4769,12 @@ impl Player {
                 // 盾压 CD 特殊处理：有 DunyaCdState 时用期望剩余 CD 而非原始到期时间
                 if cd.cd_id == "cd_盾压" {
                     if let Some(ref d) = self.dunya_cd {
-                        let dunya_ready = self.current_time + d.cd_remain / FRAMES_PER_SEC as f64;
+                        // 预计施放时刻可能已前移，但期望模型尚未推进到该时刻。
+                        // cd_remain 以 last_frame 为基准，不能再从 current_time 整段等待。
+                        let elapsed = (self.current_time * FRAMES_PER_SEC as f64).round()
+                            - d.last_frame as f64;
+                        let remaining = (d.cd_remain - elapsed.max(0.0)).max(0.0);
+                        let dunya_ready = self.current_time + remaining / FRAMES_PER_SEC as f64;
                         if dunya_ready > earliest {
                             earliest = dunya_ready;
                         }
@@ -4718,7 +4866,20 @@ impl Player {
             if skill.max_charges > 0 && cd.cd_id.starts_with("cd_") {
                 continue;
             }
-            let frames = sec_to_frames(cd.duration);
+            let duration = if skill.skill_id == 13045 && cd.cd_id == "cd_盾压" {
+                self.dunya_cooldown_duration(cd.duration)
+            } else if self.version == GameVersion::CangShengZhuShiTest
+                && self.mount == Mount::FenShanJin
+            {
+                match cd.cd_id.as_str() {
+                    "cd_盾猛" if self.has_talent(13414) => (cd.duration - 3.0).max(0.0),
+                    "cd_闪刀" if self.has_buff(91903) => 0.0,
+                    _ => cd.duration,
+                }
+            } else {
+                cd.duration
+            };
+            let frames = sec_to_frames(duration);
             let actual = if cd.haste {
                 get_actual_frames(frames, self.effective_haste_level())
             } else {
@@ -5813,6 +5974,19 @@ fn snapshot_event_state(player: &Player) -> EventState {
         (30769, "阵云结晦", 2, 30.0),
     ];
     for &(sid, name, max_ch, cd) in charge_info {
+        let cd = if player.version == GameVersion::CangShengZhuShiTest {
+            match sid {
+                13047 => 4.0,
+                13040 => 25.0
+                    - if player.uses_berserk() && player.has_talent(91001) { 3.0 } else { 0.0 }
+                    - if player.count_equip_in(crate::equip_effects::CY_JJC_SET_IDS) >= 4 { 3.0 } else { 0.0 },
+                13050 => if player.has_talent(22897) { 12.0 } else { 18.0 },
+                30769 => continue, // 新版已无充能或独立 CD。
+                _ => cd,
+            }
+        } else {
+            cd
+        };
         if let Some(&(raw_ch, raw_next)) = player.charges.get(&sid) {
             // 时间推进：和 get_charges/charge_remaining 相同逻辑
             let mut ch = raw_ch;
@@ -5844,6 +6018,8 @@ fn snapshot_event_state(player: &Player) -> EventState {
     EventState {
         rage: player.rage,
         block_value,
+        berserk_value: player.uses_berserk().then_some(player.berserk_value),
+        max_berserk_value: player.uses_berserk().then_some(player.max_berserk_value()),
         stance: player.stance(),
         buffs,
         target_buffs,
@@ -6836,8 +7012,14 @@ async fn skill_damage(
         .iter()
         .map(|s| {
             let base_name = s.name.split('·').next().unwrap_or(&s.name);
-            let recipes =
-                collect_recipes_indexed(&player, s.skill_id, base_name, &[], recipes_table);
+            let runtime_recipes = if player.version == GameVersion::CangShengZhuShiTest {
+                compute_runtime_recipes(s, &player)
+            } else {
+                Vec::new()
+            };
+            let recipes = collect_recipes_indexed(
+                &player, s.skill_id, base_name, &runtime_recipes, recipes_table,
+            );
             // 奇穴/加速 动态覆盖 attack_coeff
             if let Some(coeff) = scripts::override_attack_coeff(&player, s) {
                 let mut s2 = s.clone();
@@ -6897,12 +7079,13 @@ fn version_label(v: GameVersion) -> &'static str {
         GameVersion::ShanHaiYuanLiu => "山海源流（2025.10）",
         GameVersion::AnYingQianJi => "暗影千机（2026.04）",
         GameVersion::AnYingQianJiTest => "暗影千机·测试服（归档兼容）",
+        GameVersion::CangShengZhuShiTest => "苍生铸世·测试服（2026.10）",
     }
 }
 
-/// UI 暴露的正式服版本列表。
+/// UI 暴露的版本列表；测试服使用独立目录，默认仍为暗影千机。
 fn all_versions() -> Vec<GameVersion> {
-    vec![GameVersion::AnYingQianJi, GameVersion::ShanHaiYuanLiu]
+    vec![GameVersion::CangShengZhuShiTest, GameVersion::AnYingQianJi, GameVersion::ShanHaiYuanLiu]
 }
 
 fn all_mounts() -> Vec<Mount> {
@@ -7201,7 +7384,7 @@ fn simulate_core(
     if let Some(rage) = req.initial_rage {
         player.set_rage(rage);
     }
-    player.experimental = req.experimental;
+    player.experimental = req.experimental && cur_version != GameVersion::CangShengZhuShiTest;
     player.lite_mode = req.lite;
     // 装备清单：脚本通过 player.equip_id_at("PRIMARY_WEAPON") 等查询；
     // set_equipped 同步维护 equipped_values 索引（O(1) has_enchant）
@@ -7228,9 +7411,7 @@ fn simulate_core(
     }
     // 盾压 CD 期望重置（仅铁骨衣）
     if player.mount == Mount::TieGuYi {
-        let cd_frames = 192u32
-            - if player.has_recipe(4005) { 16 } else { 0 }
-            - if player.has_recipe(4006) { 16 } else { 0 };
+        let cd_frames = sec_to_frames(player.dunya_cooldown_duration(12.0));
         let extra_prob = if player.has_recipe(4007) { 0.05 } else { 0.0 }
             + if player.has_recipe(4008) { 0.05 } else { 0.0 };
         player.dunya_cd = Some(DunyaCdState {
@@ -8545,6 +8726,8 @@ fn simulate_core(
         skill_count,
         stance: player.stance(),
         rage: player.rage,
+        berserk_value: player.uses_berserk().then_some(player.berserk_value),
+        max_berserk_value: player.uses_berserk().then_some(player.max_berserk_value()),
         block_value: if player.mount == Mount::TieGuYi {
             Some(player.block_value)
         } else {
@@ -8555,6 +8738,7 @@ fn simulate_core(
         } else {
             None
         },
+        berserk_transactions: (player.uses_berserk() && !req.lite).then(|| player.berserk_transactions.clone()),
         timeline,
         buffs,
         available_skills,
@@ -11813,7 +11997,7 @@ async fn main() {
         return;
     }
 
-    // 默认：暗影千机（2026.04）+ 分山劲（当前最新版本，排序里也是第一个）；
+    // 默认：暗影千机（2026.04）+ 分山劲；独立测试服不改变正式服默认值。
     // 若该用户存过心法（进程隔离回收重建场景）则恢复，避免回收后重置回默认。
     let (version, mount) =
         load_mount_state().unwrap_or((GameVersion::AnYingQianJi, Mount::FenShanJin));

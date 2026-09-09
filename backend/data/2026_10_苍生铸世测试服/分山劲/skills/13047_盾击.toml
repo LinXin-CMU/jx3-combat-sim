@@ -1,0 +1,64 @@
+﻿id   = 13047
+name = "盾击"
+icon = "https://icon.jx3box.com/icon/6339.png"
+description = "擎盾 / 充能3层4秒 / 回复10怒气 / 无视50%防御 / 降低盾飞2秒调息"
+
+# 姿态: 擎盾 / 距离: 4尺 / 充能: 3层，4秒 / GCD: 1秒
+# 回复 10 怒气 / 无视目标 50% 外功防御等级 / 降低[盾飞] 2秒调息
+
+stance      = "shield"
+rage_gain   = 10
+max_charges = 3
+charge_cd   = 4.0
+
+[[cooldowns]]
+cd_id    = "gcd_1.0"
+duration = 1.0
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_0.5"
+duration = 0.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_1.5"
+duration = 1.5
+mode     = "check_only"
+haste    = true
+
+
+[[ranks]]
+rank           = 1
+name           = "盾击·一段"
+icon = "https://icon.jx3box.com/icon/6339.png"
+base_damage    = 109.0      # (104 + 114) / 2
+attack_coeff   = 1.91875
+weapon_coeff   = 1.0
+defense_ignore = 0.5
+grants_combo   = "盾击_2"
+combo_duration = 24          # 1.5秒 = 24帧 (BUFF 8254)
+
+[[ranks]]
+rank           = 2
+name           = "盾击·二段"
+icon = "https://icon.jx3box.com/icon/6339.png"
+base_damage    = 218.0      # (208 + 228) / 2
+attack_coeff   = 1.91875
+weapon_coeff   = 1.0
+defense_ignore = 0.5
+requires_combo = "盾击_2"
+grants_combo   = "盾击_3"
+combo_duration = 24          # 1.5秒 = 24帧 (BUFF 8255)
+
+[[ranks]]
+rank           = 3
+name           = "盾击·三段"
+icon = "https://icon.jx3box.com/icon/6339.png"
+base_damage    = 327.5      # (312 + 343) / 2
+attack_coeff   = 1.91875
+weapon_coeff   = 1.0
+defense_ignore = 0.5
+requires_combo = "盾击_3"

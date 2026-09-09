@@ -1659,7 +1659,8 @@ fn inspect_timeline_events_schema() -> Value {
                 "description": "定位已知 ev 编号；返回 operation_number 可直接用于手动序列修改。"},
             "selector": {
                 "type": "string",
-                "enum": ["rage_cap", "rage_overflow", "gcd_gap", "cooldown_wait", "skill", "time"]
+                "description": "普通怒气用 rage_overflow；暴怒值 sun 用 berserk_overflow。berserk_cap 仅表示变动后达到上限，不代表实际溢出。暴怒查询返回独立整秒/施放资源流水，使用 start_match 分页。",
+                "enum": ["rage_cap", "rage_overflow", "berserk_cap", "berserk_overflow", "gcd_gap", "cooldown_wait", "skill", "time"]
             },
             "skill_name": {"type": ["string", "null"], "minLength": 1, "maxLength": 64},
             "time_seconds": {"type": ["number", "null"], "minimum": 0},

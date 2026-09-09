@@ -3164,6 +3164,9 @@ fn compact_timeline_event_view(event: &Value) -> Value {
         "gcd_seconds",
         "cooldown_wait_seconds",
         "rage_delta",
+        "berserk_before",
+        "berserk_after",
+        "max_berserk_value",
         "rage_before",
         "rage_after",
         "rage_overflow",
@@ -3198,6 +3201,9 @@ fn compact_timeline_context_event(event: &Value) -> Value {
         "operation_number",
         "stance_before",
         "stance_after",
+        "berserk_before",
+        "berserk_after",
+        "max_berserk_value",
         "rage_before",
         "rage_after",
         "event_number",
@@ -3291,6 +3297,12 @@ fn timeline_metric_catalog(result: &Value) -> Value {
         ("怒气采样总数", "/rage/sample_count"),
         ("实际怒气溢出事件", "/rage/overflow_events"),
         ("实际溢出怒气", "/rage/overflow_total"),
+        ("实际暴怒溢出事件", "/berserk/overflow_events"),
+        ("实际溢出暴怒", "/berserk/overflow_total"),
+        ("暴怒上限", "/berserk/cap"),
+        ("尝试产生暴怒", "/berserk/generated_before_cap"),
+        ("实际获得暴怒", "/berserk/gained_after_cap"),
+        ("实际消耗暴怒", "/berserk/spent"),
         ("尝试产生怒气", "/rage/generated_before_cap"),
         ("实际获得怒气", "/rage/gained_after_cap"),
         ("实际消耗怒气", "/rage/spent"),
@@ -3373,6 +3385,9 @@ fn compact_result_facts(result: Option<&Value>) -> Value {
         "rotation_cycles",
         "macro_line_stats",
         "rage",
+        "berserk",
+        "berserk_events",
+        "limitations",
         "stance",
         "selection",
         "results",
@@ -3419,6 +3434,7 @@ fn compact_result_facts(result: Option<&Value>) -> Value {
     restore_compact_timeline_match_index(&Value::Object(result.clone()), &mut facts);
     restore_compact_timeline_windows(&Value::Object(result.clone()), &mut facts);
     restore_compact_rotation_matches(&Value::Object(result.clone()), &mut facts);
+    if let Some(events) = result.get("berserk_events") { facts["berserk_events"] = events.clone(); }
     facts
 }
 
@@ -3474,7 +3490,10 @@ fn restore_compact_timeline_match_index(source: &Value, target: &mut Value) {
                 "skill_name",
                 "macro_page",
                 "macro_line",
-                "rage_before",
+                "berserk_before",
+        "berserk_after",
+        "max_berserk_value",
+        "rage_before",
                 "rage_after",
                 "rage_cost",
                 "rage_overflow",
@@ -3528,7 +3547,10 @@ fn restore_compact_timeline_windows(source: &Value, target: &mut Value) {
             "macro_page",
             "macro_line",
             "rage_delta",
-            "rage_before",
+            "berserk_before",
+        "berserk_after",
+        "max_berserk_value",
+        "rage_before",
             "rage_after",
             "rage_overflow",
             "rage_generated",
@@ -3547,6 +3569,9 @@ fn restore_compact_timeline_windows(source: &Value, target: &mut Value) {
             }
         }
         for (source_key, target_key) in [
+            ("/state_before/berserk_value", "berserk_before"),
+            ("/state_after/berserk_value", "berserk_after"),
+            ("/state_before/max_berserk_value", "max_berserk_value"),
             ("/state_before/rage", "rage_before"),
             ("/state_after/rage", "rage_after"),
             ("/state_before/stance", "stance_before"),
@@ -3818,6 +3843,20 @@ fn shrink_model_evidence_item(item: &Value, max_bytes: usize) -> Value {
     if model_json_bytes(item) <= max_bytes {
         return item.clone();
     }
+    // 暴怒流水按独立资源事件分页。预算不足时回退分页游标，不能静默丢掉中间事件。
+    if item.pointer("/result/berserk_events").and_then(Value::as_array).is_some_and(|events| !events.is_empty()) {
+        let mut compact = item.clone();
+        loop {
+            if model_json_bytes(&compact) <= max_bytes { return compact; }
+            let events = compact.pointer_mut("/result/berserk_events").and_then(Value::as_array_mut).unwrap();
+            if events.is_empty() { break; }
+            events.pop();
+            let count = events.len() as u64;
+            let start = compact.pointer("/result/start_match").and_then(Value::as_u64).unwrap_or(0);
+            compact["result"]["next_start_match"] = Value::from(start + count);
+            compact["result"]["resource_events_truncated"] = Value::Bool(true);
+        }
+    }
     if item.get("tool_name").and_then(Value::as_str) == Some("inspect_timeline_events") {
         let mut compact = table_compact_timeline_item(item);
         let indexed_events = item.pointer("/result/match_index").and_then(Value::as_array).into_iter().flatten()
@@ -3949,6 +3988,9 @@ fn compact_timeline_event_index_result(result: Option<&Value>) -> Value {
         .map(compact_timeline_event_view)
         .collect::<Vec<_>>();
     serde_json::json!({
+        "berserk": result.get("berserk"),
+        "berserk_events": result.get("berserk_events"),
+        "limitations": result.get("limitations"),
         "selector": result.get("selector"),
         "total_matches": result.get("total_matches"),
         "match_index": match_index,
@@ -8944,3 +8986,7 @@ mod tests {
         (root, index)
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/cangsheng/agent_berserk_projection.rs"]
+mod berserk_projection_tests;

@@ -5,10 +5,12 @@
 //! Buff 脚本同样按版本分发。
 //!
 //! 2025.10 山海源流和 2026.04 暗影千机均保留独立脚本。
-//! 测试服枚举仅用于旧存档兼容，运行时回退到 2026.04 正式服脚本。
+//! AnYingQianJiTest 仅用于旧存档兼容，回退 2026.04 正式服；
+//! CangShengZhuShiTest 使用 2026.10 独立副本。
 
 pub mod v2025_10_ShanHaiYuanLiu;
 pub mod v2026_04_AnYingQianJi;
+pub mod v2026_10_CangShengZhuShiTest;
 
 use crate::{BuffDef, GameVersion, Player, ScriptEmitter, SkillSpec};
 
@@ -24,6 +26,9 @@ pub fn get_buff_def(player: &Player, buff_id: u32) -> Option<&'static BuffDef> {
         GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest => {
             v2026_04_AnYingQianJi::buffs::defs::get_buff_def(buff_id)
         }
+        GameVersion::CangShengZhuShiTest => {
+            v2026_10_CangShengZhuShiTest::buffs::defs::get_buff_def(buff_id)
+        }
     }
 }
 
@@ -33,6 +38,9 @@ pub fn get_buff_def_by_version(version: GameVersion, buff_id: u32) -> Option<&'s
         GameVersion::ShanHaiYuanLiu => v2025_10_ShanHaiYuanLiu::buffs::defs::get_buff_def(buff_id),
         GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest => {
             v2026_04_AnYingQianJi::buffs::defs::get_buff_def(buff_id)
+        }
+        GameVersion::CangShengZhuShiTest => {
+            v2026_10_CangShengZhuShiTest::buffs::defs::get_buff_def(buff_id)
         }
     }
 }
@@ -44,6 +52,9 @@ pub fn all_buff_defs_by_version(version: GameVersion) -> Vec<&'static BuffDef> {
         GameVersion::ShanHaiYuanLiu => v2025_10_ShanHaiYuanLiu::buffs::defs::all_buff_defs(),
         GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest => {
             v2026_04_AnYingQianJi::buffs::defs::all_buff_defs()
+        }
+        GameVersion::CangShengZhuShiTest => {
+            v2026_10_CangShengZhuShiTest::buffs::defs::all_buff_defs()
         }
     }
 }
@@ -188,6 +199,9 @@ fn get_skill_script(player: &Player, skill_id: u32) -> Option<SkillScriptFn> {
         GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest => {
             v2026_04_AnYingQianJi::skills::get_skill_script(skill_id)
         }
+        GameVersion::CangShengZhuShiTest => {
+            v2026_10_CangShengZhuShiTest::skills::get_skill_script(skill_id)
+        }
     }
 }
 
@@ -215,6 +229,9 @@ pub fn get_buff_on_tick(player: &Player, buff_id: u32) -> Option<SkillScriptFn> 
         GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest => {
             v2026_04_AnYingQianJi::buffs::get_buff_on_tick(buff_id)
         }
+        GameVersion::CangShengZhuShiTest => {
+            v2026_10_CangShengZhuShiTest::buffs::get_buff_on_tick(buff_id)
+        }
     }
 }
 
@@ -223,6 +240,9 @@ pub fn get_buff_on_expire(player: &Player, buff_id: u32) -> Option<SkillScriptFn
         GameVersion::ShanHaiYuanLiu => v2025_10_ShanHaiYuanLiu::buffs::get_buff_on_expire(buff_id),
         GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest => {
             v2026_04_AnYingQianJi::buffs::get_buff_on_expire(buff_id)
+        }
+        GameVersion::CangShengZhuShiTest => {
+            v2026_10_CangShengZhuShiTest::buffs::get_buff_on_expire(buff_id)
         }
     }
 }
@@ -233,6 +253,9 @@ pub fn get_buff_on_remove(player: &Player, buff_id: u32) -> Option<SkillScriptFn
         GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest => {
             v2026_04_AnYingQianJi::buffs::get_buff_on_remove(buff_id)
         }
+        GameVersion::CangShengZhuShiTest => {
+            v2026_10_CangShengZhuShiTest::buffs::get_buff_on_remove(buff_id)
+        }
     }
 }
 
@@ -241,6 +264,15 @@ pub fn get_buff_on_remove(player: &Player, buff_id: u32) -> Option<SkillScriptFn
 /// 动态覆盖 attack_coeff（卷雪刀按加速、卷云按奇穴等）
 /// 返回 None 表示不覆盖，使用 TOML 原值
 pub fn override_attack_coeff(player: &Player, spec: &SkillSpec) -> Option<f64> {
+    if player.uses_berserk() {
+        use v2026_10_CangShengZhuShiTest::skills;
+        match spec.skill_id {
+            30769 => return skills::zhen_yun::override_attack_coeff(player),
+            30855 => return skills::yue_zhao::override_attack_coeff(player),
+            30856 => return skills::yan_men::override_attack_coeff(player),
+            _ => {}
+        }
+    }
     match spec.skill_id {
         // 卷雪刀（平砍）：按当前加速实时算
         13039 => Some(juan_xue_attack_coeff(player)),
@@ -265,6 +297,9 @@ pub fn juan_xue_attack_coeff(player: &Player) -> f64 {
         GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest => {
             v2026_04_AnYingQianJi::skills::juan_xue_attack_coeff(haste)
         }
+        GameVersion::CangShengZhuShiTest => {
+            v2026_10_CangShengZhuShiTest::skills::juan_xue_attack_coeff(haste)
+        }
     }
 }
 
@@ -276,6 +311,9 @@ pub fn juan_xue_process_swings(player: &mut Player, to_time: f64) -> Vec<crate::
         }
         GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest => {
             v2026_04_AnYingQianJi::skills::juan_xue_process_swings(player, to_time)
+        }
+        GameVersion::CangShengZhuShiTest => {
+            v2026_10_CangShengZhuShiTest::skills::juan_xue_process_swings(player, to_time)
         }
     }
 }
@@ -289,6 +327,9 @@ pub fn jue_dao_runtime_recipes(player: &Player) -> Vec<u32> {
         GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest => {
             v2026_04_AnYingQianJi::skills::jue_dao_runtime_recipes(player)
         }
+        GameVersion::CangShengZhuShiTest => {
+            v2026_10_CangShengZhuShiTest::skills::jue_dao_runtime_recipes(player)
+        }
     }
 }
 
@@ -300,6 +341,9 @@ pub fn jue_dao_effective_rage_cost(player: &Player, skill: &SkillSpec) -> u32 {
         }
         GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest => {
             v2026_04_AnYingQianJi::skills::jue_dao_effective_rage_cost(player, skill)
+        }
+        GameVersion::CangShengZhuShiTest => {
+            v2026_10_CangShengZhuShiTest::skills::jue_dao_effective_rage_cost(player, skill)
         }
     }
 }
@@ -313,6 +357,9 @@ pub fn dun_dang_effective_rage_cost(player: &Player) -> u32 {
         GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest => {
             v2026_04_AnYingQianJi::skills::dun_dang::effective_rage_cost(player)
         }
+        GameVersion::CangShengZhuShiTest => {
+            v2026_10_CangShengZhuShiTest::skills::dun_dang::effective_rage_cost(player)
+        }
     }
 }
 
@@ -322,6 +369,9 @@ pub fn on_battle_start(player: &mut Player) {
         GameVersion::ShanHaiYuanLiu => v2025_10_ShanHaiYuanLiu::buffs::on_battle_start(player),
         GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest => {
             v2026_04_AnYingQianJi::buffs::on_battle_start(player)
+        }
+        GameVersion::CangShengZhuShiTest => {
+            v2026_10_CangShengZhuShiTest::buffs::on_battle_start(player)
         }
     }
 }
@@ -333,6 +383,9 @@ pub fn on_player_hit(player: &mut Player, t: f64) -> Vec<crate::CastEvent> {
         GameVersion::ShanHaiYuanLiu => v2025_10_ShanHaiYuanLiu::on_hit::on_player_hit(player, t),
         GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest => {
             v2026_04_AnYingQianJi::on_hit::on_player_hit(player, t)
+        }
+        GameVersion::CangShengZhuShiTest => {
+            v2026_10_CangShengZhuShiTest::on_hit::on_player_hit(player, t)
         }
     }
 }

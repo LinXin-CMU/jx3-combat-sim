@@ -275,6 +275,8 @@ fn clone_condition(c: &crate::macro_engine::MacroCondition) -> crate::macro_engi
     use crate::macro_engine::MacroCondition::*;
     match c {
         Rage(op, v) => Rage(*op, *v),
+        Energy(op, v) => Energy(*op, *v),
+        Berserk(op, v) => Berserk(*op, *v),
         Life(op, v) => Life(*op, *v),
         Buff(n) => Buff(n.clone()),
         NoBuff(n) => NoBuff(n.clone()),

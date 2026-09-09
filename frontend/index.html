@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>剑网3 苍云PVE循环模拟器</title>
   <link rel="icon" href="favicon.ico" type="image/x-icon">
-  <link rel="stylesheet" href="style.css?v=20260902-prompts1">
+  <link rel="stylesheet" href="style.css?v=20260908-toolbar-position2">
   <link rel="stylesheet" href="agent.css?v=20260906-macropages1">
 </head>
 <body>
@@ -615,13 +615,13 @@
               <div class="eq-range">
                 <div class="eq-range-track">
                   <div class="eq-range-fill" id="wzc_pk_range_fill"></div>
-                  <input type="range" id="wzc_pk_min_level" min="22000" max="44000" step="100" value="35000">
-                  <input type="range" id="wzc_pk_max_level" min="22000" max="44000" step="100" value="44000">
+                  <input type="range" id="wzc_pk_min_level" min="0" max="1500" step="1" value="0">
+                  <input type="range" id="wzc_pk_max_level" min="0" max="1500" step="1" value="1500">
                 </div>
                 <div class="eq-range-vals">
-                  <span id="wzc_pk_min_level_val">35000</span>
+                  <span id="wzc_pk_min_level_val">0</span>
                   <span>~</span>
-                  <span id="wzc_pk_max_level_val">44000</span>
+                  <span id="wzc_pk_max_level_val">1500</span>
                 </div>
               </div>
               <button class="sim-btn wzc-mini-btn" id="wzc_pk_filter_all" title="激活所有筛选 chip（门派/心法/属性/战斗/类型）">全选</button>
@@ -720,13 +720,13 @@
               <div class="eq-range">
                 <div class="eq-range-track">
                   <div class="eq-range-fill" id="wzc_fm_range_fill"></div>
-                  <input type="range" id="wzc_fm_min_level" min="22000" max="44000" step="100" value="35000">
-                  <input type="range" id="wzc_fm_max_level" min="22000" max="44000" step="100" value="44000">
+                  <input type="range" id="wzc_fm_min_level" min="0" max="1500" step="1" value="0">
+                  <input type="range" id="wzc_fm_max_level" min="0" max="1500" step="1" value="1500">
                 </div>
                 <div class="eq-range-vals">
-                  <span id="wzc_fm_min_level_val">35000</span>
+                  <span id="wzc_fm_min_level_val">0</span>
                   <span>~</span>
-                  <span id="wzc_fm_max_level_val">44000</span>
+                  <span id="wzc_fm_max_level_val">1500</span>
                 </div>
               </div>
             </div>
@@ -1802,6 +1802,41 @@
               </div>
               <span class="sim-block-value" id="sim_block_value">100</span>
             </div>
+            <div class="sim-block-column sim-berserk-column" id="sim_berserk_row" style="display:none" role="meter" aria-label="暴怒值" aria-valuemin="0" aria-valuemax="120" aria-valuenow="120" title="暴怒值：120 / 120">
+              <div class="sim-berserk-bar" aria-hidden="true">
+                <svg class="sim-berserk-blade sim-berserk-blade-empty" viewBox="0 0 64 58" focusable="false">
+                  <defs>
+                    <linearGradient id="sim-berserk-blade-gold" x1="0" y1="0" x2="0.7" y2="1">
+                      <stop offset="0" stop-color="#fff9a2"/>
+                      <stop offset="0.4" stop-color="#f9cb35"/>
+                      <stop offset="0.72" stop-color="#ee971b"/>
+                      <stop offset="1" stop-color="#b64a0c"/>
+                    </linearGradient>
+                    <linearGradient id="sim-berserk-blade-edge" x1="0" y1="1" x2="0.7" y2="0">
+                      <stop offset="0" stop-color="#ffb927"/>
+                      <stop offset="0.45" stop-color="#fff098"/>
+                      <stop offset="1" stop-color="#fffbc2"/>
+                    </linearGradient>
+                    <symbol id="sim-berserk-blade-art" viewBox="0 0 64 58">
+                      <g stroke="#704309" stroke-width="1.2" stroke-linejoin="round">
+                        <path d="M7 49 27 29 31 19 38 24 47 29 25 49Z" fill="url(#sim-berserk-blade-gold)"/>
+                        <path d="M7 49 28 36 39 26 45 29 25 47Z" fill="#f8a725"/>
+                        <path d="M8 49 25 47 43 30 47 29 26 51 7 51Z" fill="url(#sim-berserk-blade-edge)"/>
+                        <path d="M29 28 31 13 35 22 37 5 42 21 46 22 52 10 53 3 57 20 53 26 60 30 47 31 38 27Z" fill="url(#sim-berserk-blade-gold)"/>
+                      </g>
+                      <path d="M32 23 36 25 38 14 41 23 48 25 54 15 52 25 56 28 46 27 38 25Z" fill="#fff37d"/>
+                      <path d="M12 47 27 40 35 32 31 40 24 46Z" fill="#ffe179"/>
+                      <path d="M14 47 24 47 37 34 26 49 10 50Z" fill="#d65b0b" opacity="0.75"/>
+                    </symbol>
+                  </defs>
+                  <use href="#sim-berserk-blade-art"/>
+                </svg>
+                <div class="sim-berserk-fill" id="sim_berserk_fill" style="height:100%">
+                  <svg class="sim-berserk-blade" viewBox="0 0 64 58" focusable="false"><use href="#sim-berserk-blade-art"/></svg>
+                </div>
+              </div>
+              <span class="sim-block-value sim-berserk-value" id="sim_berserk_value">120</span>
+            </div>
           </div>
           <div class="sim-status-item">
             <div class="sim-buff-header">
@@ -1831,7 +1866,7 @@
               <div class="sim-gcd-particles"></div>
             </div>
             <span class="sim-gcd-value" id="sim_gcd_value">0s</span>
-            <!-- 铁骨衣模式占位：与怒气行盾牌列 (22px + 10px gap) 对齐，让两条进度条等宽 -->
+            <!-- 格挡 / 暴怒资源占位：与怒气行盾牌列 (22px + 10px gap) 对齐 -->
             <span class="sim-gcd-block-spacer" id="sim_gcd_block_spacer" style="display:none"></span>
           </div>
           <!-- 坚铁/寒甲 期望传播状态（仅启用时显示） -->
@@ -1897,32 +1932,32 @@
             </div>
             <!-- 左下角浮动工具栏：序列块显示模式 + 释放时间 + 缩放（hover 展开，不挤压序列） -->
             <div class="seq-floating-toolbar" id="seq_float_toolbar">
-              <button type="button" class="seq-toolbar-handle" id="seq_toolbar_toggle" title="序列显示设置" aria-label="序列显示设置">⚙</button>
-              <div class="seq-toolbar-body">
+              <button type="button" class="seq-toolbar-handle" id="seq_toolbar_toggle" title="调整序列的显示方式、辅助信息和大小。悬停展开，点击保持展开；点击空白处或按 Esc 收起。" aria-label="序列显示设置" aria-expanded="false" aria-controls="seq_toolbar_options"><span aria-hidden="true">⚙</span> 显示</button>
+              <div class="seq-toolbar-body" id="seq_toolbar_options" role="group" aria-label="序列显示选项">
                 <span class="seq-toolbar-label">显示</span>
                 <div class="seq-mode-seg" id="seq_mode_seg_inline">
-                  <button type="button" class="seq-mode-seg-btn" data-mode="text">文字</button>
-                  <button type="button" class="seq-mode-seg-btn" data-mode="icon">图标</button>
+                  <button type="button" class="seq-mode-seg-btn" data-mode="text" title="用文字显示技能名称，适合阅读和检查技能顺序。">文字</button>
+                  <button type="button" class="seq-mode-seg-btn" data-mode="icon" title="用技能图标显示序列；可选择图标下方显示技能名、释放时间，或不显示文字。">图标</button>
                 </div>
                 <!-- 图标模式下额外显示：底部小字内容 = 技能名 / 时间 -->
                 <span class="seq-toolbar-divider seq-icon-only"></span>
                 <span class="seq-toolbar-label seq-icon-only">图标显示</span>
                 <div class="seq-mode-seg seq-icon-label-seg seq-icon-only" id="seq_icon_label_seg_inline">
-                  <button type="button" class="seq-mode-seg-btn" data-label="name">技能名</button>
-                  <button type="button" class="seq-mode-seg-btn" data-label="time">时间</button>
-                  <button type="button" class="seq-mode-seg-btn" data-label="none">不显示</button>
+                  <button type="button" class="seq-mode-seg-btn" data-label="name" title="在图标下方显示技能名；开启辅助信息时，还会显示怒气或阵云释放前的暴怒值。">技能名</button>
+                  <button type="button" class="seq-mode-seg-btn" data-label="time" title="在图标下方显示技能释放时间，单位为秒，从战斗开始计算；此模式不显示名称旁的资源角标。">时间</button>
+                  <button type="button" class="seq-mode-seg-btn" data-label="none" title="只显示技能图标，隐藏下方的技能名、释放时间和名称旁的资源角标。">不显示</button>
                 </div>
                 <span class="seq-toolbar-divider"></span>
                 <span class="seq-toolbar-label">辅助信息</span>
-                <button type="button" class="settings-toggle seq-toolbar-toggle" id="seq_helpers_toggle_inline" data-toggle="seq-helpers" role="switch" aria-checked="false">
+                <button type="button" class="settings-toggle seq-toolbar-toggle" id="seq_helpers_toggle_inline" data-toggle="seq-helpers" role="switch" aria-checked="false" aria-label="显示序列辅助信息" title="显示释放前怒气、援戈层数和血怒覆盖提示。测试服阵云第一段以紫色显示释放前暴怒值，月照、雁门不显示暴怒。资源数字需使用文字或图标下方技能名模式。">
                   <span class="settings-toggle-knob"></span>
                 </button>
                 <span class="seq-toolbar-divider"></span>
                 <span class="seq-toolbar-label">缩放</span>
                 <div class="seq-zoom-controls" title="缩放序列技能块">
-                  <button type="button" class="seq-zoom-btn" id="seq_zoom_out" title="缩小">−</button>
-                  <span class="seq-zoom-value" id="seq_zoom_value" title="点击重置到 100%">100%</span>
-                  <button type="button" class="seq-zoom-btn" id="seq_zoom_in" title="放大">+</button>
+                  <button type="button" class="seq-zoom-btn" id="seq_zoom_out" title="缩小序列技能块，在同一行容纳更多技能。" aria-label="缩小序列">−</button>
+                  <button type="button" class="seq-zoom-value" id="seq_zoom_value" title="当前序列缩放比例；点击恢复到 100%。" aria-label="恢复序列缩放到百分之百">100%</button>
+                  <button type="button" class="seq-zoom-btn" id="seq_zoom_in" title="放大序列技能块，更容易查看图标和角标。" aria-label="放大序列">+</button>
                 </div>
               </div>
             </div>
@@ -2600,13 +2635,13 @@
               <div class="eq-range">
                 <div class="eq-range-track">
                   <div class="eq-range-fill" id="eq_range_fill"></div>
-                  <input type="range" id="eq_min_level" min="22000" max="44000" step="100" value="22000">
-                  <input type="range" id="eq_max_level" min="22000" max="44000" step="100" value="44000">
+                  <input type="range" id="eq_min_level" min="0" max="1500" step="1" value="0">
+                  <input type="range" id="eq_max_level" min="0" max="1500" step="1" value="1500">
                 </div>
                 <div class="eq-range-vals">
-                  <span id="eq_min_level_val">22000</span>
+                  <span id="eq_min_level_val">0</span>
                   <span>~</span>
-                  <span id="eq_max_level_val">44000</span>
+                  <span id="eq_max_level_val">1500</span>
                 </div>
               </div>
               <button class="sim-btn eq-mini-btn" id="eq_filter_reset">重置</button>
@@ -2801,7 +2836,7 @@
       s.onload = next; s.onerror = next;
       document.body.appendChild(s);
     }
-    var SCRIPTS = ['state.js', 'app.js?v=20260904-axisrefs1', 'agent.js?v=20260906-markdown-lists1'];
+    var SCRIPTS = ['state.js', 'app.js?v=20260908-toolbar-position2', 'agent.js?v=20260908-equip1'];
     var go = function () { loadSeq(SCRIPTS); };
     try {
       fetch('/api/settings', { cache: 'no-store' })

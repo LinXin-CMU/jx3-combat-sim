@@ -1,0 +1,42 @@
+id   = 30855
+name = "月照连营"
+icon = "https://icon.jx3box.com/icon/17158.png"
+description = "神威：阵云结晦二段 / 90秒内可施展 / 按首段50或100暴怒采用6.7125或11.725攻击系数"
+
+# 阵云结晦二段 / 8尺253°扇形5目标 / GCD: 1.5秒
+# 测试服公告未包含回复普通怒气。
+# 无视100%外功防御；不沿用旧版非侠士+200%。
+
+stance          = "not_wall"
+rage_gain       = 0
+requires_talent = 91002
+
+[[cooldowns]]
+cd_id    = "gcd_1.5"
+duration = 1.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_1.0"
+duration = 1.0
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_0.5"
+duration = 0.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[ranks]]
+rank           = 1
+name           = "月照连营"
+icon = "https://icon.jx3box.com/icon/17158.png"
+requires_combo = "阵云_2"
+grants_combo   = "阵云_3"
+combo_duration = 1440        # 90秒 = 1440帧
+base_damage    = 97.5      # (96 + 99) / 2
+attack_coeff   = 6.7125 # 首段50暴怒；首段100暴怒为11.725。
+weapon_coeff   = 1.0
+defense_ignore = 1.0

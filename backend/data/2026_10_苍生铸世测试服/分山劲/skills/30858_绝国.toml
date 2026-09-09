@@ -1,0 +1,17 @@
+id   = 30858
+name = "绝国"
+passive = true
+description = "雁门迢递追加的绝国伤害（5段，系数由脚本按长驱万里层数动态覆盖）"
+
+# attack_coeff 为占位值，实际由 yan_men_whl.rs 脚本根据消耗的长驱万里层数覆盖：
+#   1~15层: stacks × 0.19375
+#   16~45层: stacks × 0.3875
+requires_talent = 30769
+
+[[ranks]]
+rank           = 1
+name           = "绝国"
+base_damage    = 7.0
+attack_coeff   = 0.19375     # 占位：1层最低值
+weapon_coeff   = 1.0
+defense_ignore = 1.0

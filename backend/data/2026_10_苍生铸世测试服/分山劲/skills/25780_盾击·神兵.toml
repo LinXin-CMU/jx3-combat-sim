@@ -1,0 +1,14 @@
+id   = 25780
+name = "盾击·神兵"
+passive = true
+description = "天下宏愿装备特效：盾击额外触发的少量伤害（1024 制累计 prob=307）"
+
+# 触发段：dun_ji.rs 在盾击释放时按 1024 制累计；触发时 em.emit("盾击·神兵", 25780, t)
+# 数据：游戏内伤害 20~22；attack_coeff 0.31250；weapon_coeff 1.0
+
+[[ranks]]
+rank         = 1
+name         = "盾击·神兵"
+base_damage  = 21.0          # (20 + 22) / 2
+attack_coeff = 0.31250
+weapon_coeff = 1.0

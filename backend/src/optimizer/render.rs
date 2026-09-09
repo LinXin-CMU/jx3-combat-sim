@@ -166,7 +166,7 @@ fn set_nth_leaf(cond: &mut MacroCondition, target: usize, counter: &mut usize, v
             }
             set_nth_leaf(b, target, counter, v)
         }
-        Rage(_, val) => {
+        Rage(_, val) | Energy(_, val) => {
             if *counter == target {
                 *val = v.round() as i32;
                 return true;

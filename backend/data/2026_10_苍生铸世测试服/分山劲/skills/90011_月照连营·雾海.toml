@@ -1,0 +1,37 @@
+﻿id   = 90011
+name = "月照连营·雾海"
+icon = "https://icon.jx3box.com/icon/17158.png"
+description = "雾海寻龙·阵云二段 / 8尺253°扇���5目标 / +60%非侠"
+
+stance          = "not_wall"
+requires_talent = 30769
+
+[[cooldowns]]
+cd_id    = "gcd_1.5"
+duration = 1.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_1.0"
+duration = 1.0
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_0.5"
+duration = 0.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[ranks]]
+rank           = 1
+name           = "月照连营·雾海"
+icon = "https://icon.jx3box.com/icon/17158.png"
+requires_combo = "雾海_2"
+grants_combo   = "雾海_3"
+combo_duration = 96          # 6秒 = 96帧
+base_damage    = 97.5        # (96 + 99) / 2
+attack_coeff   = 1.87500
+weapon_coeff   = 1.0
+defense_ignore = 1.0

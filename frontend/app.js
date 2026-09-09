@@ -121,6 +121,7 @@ async function fetchCurrentMount() {
         if (gcdBlockSpacer) gcdBlockSpacer.style.display = 'none';
       }
     }
+    updateBerserkValue(isBerserkEnabled() ? 120 : null, 120);
     // 铁骨衣显示拆招值、招架等级、体质输入框
     const isTieguyi = currentMount.mount === 'TieGuYi';
     document.querySelectorAll('.parry-field, .vitality-field').forEach(el => {
@@ -720,8 +721,36 @@ const talentSelection = {
   mixed: [],
 };
 
+function isCangShengFenShan() {
+  return currentMount.version === 'CangShengZhuShiTest' && currentMount.mount === 'FenShanJin';
+}
+
+/** 首轮测试服的核心奇穴依赖；旧版不使用这组限制。 */
+function testTalentCoreRequirement(id) {
+  if (!isCangShengFenShan()) return null;
+  if (id === 91001 || id === 91002) return { id: 30769, name: '阵云结晦' };
+  if (id === 37559 || id === 37558) return { id: 41740, name: '崩血' };
+  return null;
+}
+
+function normalizeTestTalentSelection() {
+  if (!isCangShengFenShan()) return;
+  const core = Number(talentSelection[1]);
+  const known = new Map(talentList.map(t => [t.id, t.tier]));
+  const valid = (id, tier) => {
+    const requirement = testTalentCoreRequirement(Number(id));
+    return (!requirement || requirement.id === core)
+      && (!known.size || known.get(Number(id)) === tier);
+  };
+  for (let tier = 1; tier <= 10; tier++) {
+    if (talentSelection[tier] && !valid(talentSelection[tier], tier)) talentSelection[tier] = null;
+  }
+  talentSelection.mixed = talentSelection.mixed.filter(id => valid(id, 8));
+}
+
 /** 获取当前已选奇穴 ID 列表 */
 function getSelectedTalents() {
+  normalizeTestTalentSelection();
   const ids = [];
   for (let t = 1; t <= 10; t++) { if (talentSelection[t]) ids.push(talentSelection[t]); }
   ids.push(...talentSelection.mixed);
@@ -763,7 +792,9 @@ async function initTalentModal() {
     const opts = talentList.filter(t => t.tier === tier);
     html += `<div class="talent-tier"><span class="talent-tier-label">第${TIER_LABELS[tier]}重</span><div class="talent-options">`;
     for (const t of opts) {
-      html += `<button class="talent-btn" data-id="${t.id}" data-tier="${tier}" title="${esc(t.desc)}">${esc(t.name)}</button>`;
+      const requirement = testTalentCoreRequirement(t.id);
+      const hint = requirement ? `<small class="talent-core-requirement">需${requirement.name}</small>` : '';
+      html += `<button class="talent-btn" data-id="${t.id}" data-tier="${tier}" title="${esc(t.desc)}">${esc(t.name)}${hint}</button>`;
     }
     html += '</div></div>';
   }
@@ -815,7 +846,14 @@ function refreshTalentUI() {
   if (!overlay) return;
   const selected = new Set(getSelectedTalents());
   overlay.querySelectorAll('.talent-btn').forEach(btn => {
-    btn.classList.toggle('selected', selected.has(parseInt(btn.dataset.id)));
+    const id = parseInt(btn.dataset.id);
+    btn.classList.toggle('selected', selected.has(id));
+    const requirement = testTalentCoreRequirement(id);
+    if (requirement) {
+      const locked = Number(talentSelection[1]) !== requirement.id;
+      btn.disabled = locked;
+      btn.classList.toggle('disabled', locked);
+    }
   });
   const mixedFull = talentSelection.mixed.length >= 3;
   overlay.querySelectorAll('.talent-btn[data-tier="mixed"]').forEach(btn => {
@@ -837,10 +875,12 @@ function enforceTalentGating() {
   const EXP_EXEMPT = new Set(['阵云结晦', '月照连营', '雁门迢递', '清除冷却',
     '阵云结晦·雾海', '月照连营·雾海', '雁门迢递·雾海']);
   const isLocked = (name) => {
-    if (expOn && EXP_EXEMPT.has(name)) return false;
+    if (isCangShengFenShan() && name.endsWith('·雾海')) return true;
+    if (!isCangShengFenShan() && expOn && EXP_EXEMPT.has(name)) return false;
     const info = skillInfoMap[name];
     return info && info.requires_talent != null && !selected.has(info.requires_talent);
   };
+  if (isCangShengFenShan() && !isBerserkEnabled()) updateBerserkValue(null, null);
 
   // 技能栏：锁定/解锁按钮（虚拟技能永远不锁）
   document.querySelectorAll('.sim-skill-btn[data-skill]').forEach(btn => {
@@ -2321,6 +2361,35 @@ function updateBlockValue(bv, maxBv) {
   if (blockVal) blockVal.textContent = bv;
 }
 
+/** 暴怒仅属于测试服分山劲的阵云结晦；脱战准备满 120，运行值以后端为准。 */
+function isBerserkEnabled() {
+  return isCangShengFenShan() && Number(talentSelection[1]) === 30769;
+}
+
+function updateBerserkValue(value, maxValue) {
+  const row = document.getElementById('sim_berserk_row');
+  if (!row) return;
+  const visible = isBerserkEnabled() && value != null;
+  row.style.display = visible ? '' : 'none';
+  const blockRow = document.getElementById('sim_block_row');
+  const spacer = document.getElementById('sim_gcd_block_spacer');
+  if (spacer) spacer.style.display = visible || (blockRow && blockRow.style.display !== 'none') ? '' : 'none';
+  if (!visible) return;
+  const max = maxValue != null && maxValue > 0 ? maxValue : 120;
+  const pct = Math.min(100, Math.max(0, value / max * 100));
+  const fill = document.getElementById('sim_berserk_fill');
+  if (fill) {
+    fill.style.height = pct + '%';
+    fill.classList.toggle('berserk-high', pct >= 60);
+  }
+  const label = document.getElementById('sim_berserk_value');
+  if (label) label.textContent = value;
+  row.title = `暴怒值：${value} / ${max}`;
+  row.setAttribute('aria-valuenow', String(value));
+  row.setAttribute('aria-valuemax', String(max));
+  row.setAttribute('aria-valuetext', `${value} / ${max}`);
+}
+
 /** 重置技能按钮为默认状态（全部可用） */
 function resetSkillButtons() {
   document.querySelectorAll('.sim-skill-btn[data-skill]').forEach(btn => {
@@ -2344,6 +2413,7 @@ function resetSkillButtons() {
   const blockVal = document.getElementById('sim_block_value');
   if (blockFill) { blockFill.style.height = '100%'; blockFill.classList.add('block-high'); }
   if (blockVal) blockVal.textContent = '100';
+  updateBerserkValue(isBerserkEnabled() ? 120 : null, 120);
 }
 
 /** 当前模拟状态下的自身可移除 buff 列表（非 debuff、非 target） */
@@ -2727,7 +2797,8 @@ function decorateSeqItems(result) {
     } else {
       infoLine = `ID: ${t.skill_id}`;
     }
-    const rageInfo = t.rage_cost ? `<br>释放怒气: ${t.rage_cost}` : '';
+    const rageInfo = t.rage_cost && !Number.isFinite(t.state_before?.rage)
+      ? `<br>本次消耗怒气: ${t.rage_cost}` : '';
     // 伤害行：命中/会心/期望/×跳数；都为 null 跳过（移除气劲、宏等空 cast）
     let dmgLine = '';
     if (t.damage != null || t.damage_total != null) {
@@ -2746,6 +2817,10 @@ function decorateSeqItems(result) {
     // checkbox 切换后下次 hover 自动反映新过滤状态。
     const isQijinRemove = skillName === '移除气劲';
     const buildTip = () => {
+      const resources = [];
+      if (Number.isFinite(t.state_before?.rage)) resources.push(`怒气 ${t.state_before.rage}`);
+      if (Number.isFinite(t.state_before?.berserk_value)) resources.push(`暴怒值 ${t.state_before.berserk_value}`);
+      const resourceLine = resources.length ? `<br>释放前资源：${resources.join(' / ')}` : '';
       let buffsHtml = '';
       const sbAll = t.state_before?.buffs || [];
       const hideTeam = document.getElementById('sim_hide_team_buffs')?.checked ?? true;
@@ -2765,7 +2840,7 @@ function decorateSeqItems(result) {
         buffsHtml = `<br><div class="seq-tip-buff-label">释放前自身 buff</div><div class="seq-tip-buff-row">${items}</div>`;
       }
       // 移除气劲单独显示 infoLine（"移除: <buff name>"），其他技能 ID 已在标题里不重复
-      return `<b>${t.name}</b> (${t.skill_id}) ${t.cast_time.toFixed(2)}s${isQijinRemove ? `<br>${infoLine}` : ''}${dmgLine}${waitInfo}${rageInfo}${buffsHtml}`;
+      return `<b>${t.name}</b> (${t.skill_id}) ${t.cast_time.toFixed(2)}s${isQijinRemove ? `<br>${infoLine}` : ''}${dmgLine}${waitInfo}${rageInfo}${resourceLine}${buffsHtml}`;
     };
     el.addEventListener('mouseenter', () => showTooltip(el, buildTip()));
     el.addEventListener('mouseleave', hideTooltip);
@@ -2848,19 +2923,23 @@ function decorateSeqItems(result) {
         }
       }
     }
-    // 辅助信息 on：怒气 chip 写入 label（文字模式原名+chip / 图标模式截短名+chip）
+    // 辅助信息：阵云一段在怒气角标的位置显示释放前暴怒，其余技能仍显示怒气。
     const helpersOn = !document.body.classList.contains('seq-helpers-off');
     const isTextMode = document.body.classList.contains('seq-mode-text');
     if (helpersOn && label) {
       const rageBefore = (t.state_before && typeof t.state_before.rage === 'number') ? t.state_before.rage : null;
       const rage = (rageBefore != null && t.rage_delta != null) ? rageBefore : null;
-      const rageChip = rage != null ? `<span class="seq-rage-chip">${rage}</span>` : '';
+      const berserkBefore = t.skill_id === 30769 && Number.isFinite(t.state_before?.berserk_value)
+        ? t.state_before.berserk_value : null;
+      const resourceChip = berserkBefore != null
+        ? `<span class="seq-rage-chip seq-berserk-chip" title="释放前暴怒值" aria-label="释放前暴怒值 ${berserkBefore}">${berserkBefore}</span>`
+        : (rage != null ? `<span class="seq-rage-chip">${rage}</span>` : '');
       const name = label.textContent || skillName;
       if (isTextMode) {
-        label.innerHTML = escapeHtml(name) + rageChip;
+        label.innerHTML = escapeHtml(name) + resourceChip;
       } else {
         const short = name.length === 4 ? name.slice(0, 2) : name;
-        label.innerHTML = escapeHtml(short) + rageChip;
+        label.innerHTML = escapeHtml(short) + resourceChip;
       }
     }
     // 援戈层数角标（左下角）：释放前援戈层数，仅盾击和苍雪刀系显示
@@ -3002,6 +3081,7 @@ async function runSimulate(opts) {
         const r = await res.json();
         updateSkillButtons(r.available_skills, r.stance, r.rage, r.skill_cds, r.skill_charges, r.buffs, r.remaining_gcd, r.total_gcd, r.combo_states, r.skill_effective);
         updateBlockValue(r.block_value, r.max_block_value);
+        updateBerserkValue(r.berserk_value, r.max_berserk_value);
         updateRealtimePanel(r.initial_stats);
       } else { resetSkillButtons(); }
     } catch { resetSkillButtons(); }
@@ -3055,6 +3135,7 @@ async function runSimulate(opts) {
 
     // 更新格挡值条（铁骨衣专属）
     updateBlockValue(result.block_value, result.max_block_value);
+    updateBerserkValue(result.berserk_value, result.max_berserk_value);
 
     // 更新左栏实时面板（开战 t=0 时刻属性快照）
     updateRealtimePanel(result.initial_stats);
@@ -3496,20 +3577,60 @@ function _initSeqFloatingToolbar() {
   //   划出后 280ms 内再划入：续命，不关闭
   //   超过 280ms 未划入：移除 .toolbar-open，CSS hover 也已结束 → body 淡出
   const body = bar.querySelector('.seq-toolbar-body');
+  const handle = bar.querySelector('#seq_toolbar_toggle');
   let closeTimer = null;
+  let pinned = false;
   const CLOSE_DELAY = 800;
   const openNow = () => {
     if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
     bar.classList.add('toolbar-open');
+    handle?.setAttribute('aria-expanded', 'true');
+    if (body) body.style.maxWidth = Math.max(180, window.innerWidth - bar.getBoundingClientRect().left - 12) + 'px';
+  };
+  const closeNow = () => {
+    if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
+    pinned = false;
+    bar.classList.remove('toolbar-open');
+    handle?.setAttribute('aria-expanded', 'false');
+    if (tooltipAnchor && bar.contains(tooltipAnchor)) hideTooltip();
   };
   const scheduleClose = () => {
     if (closeTimer) clearTimeout(closeTimer);
-    closeTimer = setTimeout(() => { bar.classList.remove('toolbar-open'); closeTimer = null; }, CLOSE_DELAY);
+    closeTimer = setTimeout(() => {
+      if (!pinned && !bar.contains(document.activeElement) && !bar.matches(':hover')) closeNow();
+    }, CLOSE_DELAY);
   };
   bar.addEventListener('mouseenter', openNow);
   bar.addEventListener('mouseleave', scheduleClose);
   body?.addEventListener('mouseenter', openNow);
   body?.addEventListener('mouseleave', scheduleClose);
+  bar.addEventListener('focusin', openNow);
+  bar.addEventListener('focusout', scheduleClose);
+  handle?.addEventListener('click', () => {
+    if (pinned) closeNow();
+    else { pinned = true; openNow(); }
+  });
+  document.addEventListener('pointerdown', e => { if (!bar.contains(e.target)) closeNow(); });
+  bar.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      handle?.focus();
+      closeNow();
+    }
+  });
+  window.addEventListener('resize', () => { if (bar.classList.contains('toolbar-open')) openNow(); });
+  // 鼠标悬停和键盘聚焦共用现有帮助浮层。
+  bar.querySelectorAll('button[title]').forEach(button => {
+    const help = button.getAttribute('title');
+    button.setAttribute('aria-description', help);
+    button.removeAttribute('title');
+    // 以整条选项栏定位，避免入口或选项的说明覆盖其他按钮。
+    const showHelp = () => showTooltip(body || button, `<div class="seq-toolbar-help">${escapeHtml(help)}</div>`);
+    button.addEventListener('mouseenter', showHelp);
+    button.addEventListener('focus', showHelp);
+    button.addEventListener('mouseleave', hideTooltip);
+    button.addEventListener('blur', hideTooltip);
+  });
   // 主 segmented（文字/图标）
   bar.querySelectorAll('.seq-mode-seg:not(.seq-icon-label-seg) .seq-mode-seg-btn').forEach(btn => {
     btn.addEventListener('click', () => setSeqDisplayMode(btn.dataset.mode));
@@ -4126,6 +4247,7 @@ function renderSkillBar() {
  *  - 全心法：特殊组 +清除冷却，重排序为 宏→橙武→移除气劲→清除冷却 */
 function applyExperimentalSkills(enabled) {
   if (!currentMount) return;
+  if (isCangShengFenShan()) enabled = false;
   const groups = currentMount.school_ui?.skill_groups || [];
 
   // ── 铁骨衣：旧版阵云结晦（通用组）──
@@ -6943,7 +7065,8 @@ loadFormations();
     let expSkillOn = false;
     try { expOn = localStorage.getItem('expectation_enabled') === '1'; } catch {}
     try { const s = localStorage.getItem('boss_attack_interval'); if (s) intervalVal = parseFloat(s) || 2.0; } catch {}
-    try { expSkillOn = localStorage.getItem('experimental_skills') === '1'; } catch {}
+    try { expSkillOn = isExperimental(); } catch {}
+    const expSkillUnavailable = isCangShengFenShan();
 
     overlay.innerHTML = `
       <div class="talent-modal" style="min-width:360px;max-width:440px">
@@ -6990,8 +7113,8 @@ loadFormations();
           </div>
           <div class="settings-row">
             <label class="settings-label">实验性武学</label>
-            <span class="settings-hint">镜花水月而已</span>
-            <button class="settings-toggle ${expSkillOn ? 'on' : ''}" id="toggle_exp_skills" role="switch" aria-checked="${expSkillOn}">
+            <span class="settings-hint">${expSkillUnavailable ? '苍生铸世测试服使用独立武学规则' : '镜花水月而已'}</span>
+            <button class="settings-toggle ${expSkillOn ? 'on' : ''}" id="toggle_exp_skills" role="switch" aria-checked="${expSkillOn}" ${expSkillUnavailable ? 'disabled title="苍生铸世测试服不混用旧版实验性武学"' : ''}>
               <span class="settings-toggle-knob"></span>
             </button>
           </div>
@@ -7178,6 +7301,7 @@ loadFormations();
 
     // 实验性技能 toggle
     overlay.querySelector('#toggle_exp_skills').addEventListener('click', (e) => {
+      if (isCangShengFenShan()) return;
       const el = e.currentTarget;
       const nowOn = !el.classList.contains('on');
       el.classList.toggle('on', nowOn);
@@ -7225,6 +7349,7 @@ function getTieguMode() {
   try { const s = localStorage.getItem('tiegu_mode'); return s != null ? parseInt(s) : 2; } catch { return 2; }
 }
 function isExperimental() {
+  if (isCangShengFenShan()) return false;
   try { return localStorage.getItem('experimental_skills') === '1'; } catch { return false; }
 }
 
@@ -7959,6 +8084,7 @@ document.getElementById('btn_history')?.addEventListener('click', () => {
       `<div class="lt-row"><span class="lt-key">姿态</span><span class="lt-val">${stanceNames[s.stance] || s.stance}</span>` +
       `<span class="lt-key">怒气</span><span class="lt-val">${s.rage}</span>` +
       (s.block_value != null ? `<span class="lt-key">格挡</span><span class="lt-val">${s.block_value}</span>` : '') +
+      (s.berserk_value != null ? `<span class="lt-key">暴怒</span><span class="lt-val">${s.berserk_value}${s.max_berserk_value != null ? ' / ' + s.max_berserk_value : ''}</span>` : '') +
       `</div>`;
     html += itemRow('自身', filterTeam(s.buffs), buffLine);
     html += itemRow('目标', filterTeam(s.target_buffs), buffLine);
@@ -8755,6 +8881,7 @@ async function runMacroSimulate(duration) {
     const trackEl = document.getElementById('timeline_track');
     renderBuffTimeline(result.buff_timeline, parseInt(trackEl?.style.width) || 100);
     updateSkillButtons(result.available_skills, result.stance, result.rage, result.skill_cds, result.skill_charges, result.buffs, result.remaining_gcd, result.total_gcd, result.combo_states, result.skill_effective);
+    updateBerserkValue(result.berserk_value, result.max_berserk_value);
   } catch {
     set('sim_fight_time', '后端未连接');
   }
@@ -11334,7 +11461,7 @@ function highlightMacroLine(line) {
 
 const MACRO_COND_KEYS = new Set([
   'bufftime', 'tbufftime', 'buff', 'nobuff', 'tbuff', 'tnobuff',
-  'rage', 'life',
+  'rage', 'energy', 'sun', 'berserk', 'baonu', 'life',
   'skill_notin_cd', 'skill_energy', 'nearby_enemy',
   'last_skill', 'skill', 'noskill',
 ]);
@@ -18598,14 +18725,14 @@ window.Jx3Nav = {
   };
 
   // 默认 filter
-  //   品级 ≥ 35000（含苍云 35300 品 T套上衣等门派套装；高于此苍云 PVE 上衣已无）
+  //   品级默认不限，使用测试服配表压缩后的原生品级
   //   schools: 武器走"苍云"门派；其他走 通用 + 苍云（让门派套装上衣等也进候选池）
   //   kinds:   武器不限；其他用 mount 对应的 [通用 主属性, 门派 magic_kind]
   //   battle_types: PVE（默认；PVP/PVX 玩家在 modal 里加）
   function defaultFilterFor(pos) {
     const isWeapon = (pos === 'PRIMARY_WEAPON' || pos === 'SECONDARY_WEAPON');
     return {
-      min_level: 35000,
+      min_level: 0,
       max_level: 0,
       schools: new Set(isWeapon ? ['苍云'] : ['通用', '苍云']),
       kinds:   new Set(isWeapon ? [] : defaultKindsForMount()),
@@ -18616,9 +18743,9 @@ window.Jx3Nav = {
       categories: new Set(),
     };
   }
-  // 滑条端点（与 configurator 一致；step=100）
-  const WZC_FM_LEVEL_MIN = 22000;
-  const WZC_FM_LEVEL_MAX = 44000;
+  // 滑条端点（与 configurator 一致；step=1）
+  const WZC_FM_LEVEL_MIN = 0;
+  const WZC_FM_LEVEL_MAX = 1500;
 
   POS_LIST.forEach(pos => {
     // excluded: 用户在 modal 预览里勾掉的 equip_id（即使经 filter 匹配也不进候选池）
@@ -18651,8 +18778,8 @@ window.Jx3Nav = {
   function _deserFilter(o) {
     if (!o) return null;
     return {
-      min_level: o.min_level | 0,
-      max_level: o.max_level | 0,
+      min_level: (o.min_level | 0) > WZC_FM_LEVEL_MAX ? 0 : (o.min_level | 0),
+      max_level: (o.max_level | 0) > WZC_FM_LEVEL_MAX ? 0 : (o.max_level | 0),
       schools: new Set(o.schools || []),
       kinds:   new Set(o.kinds || []),
       attrs:   new Set(o.attrs || []),
@@ -19597,7 +19724,7 @@ window.Jx3Nav = {
       scheduleFilterPreview();
     });
 
-    // 品级双滑条 —— 同步 fill + 写回 _wzcFmDraft（max=44000 时存 0 表示"不限上限"）
+    // 品级双滑条 —— 同步 fill + 写回 _wzcFmDraft（max=1500 时存 0 表示"不限上限"）
     ['wzc_fm_min_level', 'wzc_fm_max_level'].forEach(id => {
       document.getElementById(id).addEventListener('input', () => {
         syncWzcFmRange();
@@ -20282,7 +20409,7 @@ window.Jx3Nav = {
     if (f.attrs.size) summaryParts.push([...f.attrs].join('/'));
     if (f.keyword) summaryParts.push('"' + f.keyword + '"');
     if (f.only_set) summaryParts.push('只看套装');
-    if (f.min_level && f.min_level !== 22000) summaryParts.push(`Lv≥${f.min_level}`);
+    if (f.min_level && f.min_level !== 0) summaryParts.push(`Lv≥${f.min_level}`);
     if (f.max_level && f.max_level > 0) summaryParts.push(`Lv≤${f.max_level}`);
     const summary = summaryParts.join(' · ') || '默认';
     const cands = ps.candidates || [];
@@ -22791,7 +22918,7 @@ window.Jx3Nav = {
     schools: [],
     kinds: [],
     filter: {
-      min_level: 22000,
+      min_level: 0,
       max_level: 0,
       schools: new Set(),
       kinds: new Set(),
@@ -22889,7 +23016,7 @@ window.Jx3Nav = {
       state.meta = meta;
       state.schools = meta.schools || [];
       state.kinds = meta.kinds || [];
-      state.filter.min_level = 22000;
+      state.filter.min_level = 0;
       renderChips();
       return meta;
     } catch (e) {
@@ -24640,7 +24767,7 @@ window.Jx3Nav = {
 
   function syncRange() {
     const min = parseInt(rangeMin.min, 10) || 0;
-    const max = parseInt(rangeMin.max, 10) || 44000;
+    const max = parseInt(rangeMin.max, 10) || 1500;
     let lo = parseInt(rangeMin.value, 10);
     let hi = parseInt(rangeMax.value, 10);
     if (!Number.isFinite(lo)) lo = min;
@@ -24682,8 +24809,8 @@ window.Jx3Nav = {
     state.filter.onlySet = false;
     state.filter.onlyOrange = false;
     state.filter.categories.clear();
-    rangeMin.value = 22000;
-    rangeMax.value = 44000;
+    rangeMin.value = 0;
+    rangeMax.value = 1500;
     syncRange();
     document.getElementById('eq_keyword').value = '';
     document.getElementById('eq_only_set').checked = false;

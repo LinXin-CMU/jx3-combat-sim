@@ -265,6 +265,7 @@ fn extract_line_tunables(
 
 enum Leaf<'a> {
     Rage(crate::macro_engine::CmpOp, i32),
+    Energy(crate::macro_engine::CmpOp, i32),
     Life(crate::macro_engine::CmpOp, f64),
     BuffTime(&'a str, crate::macro_engine::CmpOp, f64),
     TBuffTime(&'a str, crate::macro_engine::CmpOp, f64),
@@ -280,6 +281,7 @@ fn walk_leaves<'a>(cond: &'a MacroCondition, out: &mut Vec<Leaf<'a>>) {
             walk_leaves(b, out);
         }
         Rage(op, v) => out.push(Leaf::Rage(*op, *v)),
+        Energy(op, v) => out.push(Leaf::Energy(*op, *v)),
         Life(op, v) => out.push(Leaf::Life(*op, *v)),
         BuffTime(n, op, v) => out.push(Leaf::BuffTime(n.as_str(), *op, *v)),
         TBuffTime(n, op, v) => out.push(Leaf::TBuffTime(n.as_str(), *op, *v)),
@@ -299,6 +301,7 @@ fn leaf_to_tunable(
     use crate::macro_engine::CmpOp;
     let op_raw = match leaf {
         Leaf::Rage(op, _)
+        | Leaf::Energy(op, _)
         | Leaf::Life(op, _)
         | Leaf::BuffTime(_, op, _)
         | Leaf::TBuffTime(_, op, _)
@@ -322,6 +325,12 @@ fn leaf_to_tunable(
             let mn = (*v - 30.0).max(0.0);
             let mx = (*v + 30.0).min(100.0);
             ("life".to_string(), *v, mn, mx, 1.0, "int", LeafKind::Life)
+        }
+        Leaf::Energy(_, v) => {
+            let fv = *v as f64;
+            let mn = (fv - 30.0).max(0.0);
+            let mx = (fv + 30.0).min(200.0);
+            ("energy".to_string(), fv, mn, mx, 1.0, "int", LeafKind::Energy)
         }
         Leaf::BuffTime(n, _, v) => {
             let mn = round_step((*v - 5.0).max(0.0), 0.1);
@@ -424,6 +433,8 @@ pub fn clone_condition(c: &MacroCondition) -> MacroCondition {
     use MacroCondition::*;
     match c {
         Rage(op, v) => Rage(*op, *v),
+        Energy(op, v) => Energy(*op, *v),
+        Berserk(op, v) => Berserk(*op, *v),
         Life(op, v) => Life(*op, *v),
         Buff(n) => Buff(n.clone()),
         NoBuff(n) => NoBuff(n.clone()),

@@ -1,0 +1,15 @@
+id   = 90001
+name = "移除气劲"
+icon = "https://icon.jx3box.com/icon/23640.png"
+description = "移除气劲效果 / 不造成伤害 / 无GCD / 无CD"
+
+# 纯功能技能：移除气劲
+# 不造成伤害，不占GCD，无CD，无充能
+
+[[ranks]]
+rank         = 1
+name         = "移除气劲"
+icon = "https://icon.jx3box.com/icon/23640.png"
+base_damage  = 0.0
+attack_coeff = 0.0
+weapon_coeff = 0.0

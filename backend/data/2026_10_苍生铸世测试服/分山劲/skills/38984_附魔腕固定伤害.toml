@@ -1,0 +1,14 @@
+id   = 38984
+name = "昆吾·弦刃"
+passive = true
+true_damage = true
+description = "暗影千机赛季腕大附魔（16451）的真实伤害。命中触发，10% odds + 15s 内置 CD；参 jx3dps-online: 仅走等级压制+易伤+全局增伤（跳秘籍/破防/无双/防御/PVE/会心）"
+
+# 真实伤害公式：base_damage × (1+等级压制) × (1+易伤) × (1+全局增伤)
+# 参考 jx3dps-online：暗影千机品级 2,415,000 真伤
+[[ranks]]
+rank          = 1
+name          = "昆吾·弦刃"
+base_damage   = 2415000
+attack_coeff  = 0
+weapon_coeff  = 0

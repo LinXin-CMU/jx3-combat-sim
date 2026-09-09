@@ -1,0 +1,55 @@
+﻿id   = 90010
+name = "阵云结晦·雾海"
+icon = "https://icon.jx3box.com/icon/17157.png"
+description = "雾海寻龙·阵云结晦一段 / 擎刀 / CD5秒 / 消耗长驱万里≥6层 / +60%非侠"
+
+# 实验性技能：雾海寻龙版阵云结晦
+# 消耗所有长驱万里层数，6尺矩形5目标
+# 无视100%外功防御，非侠士+60%（走秘籍99343���
+
+stance          = "blade"
+requires_talent = 30769
+
+[[cooldowns]]
+cd_id    = "cd_阵云·雾海"
+duration = 5.0
+mode     = "check_and_trigger"
+haste    = false
+
+[[cooldowns]]
+cd_id    = "gcd_1.5"
+duration = 1.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_1.0"
+duration = 1.0
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_0.5"
+duration = 0.5
+mode     = "check_and_trigger"
+haste    = true
+
+# 宏只需写"阵云结晦·雾海"，后端按连招状态自动重定向到二/三段
+[[combo_follow]]
+requires_combo = "雾海_3"
+skill_id = 90012
+
+[[combo_follow]]
+requires_combo = "雾海_2"
+skill_id = 90011
+
+[[ranks]]
+rank           = 1
+name           = "阵云结晦·雾海"
+icon = "https://icon.jx3box.com/icon/17157.png"
+grants_combo   = "雾海_2"
+combo_duration = 96          # 6秒 = 96帧
+base_damage    = 73.0        # (72 + 74) / 2
+attack_coeff   = 1.50000
+weapon_coeff   = 1.0
+defense_ignore = 1.0

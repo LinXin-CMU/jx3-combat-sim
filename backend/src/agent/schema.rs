@@ -71,6 +71,7 @@ impl ScenarioSnapshotV1 {
 
         let game_version = game_version_id(game_version).to_string();
         let mount = mount_id(mount).to_string();
+        validate_identity(&game_version, &mount)?;
         let scenario_hash = hash_payload(&game_version, &mount, &simulation)?;
 
         Ok(Self {
@@ -104,10 +105,14 @@ fn validate_identity(game_version: &str, mount: &str) -> Result<(), ScenarioErro
     if !matches!(
         game_version,
         "2025_10_shanhai_yuanliu" | "2026_04_anying_qianji" | "2026_04_anying_qianji_test"
+            | "2026_10_cangsheng_zhushi_test"
     ) {
         return Err(ScenarioError::InvalidField("game_version"));
     }
     if !matches!(mount, "fenshanjin" | "tieguyi") {
+        return Err(ScenarioError::InvalidField("mount"));
+    }
+    if game_version == "2026_10_cangsheng_zhushi_test" && mount != "fenshanjin" {
         return Err(ScenarioError::InvalidField("mount"));
     }
     Ok(())
@@ -161,6 +166,7 @@ pub(super) fn game_version_id(version: GameVersion) -> &'static str {
         GameVersion::ShanHaiYuanLiu => "2025_10_shanhai_yuanliu",
         GameVersion::AnYingQianJi => "2026_04_anying_qianji",
         GameVersion::AnYingQianJiTest => "2026_04_anying_qianji_test",
+        GameVersion::CangShengZhuShiTest => "2026_10_cangsheng_zhushi_test",
     }
 }
 
@@ -286,6 +292,8 @@ mod tests {
         assert_ne!(base.scenario_hash, old_version.scenario_hash);
         assert_ne!(base.scenario_hash, tank.scenario_hash);
     }
+
+    include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cangsheng/schema.rs"));
 
     #[test]
     fn verify_hash_detects_mutation() {

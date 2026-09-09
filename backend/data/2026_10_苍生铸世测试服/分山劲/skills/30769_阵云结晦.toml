@@ -1,0 +1,50 @@
+﻿id   = 30769
+name = "阵云结晦"
+icon = "https://icon.jx3box.com/icon/17157.png"
+description = "核心奇穴 / 消耗50或100暴怒，无独立调息 / 攻击系数5.33125或9.33125（已含档位增幅） / 非侠士增伤76%或195% / 神威解锁后续两段"
+
+# 2026-09-08 官方首轮：第一重核心奇穴，无调息；仍保留原有公共调息。
+# 暴怒消耗与隐藏秘籍在统一施放链处理。未公布的基础系数按用户要求复用暗影千机。
+# 测试服公告未包含回复普通怒气；仅沿用未公布的伤害基础数据。
+
+stance          = "not_wall"
+rage_gain       = 0
+requires_talent = 30769
+max_charges     = 0
+charge_cd       = 0.0
+
+[[cooldowns]]
+cd_id    = "gcd_1.5"
+duration = 1.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_1.0"
+duration = 1.0
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "gcd_0.5"
+duration = 0.5
+mode     = "check_and_trigger"
+haste    = true
+
+# 宏只需写一行"阵云结晦"，后端按连招状态自动重定向到二/三段
+[[combo_follow]]
+requires_combo = "阵云_3"
+skill_id = 30856
+
+[[combo_follow]]
+requires_combo = "阵云_2"
+skill_id = 30855
+
+[[ranks]]
+rank           = 1
+name           = "阵云结晦"
+icon = "https://icon.jx3box.com/icon/17157.png"
+base_damage    = 73.0      # (72 + 74) / 2
+attack_coeff   = 5.33125 # 50暴怒；100暴怒为9.33125，由版本脚本按首段消耗切换。
+weapon_coeff   = 1.0
+defense_ignore = 1.0

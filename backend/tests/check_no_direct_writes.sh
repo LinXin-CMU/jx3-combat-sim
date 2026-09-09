@@ -4,6 +4,7 @@
 # 任何这些模式如果在 src/scripts/**/*.rs 或 src/macro_eval.rs 出现，CI 立即红：
 #   player.rage = ...        ← 应走 player.set_rage(v) / player.add_rage(d)
 #   player.block_value = ... ← player.set_block_value() / player.add_block_value()
+#   player.berserk_value = ... ← player.set_berserk_value() / player.add_berserk_value()
 #   inst.stacks = N          ← player.set_buff_stacks(buff_id, N)
 #   player.active_cds.insert ← player.add_protect_cd(...)
 #   player.active_buffs.push ← player.add_buff(...)
@@ -47,6 +48,11 @@ check 'player\.rage\s*=\s*[^=]' \
 check 'player\.block_value\s*=\s*[^=]' \
       "脚本侧直写 player.block_value" \
       "→ 改用 player.set_block_value(v) 或 player.add_block_value(delta)"
+
+# 暴怒值直写（包含复合赋值）
+check 'player\.berserk_value\s*([+*/%-]?=)\s*[^=]' \
+      "脚本侧直写 player.berserk_value" \
+      "→ 改用 player.set_berserk_value(v) 或 player.add_berserk_value(delta)"
 
 # 3. inst.stacks 直写（buff 实例层数）
 check 'inst\.stacks\s*=\s*[^=]' \

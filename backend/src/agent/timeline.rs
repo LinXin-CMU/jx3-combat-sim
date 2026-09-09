@@ -18,6 +18,8 @@ const TIME_EPSILON: f64 = 0.001;
 pub enum TimelineEventSelector {
     RageCap,
     RageOverflow,
+    BerserkOverflow,
+    BerserkCap,
     GcdGap,
     CooldownWait,
     Skill,
@@ -53,6 +55,10 @@ pub struct TimelineBuffViewV1 {
 #[serde(deny_unknown_fields)]
 pub struct TimelineStateViewV1 {
     pub rage: i32,
+    #[serde(default)]
+    pub berserk_value: Option<i32>,
+    #[serde(default)]
+    pub max_berserk_value: Option<i32>,
     pub stance: String,
     pub buffs: Vec<TimelineBuffViewV1>,
     pub target_buffs: Vec<TimelineBuffViewV1>,
@@ -102,6 +108,10 @@ pub struct TimelineEventWindowV1 {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct TimelineEventInspectionV1 {
+    #[serde(default)]
+    pub berserk: Option<super::berserk::BerserkObservation>,
+    #[serde(default)]
+    pub berserk_events: Vec<super::berserk::BerserkEvent>,
     pub selector: TimelineEventSelector,
     pub total_matches: usize,
     /// Lightweight index of matching events so the Agent can identify several
@@ -127,6 +137,12 @@ pub struct TimelineEventMatchV1 {
     pub skill_name: String,
     pub macro_page: Option<usize>,
     pub macro_line: Option<usize>,
+    #[serde(default)]
+    pub berserk_before: Option<i32>,
+    #[serde(default)]
+    pub berserk_after: Option<i32>,
+    #[serde(default)]
+    pub max_berserk_value: Option<i32>,
     pub rage_before: Option<i32>,
     pub rage_after: Option<i32>,
     pub rage_cost: Option<u32>,
@@ -310,6 +326,12 @@ pub struct RotationCycleSkillV1 {
     pub event_number: usize,
     pub cast_time: f64,
     pub skill_name: String,
+    #[serde(default)]
+    pub berserk_before: Option<i32>,
+    #[serde(default)]
+    pub berserk_after: Option<i32>,
+    #[serde(default)]
+    pub max_berserk_value: Option<i32>,
     pub rage_before: Option<i32>,
     pub rage_after: Option<i32>,
 }
@@ -319,6 +341,12 @@ pub struct RotationCycleSkillV1 {
 pub struct AbsoluteKnifeObservationV1 {
     pub event_number: usize,
     pub skill_name: String,
+    #[serde(default)]
+    pub berserk_before: Option<i32>,
+    #[serde(default)]
+    pub berserk_after: Option<i32>,
+    #[serde(default)]
+    pub max_berserk_value: Option<i32>,
     pub rage_before: Option<i32>,
     pub rage_cost: Option<u32>,
     pub yuan_ge_before: Option<u32>,
@@ -411,6 +439,8 @@ pub struct PauseRecoveryObservationV1 {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ComparisonTimelineDiagnosticsV1 {
+    #[serde(default)]
+    pub berserk: Option<super::berserk::BerserkObservation>,
     pub active_event_count: usize,
     pub gcd_gap_count: usize,
     pub gcd_gap_seconds: f64,
@@ -446,6 +476,8 @@ pub struct TimelineAnalysis {
     pub total_observed_gcd_gap_seconds: f64,
     pub gcd_gaps: Vec<GcdGapEvidence>,
     pub rage: Option<RageObservation>,
+    #[serde(default)]
+    pub berserk: Option<super::berserk::BerserkObservation>,
     pub buff_coverage: Vec<BuffCoverage>,
     pub skipped: Vec<SkippedSkill>,
     pub diagnostic_profile: RotationDiagnosticProfile,
@@ -478,6 +510,7 @@ pub fn comparison_timeline_diagnostics(
         .collect::<Vec<_>>();
     buffs.sort_by(|left, right| left.name.cmp(&right.name));
     ComparisonTimelineDiagnosticsV1 {
+        berserk: super::berserk::observe(response),
         active_event_count: response
             .timeline
             .iter()
@@ -626,6 +659,7 @@ pub fn analyze_timeline(
         total_observed_gcd_gap_seconds,
         gcd_gaps,
         rage,
+        berserk: super::berserk::observe(response),
         buff_coverage,
         skipped,
         diagnostic_profile,
@@ -801,6 +835,9 @@ fn summarize_rotation_cycle(
                 event_number,
                 cast_time: event.cast_time,
                 skill_name: event.name.clone(),
+                berserk_before: event.state_before.as_ref().and_then(|s| s.berserk_value),
+                berserk_after: event.state_after.as_ref().and_then(|s| s.berserk_value),
+                max_berserk_value: event.state_before.as_ref().and_then(|s| s.max_berserk_value),
                 rage_before: event.state_before.as_ref().map(|state| state.rage),
                 rage_after: event
                     .state_after
@@ -831,6 +868,9 @@ fn summarize_rotation_cycle(
             absolute_knives.push(AbsoluteKnifeObservationV1 {
                 event_number,
                 skill_name: event.name.clone(),
+                berserk_before: event.state_before.as_ref().and_then(|s| s.berserk_value),
+                berserk_after: event.state_after.as_ref().and_then(|s| s.berserk_value),
+                max_berserk_value: event.state_before.as_ref().and_then(|s| s.max_berserk_value),
                 rage_before: event.state_before.as_ref().map(|state| state.rage),
                 rage_cost: event.rage_cost,
                 yuan_ge_before,
@@ -965,7 +1005,34 @@ pub fn inspect_timeline_events(
         .iter()
         .filter(|event| !event.triggered)
         .collect::<Vec<_>>();
+    if matches!(query.selector, TimelineEventSelector::BerserkOverflow | TimelineEventSelector::BerserkCap) {
+        let mut events = super::berserk::events(&simulation.response, query.selector == TimelineEventSelector::BerserkOverflow);
+        events.retain(|event| query.event_number.is_none_or(|n| event.event_number == Some(n))
+            && query.skill_name.as_ref().is_none_or(|name| event.transaction.source.contains(name))
+            && query.time_seconds.is_none_or(|time| (event.transaction.time_seconds - time).abs() < TIME_EPSILON));
+        let total = events.len();
+        let start = query.start_match.min(total);
+        let end = start.saturating_add(query.limit.clamp(1, 8)).min(total);
+        let result = TimelineEventInspectionV1 {
+            selector: query.selector,
+            berserk: super::berserk::observe(&simulation.response),
+            berserk_events: events[start..end].to_vec(),
+            total_matches: total,
+            match_index: Vec::new(), match_index_truncated: false,
+            start_match: start,
+            next_start_match: (end < total).then_some(end),
+            window_selection: "exact_resource_transactions".to_string(),
+            windows: Vec::new(),
+            limitations: vec!["berserk_is_independent_of_rage".into(), "berserk_cap_does_not_imply_overflow".into(), "passive_regeneration_has_no_cast_owner_previous_and_next_events_are_context_only".into()],
+        };
+        return Ok(TimelineEventInspectionExecution { evidence: EvidenceEnvelopeV1::new(
+            trace_id, INSPECT_TIMELINE_EVENTS, &simulation.evidence.scenario_hash,
+            serde_json::json!({"query": query, "source_evidence_id": simulation.evidence.evidence_id}),
+            result, provenance, elapsed_ms(started),
+        )? });
+    }
     let mut matching = match query.selector {
+        TimelineEventSelector::BerserkOverflow | TimelineEventSelector::BerserkCap => unreachable!(),
         TimelineEventSelector::RageCap => active
             .iter()
             .enumerate()
@@ -1056,6 +1123,9 @@ pub fn inspect_timeline_events(
                 skill_name: event.name.clone(),
                 macro_page: event.macro_page,
                 macro_line: event.macro_line,
+                berserk_before: event.state_before.as_ref().and_then(|s| s.berserk_value),
+                berserk_after: event.state_after.as_ref().and_then(|s| s.berserk_value),
+                max_berserk_value: event.state_before.as_ref().and_then(|s| s.max_berserk_value),
                 rage_before: event.state_before.as_ref().map(|state| state.rage),
                 rage_after: event
                     .state_after
@@ -1106,6 +1176,8 @@ pub fn inspect_timeline_events(
     let consumed = query.start_match.saturating_add(windows.len());
     let next_start_match = (consumed < total_matches).then_some(consumed);
     let result = TimelineEventInspectionV1 {
+        berserk: super::berserk::observe(&simulation.response),
+        berserk_events: Vec::new(),
         selector: query.selector,
         total_matches,
         match_index_truncated: total_matches > match_index.len(),
@@ -1173,6 +1245,8 @@ fn timeline_event_view(
 fn timeline_state_view(state: &EventState, buff_names: &[String]) -> TimelineStateViewV1 {
     TimelineStateViewV1 {
         rage: state.rage,
+        berserk_value: state.berserk_value,
+        max_berserk_value: state.max_berserk_value,
         stance: stance_name(state.stance).to_string(),
         buffs: filter_timeline_buffs(&state.buffs, buff_names),
         target_buffs: filter_timeline_buffs(&state.target_buffs, buff_names),
@@ -1715,6 +1789,8 @@ mod tests {
         let state = EventState {
             rage,
             block_value: None,
+            berserk_value: None,
+            max_berserk_value: None,
             stance: Stance::Shield,
             buffs: Vec::new(),
             target_buffs: Vec::new(),
@@ -2201,6 +2277,8 @@ mod tests {
         let state_with_stacks = |stacks| EventState {
             rage: 0,
             block_value: None,
+            berserk_value: None,
+            max_berserk_value: None,
             stance: Stance::Shield,
             buffs: vec![EventBuff {
                 buff_id: 42,

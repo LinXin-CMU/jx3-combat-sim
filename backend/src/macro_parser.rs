@@ -126,6 +126,10 @@ fn parse_line(line: &str, line_num: usize) -> Result<Option<MacroLine>, MacroPar
             || rest.contains("noskill:")
             || rest.contains("life")
             || rest.contains("rage")
+            || rest.contains("energy")
+            || rest.contains("berserk")
+            || rest.contains("sun")
+            || rest.contains("baonu")
             || rest.contains("nearby_enemy");
 
         if has_condition {
@@ -266,6 +270,18 @@ fn parse_atom(s: &str, line_num: usize) -> Result<MacroCondition, MacroParseErro
     if s.starts_with("rage") {
         let (op, val) = parse_cmp_i32(&s[4..], line_num)?;
         return Ok(MacroCondition::Rage(op, val));
+    }
+
+    // energy：格挡值，与 sun 暴怒和 skill_energy 技能充能独立。
+    if let Some(rest) = s.strip_prefix("energy") {
+        let (op, val) = parse_cmp_i32(rest, line_num)?;
+        return Ok(MacroCondition::Energy(op, val));
+    }
+
+    // sun：暴怒值；保留旧扩展别名以兼容已有宏。
+    if let Some(rest) = s.strip_prefix("sun").or_else(|| s.strip_prefix("berserk")).or_else(|| s.strip_prefix("baonu")) {
+        let (op, val) = parse_cmp_i32(rest, line_num)?;
+        return Ok(MacroCondition::Berserk(op, val));
     }
 
     // life>N / life<N
@@ -531,6 +547,8 @@ mod tests {
             _ => panic!("expected And"),
         }
     }
+
+    include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cangsheng/macro_parser.rs"));
 
     #[test]
     fn current_general_macro_exposes_exact_complex_grouping() {

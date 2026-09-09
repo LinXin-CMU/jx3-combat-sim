@@ -2217,7 +2217,7 @@ struct ProcessedData {
 /// 从已加载的 EquipData 过滤并保存为 JSON
 ///
 /// 过滤规则（苍云 T / 外攻 配装）：
-///   - 品级 >= min_level（建议 22000）
+///   - 品级 >= min_level（测试服压缩品级后不使用旧 22000 门槛）
 ///   - AND magic_kind NOT IN {根骨, 元气, 治疗, 内功}
 ///   - AND (
 ///         belong_school IN {通用, 苍云}
@@ -2367,7 +2367,7 @@ pub fn load_equip_smart(data_dir: &Path) -> EquipData {
         let data = load_equip_data(&tab_dir);
         // 自动生成 JSON 缓存（复用已加载的数据，无需重新读 .tab）
         eprintln!("[equip] 从 .tab 加载成功，自动生成 JSON 缓存...");
-        save_processed(data, &json_path, 22000);
+        save_processed(data, &json_path, 0);
         // 生成后再从 JSON 加载（确保启动后就是过滤后的数据集）
         return load_from_processed(&json_path).unwrap_or_else(|| {
             eprintln!("[equip] JSON 重新加载失败");

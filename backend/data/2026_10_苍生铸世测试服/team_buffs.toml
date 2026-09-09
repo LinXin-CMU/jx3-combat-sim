@@ -1,0 +1,808 @@
+# 团队增益数据（暗影千机 2026.04）
+# 参考 jx3dps-online + 游戏 buff.txt 核对，共 50 条
+# buff_id 走项目自定义 0xD0000001 起占位段，避免与铁骨衣自身 BUFF_HAN_XIAO/BUFF_ZHEN_FEN 等冲突
+# 单层数值见 v2026/buffs/team_buffs.rs 内的 BuffDef.effects；toml 仅描述排程参数
+#
+# 字段说明：
+#   default_period  = 0    → 永久挂（duration 0 = 永久）
+#   default_period  > 0    → 周期性，每 period 秒挂一次，单次持续 duration 秒
+#   stacks/max_stacks      → 层数（一次挂多少层；max 用于 UI）
+#   is_target_buff = true  → 走 add_target_buff（戒火/虚弱/破风等）
+
+# ─── 常用增益（5 条）──────────────────────────────────────────
+
+[[entries]]
+key = "袖气"
+buff_id = 0xD0000041
+category = "常用增益"
+side = "通用"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 0.0
+default_duration = 0.0
+default_stacks = 1
+max_stacks = 1
+icon = "https://icon.jx3box.com/icon/907.png"
+description = "全属性提升 317 点"
+source = "七秀"
+conflicts = []
+
+[[entries]]
+key = "共战江湖"
+buff_id = 0xD0000042
+category = "常用增益"
+side = "通用"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 0.0
+default_duration = 0.0
+default_stacks = 6
+max_stacks = 6
+icon = "https://icon.jx3box.com/icon/2148.png"
+description = "每层提升 5% 最终伤害和气血（满 6 层）"
+source = "共战江湖"
+conflicts = []
+
+[[entries]]
+key = "撼如雷"
+buff_id = 0xD0000043
+category = "常用增益"
+side = "通用"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 0.0
+default_duration = 0.0
+default_stacks = 1
+max_stacks = 1
+icon = "https://icon.jx3box.com/icon/635.png"
+description = "外功基础攻击 +5%"
+source = "天策"
+conflicts = []
+
+[[entries]]
+key = "蒸鱼菜盘"
+buff_id = 0xD0000044
+category = "常用增益"
+side = "通用"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 0.0
+default_duration = 0.0
+default_stacks = 1
+max_stacks = 1
+icon = "https://icon.jx3box.com/icon/552.png"
+description = "无双 +1334"
+source = "帮会宴席"
+conflicts = []     # jx3dps-online 仅列了与"肘子菜盘"互斥（不收录），与水煮鱼不互斥
+
+[[entries]]
+key = "同泽宴"
+buff_id = 0xD0000045
+category = "常用增益"
+side = "通用"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 0.0
+default_duration = 0.0
+default_stacks = 1
+max_stacks = 1
+icon = "https://icon.jx3box.com/icon/9025.png"
+description = "无双 +868、破招 +868"
+source = "团队宴席"
+conflicts = []
+
+# ─── 目标减益（8 条）─────────────────────────────────────────
+
+[[entries]]
+key = "虚弱"
+buff_id = 8248      # BUFF_XU_RUO（铁骨衣自身和团队成员共享同一 debuff，避免叠加 -10%）
+category = "目标减益"
+side = "通用"
+is_target_buff = true
+default_first_release = 0.0
+default_period = 0.0
+default_duration = 0.0
+default_stacks = 1
+max_stacks = 1
+icon = "https://icon.jx3box.com/icon/6347.png"
+description = "目标外功防御 -5%"
+source = "铁骨衣"
+conflicts = []
+
+[[entries]]
+key = "劲风"
+buff_id = 0xD0000048
+category = "目标减益"
+side = "通用"
+is_target_buff = true
+default_first_release = 0.0
+default_period = 0.0
+default_duration = 0.0
+default_stacks = 1
+max_stacks = 1
+icon = "https://icon.jx3box.com/icon/650.png"
+description = "目标外功防御 -4655（破风 +33%）"
+source = "铁牢律奇穴"
+conflicts = ["破风"]
+
+[[entries]]
+key = "破风"
+buff_id = 0xD0000047
+category = "目标减益"
+side = "通用"
+is_target_buff = true
+default_first_release = 0.0
+default_period = 0.0
+default_duration = 0.0
+default_stacks = 1
+max_stacks = 1
+icon = "https://icon.jx3box.com/icon/647.png"
+description = "目标外功防御 -3500"
+source = "傲血战意/铁牢律"
+conflicts = ["劲风"]
+
+[[entries]]
+key = "破甲"
+buff_id = 0xD0000049
+category = "目标减益"
+side = "通用"
+is_target_buff = true
+default_first_release = 0.0
+default_period = 18.0
+default_duration = 6.0
+default_stacks = 1
+max_stacks = 1
+icon = "https://icon.jx3box.com/icon/2987.png"
+description = "目标外功防御 -10%（乘龙箭，覆盖率约 33%）"
+source = "铁牢律乘龙箭"
+conflicts = []
+
+[[entries]]
+key = "戒火"
+buff_id = 0xD000004A
+category = "目标减益"
+side = "旗舰"
+is_target_buff = true
+default_first_release = 0.0
+default_period = 0.0
+default_duration = 0.0
+default_stacks = 1
+max_stacks = 1
+icon = "https://icon.jx3box.com/icon/3798.png"
+description = "目标受到伤害 +2%"
+source = "明尊琉璃体"
+conflicts = []
+
+[[entries]]
+key = "戒火·悟"
+buff_id = 0xD0000030
+category = "目标减益"
+side = "无界"
+is_target_buff = true
+default_first_release = 0.0
+default_period = 0.0
+default_duration = 0.0
+default_stacks = 1
+max_stacks = 1
+icon = "https://icon.jx3box.com/icon/3798.png"
+description = "目标受到伤害 +5%"
+source = "明尊琉璃体·悟"
+conflicts = []
+
+[[entries]]
+key = "战锋·悟"
+buff_id = 0xD0000032
+category = "目标减益"
+side = "无界"
+is_target_buff = true
+default_first_release = 0.0
+default_period = 0.0
+default_duration = 0.0
+default_stacks = 1
+max_stacks = 1
+icon = "https://icon.jx3box.com/icon/14126.png"
+description = "目标受到外功伤害 +4%"
+source = "铁牢律·悟"
+conflicts = ["龙吟·悟"]
+
+[[entries]]
+key = "龙吟·悟"
+buff_id = 0xD0000031
+category = "目标减益"
+side = "无界"
+is_target_buff = true
+default_first_release = 0.0
+default_period = 0.0
+default_duration = 0.0
+default_stacks = 1
+max_stacks = 1
+icon = "https://icon.jx3box.com/icon/650.png"
+description = "目标受到外功伤害 +3%"
+source = "铁牢律·悟"
+conflicts = ["战锋·悟"]
+
+# ─── 坦克 Buff（10 条）──────────────────────────────────────
+
+[[entries]]
+key = "寒啸千军"
+buff_id = 33210     # BUFF_HAN_XIAO 新寒啸无双（铁骨衣自身和团队成员共享同一 BuffDef；旧 ID 10031 已弃用）
+category = "坦克Buff"
+side = "旗舰"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 30.0
+default_duration = 15.0
+default_stacks = 100
+max_stacks = 100
+icon = "https://icon.jx3box.com/icon/7514.png"
+description = "每层无双 +67（最大 100 层，覆盖率约 50%）"
+source = "铁骨衣"
+conflicts = []
+
+[[entries]]
+key = "振奋"
+buff_id = 8504      # BUFF_ZHEN_FEN（铁骨衣自身和团队成员共享同一 BuffDef）
+category = "坦克Buff"
+side = "通用"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 0.0
+default_duration = 0.0
+default_stacks = 100
+max_stacks = 100
+icon = "https://icon.jx3box.com/icon/6436.png"
+description = "每层无双 +111"
+source = "铁骨衣"
+conflicts = []
+
+[[entries]]
+key = "号令三军"
+buff_id = 0xD000000D
+category = "坦克Buff"
+side = "旗舰"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 120.0
+default_duration = 24.0
+default_stacks = 100
+max_stacks = 100
+icon = "https://icon.jx3box.com/icon/7513.png"
+description = "每层无双 +619.5（一鼓二鼓平均，覆盖率约 20%）"
+source = "铁牢律"
+conflicts = []
+
+[[entries]]
+key = "禅语"
+buff_id = 0xD000000E
+category = "坦克Buff"
+side = "旗舰"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 0.0
+default_duration = 0.0
+default_stacks = 100
+max_stacks = 100
+icon = "https://icon.jx3box.com/icon/4526.png"
+description = "每层无双 +139（洗髓经奇穴）"
+source = "洗髓经奇穴"
+conflicts = []
+
+[[entries]]
+key = "圣浴明心"
+buff_id = 0xD0000010
+category = "坦克Buff"
+side = "旗舰"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 0.0
+default_duration = 0.0
+default_stacks = 10
+max_stacks = 10
+icon = "https://icon.jx3box.com/icon/7483.png"
+description = "每层无双 +919（明尊增伤朝圣言）"
+source = "明尊琉璃体奇穴"
+conflicts = ["朝圣"]
+
+[[entries]]
+key = "朝圣"
+buff_id = 0xD000000F
+category = "坦克Buff"
+side = "旗舰"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 86.0
+default_duration = 6.0
+default_stacks = 100
+max_stacks = 100
+icon = "https://icon.jx3box.com/icon/3791.png"
+description = "每层无双 +612（明尊朝圣言，覆盖率约 7%）"
+source = "明尊琉璃体"
+conflicts = ["圣浴明心"]
+
+[[entries]]
+key = "盾挡·悟"
+buff_id = 0xD0000036
+category = "坦克Buff"
+side = "无界"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 10.0
+default_duration = 6.6
+default_stacks = 100
+max_stacks = 100
+icon = "https://icon.jx3box.com/icon/101339.png"
+description = "每层全破防 +80（覆盖率约 66%）"
+source = "铁骨衣·悟"
+conflicts = []
+
+[[entries]]
+key = "寒啸千军·悟"
+buff_id = 0xD0000033
+category = "坦克Buff"
+side = "无界"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 30.0
+default_duration = 9.0
+default_stacks = 1
+max_stacks = 1
+icon = "https://icon.jx3box.com/icon/7514.png"
+description = "无双率 +5%（覆盖率约 30%）"
+source = "铁骨衣·悟"
+conflicts = []
+
+[[entries]]
+key = "号令三军·悟"
+buff_id = 0xD0000034
+category = "坦克Buff"
+side = "无界"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 120.0
+default_duration = 24.0
+default_stacks = 100
+max_stacks = 100
+icon = "https://icon.jx3box.com/icon/7513.png"
+description = "每层无双 +715"
+source = "铁牢律·悟"
+conflicts = []
+
+[[entries]]
+key = "弘法·悟"
+buff_id = 0xD0000035
+category = "坦克Buff"
+side = "无界"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 20.0
+default_duration = 6.0
+default_stacks = 100
+max_stacks = 100
+icon = "https://icon.jx3box.com/icon/7509.png"
+description = "每层无双 +759（覆盖率约 30%）"
+source = "洗髓经·悟"
+conflicts = []
+
+[[entries]]
+key = "朝圣·悟"
+buff_id = 0xD000003D
+category = "坦克Buff"
+side = "无界"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 86.0
+default_duration = 6.0
+default_stacks = 100
+max_stacks = 100
+icon = "https://icon.jx3box.com/icon/3791.png"
+description = "每层无双 +244（明尊·悟）"
+source = "明尊琉璃体·悟"
+conflicts = []
+
+[[entries]]
+key = "狮吼·悟"
+buff_id = 0xD000003E
+category = "坦克Buff"
+side = "无界"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 0.0
+default_duration = 0.0
+default_stacks = 100
+max_stacks = 100
+icon = "https://icon.jx3box.com/icon/4526.png"
+description = "每层无双 +139（禅语·悟）"
+source = "洗髓经·悟"
+conflicts = []
+
+# ─── 治疗 Buff（12 条）──────────────────────────────────────
+
+[[entries]]
+key = "飘黄"
+buff_id = 0xD0000011
+category = "治疗Buff"
+side = "旗舰"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 25.0
+default_duration = 15.0
+default_stacks = 100
+max_stacks = 100
+icon = "https://icon.jx3box.com/icon/15692.png"
+description = "每层无双 +163（覆盖率约 60%）"
+source = "灵素"
+conflicts = []
+
+[[entries]]
+key = "仙王蛊鼎"
+buff_id = 0xD0000012
+category = "治疗Buff"
+side = "旗舰"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 60.0
+default_duration = 15.0
+default_stacks = 100
+max_stacks = 100
+icon = "https://icon.jx3box.com/icon/2747.png"
+description = "每层无双 +500（覆盖率约 25%）"
+source = "补天诀"
+conflicts = []
+
+[[entries]]
+key = "左旋右转"
+buff_id = 0xD0000013
+category = "治疗Buff"
+side = "旗舰"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 0.0
+default_duration = 0.0
+default_stacks = 100
+max_stacks = 100
+icon = "https://icon.jx3box.com/icon/904.png"
+description = "每层无双 +139"
+source = "云裳心经"
+conflicts = []
+
+[[entries]]
+key = "秋肃"
+buff_id = 0xD0000014
+category = "治疗Buff"
+side = "旗舰"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 0.0
+default_duration = 0.0
+default_stacks = 100
+max_stacks = 100
+icon = "https://icon.jx3box.com/icon/403.png"
+description = "每层无双 +139"
+source = "离经易道"
+conflicts = []
+
+[[entries]]
+key = "庄周梦"
+buff_id = 0xD0000015
+category = "治疗Buff"
+side = "旗舰"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 0.0
+default_duration = 0.0
+default_stacks = 100
+max_stacks = 100
+icon = "https://icon.jx3box.com/icon/9555.png"
+description = "每层无双 +139"
+source = "相知"
+conflicts = []
+
+[[entries]]
+key = "皎素"
+buff_id = 0xD0000016
+category = "治疗Buff"
+side = "旗舰"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 43.0
+default_duration = 6.0
+default_stacks = 1
+max_stacks = 1
+icon = "https://icon.jx3box.com/icon/17706.png"
+description = "外功会心效果 +5%（覆盖率约 14%）"
+source = "离经易道"
+conflicts = []
+
+[[entries]]
+key = "左旋右转·悟"
+buff_id = 0xD0000037
+category = "治疗Buff"
+side = "无界"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 0.0
+default_duration = 0.0
+default_stacks = 100
+max_stacks = 100
+icon = "https://icon.jx3box.com/icon/904.png"
+description = "每层无双 +126（罗裳·悟）"
+source = "云裳·悟"
+conflicts = []
+
+[[entries]]
+key = "仙王蛊鼎·悟"
+buff_id = 0xD0000038
+category = "治疗Buff"
+side = "无界"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 37.5
+default_duration = 15.0
+default_stacks = 100
+max_stacks = 100
+icon = "https://icon.jx3box.com/icon/2747.png"
+description = "每层无双 +306（仙鼎·悟，覆盖率约 40%）"
+source = "补天·悟"
+conflicts = []
+
+[[entries]]
+key = "梅花三弄·悟"
+buff_id = 0xD0000039
+category = "治疗Buff"
+side = "无界"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 0.0
+default_duration = 0.0
+default_stacks = 100
+max_stacks = 100
+icon = "https://icon.jx3box.com/icon/9555.png"
+description = "每层无双 +126（金缕·悟）"
+source = "相知·悟"
+conflicts = []
+
+[[entries]]
+key = "秋肃·悟"
+buff_id = 0xD000003A
+category = "治疗Buff"
+side = "无界"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 0.0
+default_duration = 0.0
+default_stacks = 100
+max_stacks = 100
+icon = "https://icon.jx3box.com/icon/403.png"
+description = "每层无双 +139"
+source = "离经·悟"
+conflicts = []
+
+[[entries]]
+key = "中和·悟"
+buff_id = 0xD000003B
+category = "治疗Buff"
+side = "无界"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 60.0
+default_duration = 6.0
+default_stacks = 100
+max_stacks = 100
+icon = "https://icon.jx3box.com/icon/16025.png"
+description = "每层无双 +100（灵素·悟，覆盖率约 10%）"
+source = "灵素·悟"
+conflicts = []
+
+[[entries]]
+key = "逐云寒蕊·悟"
+buff_id = 0xD000003C
+category = "治疗Buff"
+side = "无界"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 60.0
+default_duration = 15.0
+default_stacks = 100
+max_stacks = 100
+icon = "https://icon.jx3box.com/icon/15692.png"
+description = "每层无双 +304（濯莲·悟，覆盖率约 25%）"
+source = "灵素·悟"
+conflicts = []
+
+# ─── 食物增益（3 条）─────────────────────────────────────────
+
+[[entries]]
+key = "百炼水煮鱼"
+buff_id = 0xD0000018
+category = "食物增益"
+side = "通用"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 0.0
+default_duration = 0.0
+default_stacks = 1
+max_stacks = 1
+icon = "https://icon.jx3box.com/icon/7667.png"
+description = "无双 +600、破招 +600"
+source = "百炼水煮鱼"
+conflicts = ["炼狱水煮鱼"]
+
+[[entries]]
+key = "炼狱水煮鱼"
+buff_id = 0xD0000017
+category = "食物增益"
+side = "通用"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 0.0
+default_duration = 0.0
+default_stacks = 1
+max_stacks = 1
+icon = "https://icon.jx3box.com/icon/7667.png"
+description = "无双 +100、破招 +100"
+source = "炼狱水煮鱼"
+conflicts = ["百炼水煮鱼"]
+
+[[entries]]
+key = "吟冬卧雪"
+buff_id = 0xD0000019
+category = "食物增益"
+side = "通用"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 0.0
+default_duration = 0.0
+default_stacks = 8
+max_stacks = 8
+icon = "https://icon.jx3box.com/icon/138.png"
+description = "全破防 +380、全会心 +380（每层）"
+source = "节日冬至食盒"
+conflicts = []
+
+# ─── 稀缺增益（5 条）─────────────────────────────────────────
+
+[[entries]]
+key = "疏狂"
+buff_id = 0xD000001A
+category = "稀缺增益"
+side = "通用"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 30.0
+default_duration = 6.0
+default_stacks = 1
+max_stacks = 1
+icon = "https://icon.jx3box.com/icon/8638.png"
+description = "外功基础攻击 +30%（覆盖率约 20%）"
+source = "北傲诀奇穴"
+conflicts = []
+
+[[entries]]
+key = "烈雷"
+buff_id = 0xD000001B
+category = "稀缺增益"
+side = "通用"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 75.0
+default_duration = 6.0
+default_stacks = 1
+max_stacks = 1
+icon = "https://icon.jx3box.com/icon/7113.png"
+description = "外功基础攻击 +700（莫问武器，覆盖率约 8%）"
+source = "莫问特效武器"
+conflicts = []
+
+[[entries]]
+key = "弄梅"
+buff_id = 0xD000001C
+category = "稀缺增益"
+side = "通用"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 24.0
+default_duration = 18.0
+default_stacks = 1
+max_stacks = 1
+icon = "https://icon.jx3box.com/icon/7059.png"
+description = "破防 +700、无视防御 +20%（相知武器，覆盖率约 75%）"
+source = "相知特效武器"
+conflicts = []
+
+[[entries]]
+key = "碎星辰"
+buff_id = 0xD000001E
+category = "稀缺增益"
+side = "旗舰"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 30.0
+default_duration = 15.0
+default_stacks = 1
+max_stacks = 1
+icon = "https://icon.jx3box.com/icon/1450.png"
+description = "外功会心效果 +10%（覆盖率约 50%）"
+source = "太虚剑意"
+conflicts = []
+
+# ─── 节日增益（5 条）─────────────────────────────────────────
+
+[[entries]]
+key = "瑰栗粽"
+buff_id = 0xD000001F
+category = "节日增益"
+side = "通用"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 0.0
+default_duration = 0.0
+default_stacks = 1
+max_stacks = 1
+icon = "https://icon.jx3box.com/icon/2583.png"
+description = "武器伤害 +2477"
+source = "端午节日活动"
+conflicts = ["芦兜粽"]
+
+[[entries]]
+key = "芦兜粽"
+buff_id = 0xD0000020
+category = "节日增益"
+side = "通用"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 0.0
+default_duration = 0.0
+default_stacks = 1
+max_stacks = 1
+icon = "https://icon.jx3box.com/icon/2582.png"
+description = "外功攻击 +1641"
+source = "端午节日活动"
+conflicts = ["瑰栗粽"]
+
+[[entries]]
+key = "梅花糕"
+buff_id = 0xD0000022
+category = "节日增益"
+side = "通用"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 0.0
+default_duration = 0.0
+default_stacks = 1
+max_stacks = 1
+icon = "https://icon.jx3box.com/icon/6782.png"
+description = "武器伤害 +2657"
+source = "端午节日活动"
+conflicts = ["云片糕"]
+
+[[entries]]
+key = "云片糕"
+buff_id = 0xD0000021
+category = "节日增益"
+side = "通用"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 0.0
+default_duration = 0.0
+default_stacks = 1
+max_stacks = 1
+icon = "https://icon.jx3box.com/icon/6892.png"
+description = "外功攻击 +1762"
+source = "端午节日活动"
+conflicts = ["梅花糕"]
+
+[[entries]]
+key = "春节·升景"
+buff_id = 0xD0000023
+category = "节日增益"
+side = "通用"
+is_target_buff = false
+default_first_release = 0.0
+default_period = 0.0
+default_duration = 0.0
+default_stacks = 1
+max_stacks = 1
+icon = "https://icon.jx3box.com/icon/341.png"
+description = "外功攻击 +6849、武器伤害 +2296"
+source = "春节节日活动"
+conflicts = []

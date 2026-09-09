@@ -120,6 +120,9 @@ pub(crate) fn buff_name_to_id(name: &str) -> Option<u32> {
         "寒甲" => Some(BUFF_HAN_JIA),
         "坚铁" => Some(BUFF_JIAN_TIE),
         "盾威" => Some(BUFF_DUN_WEI),
+        "威压" => Some(scripts::v2026_10_CangShengZhuShiTest::buffs::defs::BUFF_WEI_YA),
+        "惊涌" => Some(scripts::v2026_10_CangShengZhuShiTest::buffs::defs::BUFF_JING_YONG_PASSIVE),
+        "角斗场" => Some(scripts::v2026_10_CangShengZhuShiTest::buffs::defs::BUFF_JIAO_DOU_CHANG),
         "严阵" => Some(BUFF_YAN_ZHEN),
         "铁骨" => Some(BUFF_TIE_GU),
         "铁骨·宿敌" | "宿敌" => Some(BUFF_TIE_GU_SU_DI),
@@ -238,6 +241,12 @@ fn eval_condition(cond: &MacroCondition, state: &Phase1State) -> bool {
     );
     match cond {
         MacroCondition::Rage(op, val) => op.compare_i32(state.player.rage, *val),
+        MacroCondition::Energy(op, val) => {
+            op.compare_i32(state.player.block_value, *val)
+        }
+        MacroCondition::Berserk(op, val) => {
+            op.compare_i32(state.player.berserk_value, *val)
+        }
         MacroCondition::Life(op, val) => {
             // 模拟器默认满血
             op.compare_f64(1.0, *val)
@@ -476,6 +485,18 @@ pub fn evaluate_phase2<'a>(
                 entry.skill_name.clone(),
                 false,
                 "战绝：仅可释放苍雪刀招式".into()
+            );
+            continue;
+        }
+
+        // 测试服宏按三段各自的名字匹配；母招式不能代替后续段进入可释放池。
+        // 手动轴仍保留同名连续点击的连招入口，正式服宏维持原行为。
+        if player.is_zhen_yun_followup_entry(skill) {
+            push_dbg!(
+                entry.line,
+                entry.skill_name.clone(),
+                false,
+                "请分别使用月照连营或雁门迢递".into()
             );
             continue;
         }
@@ -1348,3 +1369,7 @@ pub fn simulate_macro(
 
     (timeline, debug_steps, line_stats)
 }
+
+#[cfg(test)]
+#[path = "../tests/cangsheng/macro_conditions.rs"]
+mod berserk_condition_tests;

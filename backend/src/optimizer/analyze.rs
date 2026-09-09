@@ -33,6 +33,7 @@ pub struct TunableParam {
 #[derive(Debug, Clone, Copy, Serialize, serde::Deserialize, PartialEq, Eq)]
 pub enum LeafKind {
     Rage,
+    Energy,
     Life,
     BuffTime,
     TBuffTime,
@@ -115,6 +116,7 @@ fn format_line(line: &MacroLine) -> String {
 
 enum Leaf {
     Rage(CmpOp, i32),
+    Energy(CmpOp, i32),
     Life(CmpOp, f64),
     BuffTime(String, CmpOp, f64),
     TBuffTime(String, CmpOp, f64),
@@ -129,6 +131,7 @@ fn walk_conditions(cond: &MacroCondition, out: &mut Vec<Leaf>) {
             walk_conditions(b, out);
         }
         MacroCondition::Rage(op, v) => out.push(Leaf::Rage(*op, *v)),
+        MacroCondition::Energy(op, v) => out.push(Leaf::Energy(*op, *v)),
         MacroCondition::Life(op, v) => out.push(Leaf::Life(*op, *v)),
         MacroCondition::BuffTime(n, op, v) => out.push(Leaf::BuffTime(n.clone(), *op, *v)),
         MacroCondition::TBuffTime(n, op, v) => out.push(Leaf::TBuffTime(n.clone(), *op, *v)),
@@ -162,6 +165,11 @@ impl Leaf {
             Leaf::Life(_, v) => {
                 let (mn, mx) = clamp_int_range(*v, 0.0, 100.0, 30.0);
                 ("life".to_string(), *v, mn, mx, 1.0, "int", LeafKind::Life)
+            }
+            Leaf::Energy(_, v) => {
+                let fv = *v as f64;
+                let (mn, mx) = clamp_int_range(fv, 0.0, 200.0, 30.0);
+                ("energy".to_string(), fv, mn, mx, 1.0, "int", LeafKind::Energy)
             }
             Leaf::BuffTime(n, _, v) => {
                 let mn = round_to_step((*v - 5.0).max(0.0), 0.1);
@@ -239,6 +247,7 @@ impl Leaf {
     fn op(&self) -> CmpOp {
         match self {
             Leaf::Rage(op, _)
+            | Leaf::Energy(op, _)
             | Leaf::Life(op, _)
             | Leaf::BuffTime(_, op, _)
             | Leaf::TBuffTime(_, op, _)
@@ -291,7 +300,7 @@ fn set_nth_leaf(cond: &mut MacroCondition, target: usize, counter: &mut usize, v
             }
             set_nth_leaf(b, target, counter, v)
         }
-        MacroCondition::Rage(_, val) => {
+        MacroCondition::Rage(_, val) | MacroCondition::Energy(_, val) => {
             if *counter == target {
                 *val = v.round() as i32;
                 return true;

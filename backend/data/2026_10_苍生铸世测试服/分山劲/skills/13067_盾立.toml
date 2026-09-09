@@ -1,0 +1,29 @@
+﻿id   = 13067
+name = "盾立"
+
+icon = "https://icon.jx3box.com/icon/6340.png"
+# 防御技 / 擎盾姿态 / CD: 20秒
+# 2秒内反弹所有招式伤害及效果（仅对玩家）
+# 盾墙下延长至3秒
+
+stance = "shield"
+
+[[cooldowns]]
+cd_id    = "gcd_0.5"
+duration = 0.5
+mode     = "check_and_trigger"
+haste    = true
+
+[[cooldowns]]
+cd_id    = "cd_盾立"
+duration = 20.0
+mode     = "check_and_trigger"
+haste    = false
+
+[[ranks]]
+rank         = 1
+name         = "盾立"
+icon = "https://icon.jx3box.com/icon/6340.png"
+base_damage  = 0
+attack_coeff = 0
+weapon_coeff = 0

@@ -199,6 +199,12 @@ impl KnowledgeVersionContext {
                 current_season: "体服（2021-2025）",
                 required_category: Some("130级"),
             },
+            GameVersion::CangShengZhuShiTest => Self {
+                game_version,
+                // 新资料必须显式归入本测试赛季，不能继承暗影千机或旧体服资料。
+                current_season: "苍生铸世测试服（2026）",
+                required_category: None,
+            },
         }
     }
 
@@ -2014,6 +2020,7 @@ fn current_release_label(game_version: GameVersion) -> &'static str {
     match game_version {
         GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest => "暗影千机",
         GameVersion::ShanHaiYuanLiu => "山海源流",
+        GameVersion::CangShengZhuShiTest => "苍生铸世",
     }
 }
 
@@ -2757,6 +2764,8 @@ mod tests {
                 && result.version_match == KnowledgeVersionMatch::HistoricalExplicit
         }));
     }
+
+    include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cangsheng/knowledge.rs"));
 
     #[test]
     fn metadata_only_entries_are_never_fact_eligible() {

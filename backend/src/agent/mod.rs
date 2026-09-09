@@ -5,6 +5,7 @@
 //! formulas or expose arbitrary filesystem/process access.
 
 pub mod artifacts;
+pub mod berserk;
 pub mod compare;
 pub mod domain;
 pub mod distillation;
