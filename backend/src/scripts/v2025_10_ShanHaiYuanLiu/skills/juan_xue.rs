@@ -38,6 +38,7 @@ pub fn process_swings(player: &mut Player, to_time: f64) -> Vec<CastEvent> {
     while t <= to_time + 0.0001 {
        events.push(CastEvent {
             sequence_index: None,
+            solidify: None,
            name: "卷雪刀".into(),
             skill_id: 13039,
             cast_time: t,

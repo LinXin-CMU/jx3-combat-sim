@@ -97,6 +97,7 @@ pub fn run_rollout(
                 &recipes_table,
                 &skill_by_id,
                 &[],
+                None,
             );
             Ok(summarize(timeline, &player, duration))
         }

@@ -291,6 +291,7 @@ pub fn run_once(ind: &StructIndividual, ctx: &StructCtx, duration: f64) -> f64 {
         recipes_table,
         &skill_by_id,
         &[],
+        None,
     );
     let total: f64 = timeline.iter().filter_map(|e| e.damage_total).sum();
     let last_cast = timeline

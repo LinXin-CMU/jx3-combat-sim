@@ -23,11 +23,17 @@ mod buffs;
 pub mod equip;
 pub mod equip_effects;
 pub mod expectation;
+pub mod macro_assist;
 pub mod macro_engine;
 pub mod macro_eval;
+pub mod macro_diagnostic;
 pub mod macro_gen;
+mod macro_exact;
+mod macro_exact_http;
+mod loop_tabs;
 pub mod macro_parser;
 pub mod macro_prune;
+pub mod macro_solidify;
 pub mod optimizer;
 pub mod rl;
 mod router;
@@ -680,6 +686,15 @@ fn talents_file(version: GameVersion, mount: Mount) -> String {
 fn recipes_file(version: GameVersion) -> String {
     // 秘籍按版本共享（两心法同一份）
     format!("{}/recipes.toml", version_root(version))
+}
+/// 心法独立表优先；未提供时沿用该版本的共享表。
+fn recipes_file_for_mount(version: GameVersion, mount: Mount) -> String {
+    let path = format!("{}/recipes.toml", mount_root(version, mount));
+    if Path::new(&path).exists() { path } else { recipes_file(version) }
+}
+fn team_buffs_file_for_mount(version: GameVersion, mount: Mount) -> String {
+    let path = format!("{}/team_buffs.toml", mount_root(version, mount));
+    if Path::new(&path).exists() { path } else { team_buffs_file(version) }
 }
 fn school_toml_path(version: GameVersion, mount: Mount) -> String {
     format!("{}/school.toml", mount_root(version, mount))
@@ -1966,6 +1981,9 @@ pub struct SimulateRequest {
     /// 非主GCD技能释放偏移：序列索引 → 偏移秒数（相对最早可释放时间）
     #[serde(default)]
     pub timing_offsets: HashMap<String, f64>,
+    /// Frozen concrete casts with relative event checkpoints; no macro evaluation.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub solidified_casts: HashMap<String, macro_solidify::FrozenCast>,
     /// 网络延迟（毫秒）
     #[serde(default)]
     pub network_delay: u32,
@@ -2052,6 +2070,8 @@ pub struct CastEvent {
     /// Original manual input position; independent of skipped or triggered events.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sequence_index: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub solidify: Option<macro_solidify::FrozenCast>,
     pub name: String,
     pub skill_id: u32,
     pub cast_time: f64,
@@ -2166,6 +2186,8 @@ pub struct RageTransaction {
 /// 事件时刻的玩家状态快照
 #[derive(Debug, Serialize, Clone)]
 pub struct EventState {
+    /// 实际采样时刻；释放前快照可能早于 cast_skill 最终排定的时刻。
+    pub time: f64,
     pub rage: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub block_value: Option<i32>,
@@ -2178,6 +2200,21 @@ pub struct EventState {
     pub target_buffs: Vec<EventBuff>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub skill_cds: Vec<EventSkillCd>,
+    /// 宏条件的技能状态；None 表示未提供技能目录，不能据此推断技能可用。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skill_states: Option<Vec<EventSkillState>>,
+}
+
+/// 宏条件快照，直接使用 Player 的充能与 CD 查询，包含满层及 GCD 状态。
+#[derive(Debug, Serialize, Clone)]
+pub struct EventSkillState {
+    pub name: String,
+    pub skill_id: u32,
+    /// None 为非充能技能，与未记录状态区别开。
+    pub charges: Option<u32>,
+    pub max_charges: Option<u32>,
+    /// 与 skill_notin_cd 一致，包含 GCD，不代表姿态/资源等释放要求满足。
+    pub not_in_cd: bool,
 }
 
 /// 状态快照中的技能 CD 条目
@@ -2192,6 +2229,7 @@ pub struct EventSkillCd {
 pub struct EventBuff {
     pub buff_id: u32,
     pub name: String,
+    /// 仅记录仍活跃的效果：0 表示永久，正数表示剩余秒数；缺席不等于 0。
     pub remaining: f64,
     pub stacks: u32,
     /// 图标 URL（来自 BuffDef.icon，空串前端跳过）—— 让序列项 hover 等场景能按 buff_id 取图标
@@ -2496,6 +2534,8 @@ pub struct Player {
     /// Lite 模式：跳过 buff_events 记录（snapshot），跳过 timeline 详情。
     /// 由 simulate_core 在 req.lite=true 时设置。批量场景用。
     pub lite_mode: bool,
+    /// 完整模拟一次性绑定的主动技能首 rank，仅用于只读状态快照。
+    snapshot_skill_specs: Option<Vec<SkillSpec>>,
     /// 当前选中阵法（None = 不开阵）
     pub formation: Option<FormationSelection>,
     /// 阵法永久 effects 聚合（simulate_core 入口预算；aggregate_buff_fields 合并）
@@ -2664,6 +2704,7 @@ impl Player {
             last_swing_time: None,
             experimental: false,
             lite_mode: false,
+            snapshot_skill_specs: None,
             zhen_yun_consumed_stacks: 0,
             expectation: None,
             next_boss_attack: None,
@@ -4383,8 +4424,16 @@ impl Player {
         let mut events = Vec::new();
         let mut em = ScriptEmitter::new();
 
-        // 执行 tick 脚本 + 记录事件
-        for (bid, t) in tick_schedule {
+        // Tick 与到期事件必须按时间交错处理。否则长手动等待会先执行
+        // 较晚的 tick，再让较早的 expire 回调覆盖状态，与宏的逐事件推进不同。
+        // 同一时刻仍保持 tick 在 expire 前，保留末跳语义。
+        let mut scheduled: Vec<(f64, bool, u32)> = tick_schedule
+            .into_iter()
+            .map(|(bid, t)| (t, false, bid))
+            .chain(expired.iter().map(|&(bid, t)| (t, true, bid)))
+            .collect();
+        scheduled.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+        for (t, is_expire, bid) in scheduled {
             self.current_time = t;
             if !self.lite_mode {
                 if let Some(def) = self.buff_def(bid) {
@@ -4393,32 +4442,17 @@ impl Player {
                         self.buff_events
                             .entry(bid)
                             .or_default()
-                            .push((t, "tick".into(), state));
+                            .push((t, if is_expire { "expire" } else { "tick" }.into(), state));
                     }
                 }
             }
-            if let Some(script) = scripts::get_buff_on_tick(self, bid) {
+            let script = if is_expire {
+                scripts::get_buff_on_expire(self, bid)
+            } else {
+                scripts::get_buff_on_tick(self, bid)
+            };
+            if let Some(script) = script {
                 script(self, &mut em, t);
-            }
-        }
-
-        // 执行 expire 脚本 + 记录事件
-        for (bid, t) in &expired {
-            self.current_time = *t;
-            if !self.lite_mode {
-                if let Some(def) = self.buff_def(*bid) {
-                    if def.show_on_timeline {
-                        let state = snapshot_event_state(self);
-                        self.buff_events.entry(*bid).or_default().push((
-                            *t,
-                            "expire".into(),
-                            state,
-                        ));
-                    }
-                }
-            }
-            if let Some(script) = scripts::get_buff_on_expire(self, *bid) {
-                script(self, &mut em, *t);
             }
         }
 
@@ -5586,6 +5620,7 @@ impl ScriptEmitter {
     pub fn emit(&mut self, name: &str, skill_id: u32, cast_time: f64) {
        self.events.push(CastEvent {
             sequence_index: None,
+            solidify: None,
            name: name.into(),
             skill_id,
             cast_time,
@@ -5628,6 +5663,7 @@ impl ScriptEmitter {
     pub fn emit_with_ticks(&mut self, name: &str, skill_id: u32, cast_time: f64, ticks: u32) {
        let mut ev = CastEvent {
             sequence_index: None,
+            solidify: None,
            name: name.into(),
             skill_id,
             cast_time,
@@ -5681,6 +5717,7 @@ impl ScriptEmitter {
     ) {
        self.events.push(CastEvent {
             sequence_index: None,
+            solidify: None,
            name: name.into(),
             skill_id,
             cast_time,
@@ -5729,6 +5766,7 @@ impl ScriptEmitter {
     ) {
        self.events.push(CastEvent {
             sequence_index: None,
+            solidify: None,
            name: name.into(),
             skill_id,
             cast_time,
@@ -5917,20 +5955,28 @@ fn snapshot_event_state(player: &Player) -> EventState {
         .iter()
         .filter(|b| b.expires_at == 0.0 || b.expires_at > t)
         .filter_map(|b| {
-            let def = player.buff_def(b.buff_id)?;
-            if def.is_debuff {
-                return None;
-            } // 跳过 debuff
+            let (name, icon) = if let Some(def) = player.buff_def(b.buff_id) {
+                (def.name, def.icon)
+            } else {
+                // 游戏姿态由 add_state_buff 管理，没有属性 BuffDef，但宏按游戏 ID 查询。
+                // 其余无定义的内部姿态/连招 ID 不作为游戏宏候选公开。
+                match b.buff_id {
+                    BUFF_STANCE_SHIELD_GAME => ("擎盾", ""),
+                    BUFF_STANCE_BLADE_GAME => ("擎刀", ""),
+                    _ => return None,
+                }
+            };
+            // 宏 buff 条件查询全部自身状态，包括标为 debuff 的盾飞等效果。
             Some(EventBuff {
                 buff_id: b.buff_id,
-                name: def.name.to_string(),
+                name: name.to_string(),
                 remaining: if b.expires_at == 0.0 {
                     0.0
                 } else {
                     (b.expires_at - t).max(0.0)
                 },
                 stacks: b.stacks,
-                icon: def.icon.to_string(),
+                icon: icon.to_string(),
             })
         })
         .collect();
@@ -6010,12 +6056,27 @@ fn snapshot_event_state(player: &Player) -> EventState {
     } else {
         None
     };
+    let skill_states = player.snapshot_skill_specs.as_ref().map(|skills| {
+        skills.iter().map(|skill| EventSkillState {
+            name: if (90010..=90012).contains(&skill.skill_id) {
+                skill.name.clone()
+            } else {
+                skill.name.split('·').next().unwrap_or(&skill.name).to_string()
+            },
+            skill_id: skill.skill_id,
+            charges: player.get_charges(skill),
+            max_charges: (skill.max_charges > 0)
+                .then(|| player.effective_max_charges(skill)),
+            not_in_cd: player.is_skill_not_in_cd(skill),
+        }).collect()
+    });
     let _ns = _t0.elapsed().as_nanos() as u64;
     perf_add(|p| {
         p.snapshot_n += 1;
         p.snapshot_ns += _ns;
     });
     EventState {
+        time: t,
         rage: player.rage,
         block_value,
         berserk_value: player.uses_berserk().then_some(player.berserk_value),
@@ -6024,6 +6085,7 @@ fn snapshot_event_state(player: &Player) -> EventState {
         buffs,
         target_buffs,
         skill_cds,
+        skill_states,
     }
 }
 
@@ -6058,6 +6120,7 @@ pub struct SharedState {
     pub agent_providers: Arc<agent::provider::ProviderCatalog>,
     /// 当前 worker 的瞬态 Agent run；每个 worker 同时只允许一个活动 run。
     pub agent_runs: Arc<agent::run::AgentRunManager>,
+    pub exact_jobs: Arc<macro_exact_http::Manager>,
     /// 当前 worker 用户目录内的 append-only Agent 会话。
     pub agent_sessions: Arc<agent::session::AgentSessionStore>,
     /// 启动时构建的只读、版本感知本地知识索引；未配置时 Agent 保持原有模拟能力。
@@ -7350,6 +7413,20 @@ fn simulate_core(
     team_buffs_table: &[TeamBuffEntry],
     formations_table: &[FormationEntry],
 ) -> SimulateResponse {
+    simulate_core_with_trace(req, skills, cur_version, cur_mount, cur_consts, recipes_table, team_buffs_table, formations_table, None)
+}
+
+fn simulate_core_with_trace(
+    req: &SimulateRequest,
+    skills: &[SkillSpec],
+    cur_version: GameVersion,
+    cur_mount: Mount,
+    cur_consts: MountConstants,
+    recipes_table: &[RecipeEntry],
+    team_buffs_table: &[TeamBuffEntry],
+    formations_table: &[FormationEntry],
+    mut trace: Option<&mut macro_diagnostic::Collector>,
+) -> SimulateResponse {
     let sim_start = std::time::Instant::now();
     SIM_PERF.with(|p| *p.borrow_mut() = SimPerf::default());
     // 秘籍倒排索引（按需构建/重建）
@@ -7386,6 +7463,14 @@ fn simulate_core(
     }
     player.experimental = req.experimental && cur_version != GameVersion::CangShengZhuShiTest;
     player.lite_mode = req.lite;
+    player.snapshot_skill_specs = (!req.lite).then(|| {
+        let mut specs = skill_map.values()
+            .filter_map(|ranks| ranks.first())
+            .map(|skill| (**skill).clone())
+            .collect::<Vec<_>>();
+        specs.sort_by(|left, right| left.name.cmp(&right.name));
+        specs
+    });
     // 装备清单：脚本通过 player.equip_id_at("PRIMARY_WEAPON") 等查询；
     // set_equipped 同步维护 equipped_values 索引（O(1) has_enchant）
     player.set_equipped(req.equipment.clone());
@@ -7694,7 +7779,7 @@ fn simulate_core(
                         .find(|e| !e.triggered)
                         .map(|e| e.name.split('·').next().unwrap_or(&e.name).to_string());
                 }
-                let (macro_tl, debug, line_stats) = macro_eval::simulate_macro(
+                let (mut macro_tl, debug, line_stats) = macro_eval::simulate_macro(
                     config,
                     &mut player,
                     &skill_map,
@@ -7708,6 +7793,7 @@ fn simulate_core(
                     recipes_table,
                     &skill_by_id,
                     &req.pauses,
+                    trace.as_deref_mut(),
                 );
                 if let Some(last) = macro_tl.iter().rev().find(|e| !e.triggered) {
                     macro_last_skill = Some(
@@ -7718,6 +7804,9 @@ fn simulate_core(
                             .to_string(),
                     );
                 }
+                for event in macro_tl.iter_mut().filter(|e| !e.triggered) {
+                    event.sequence_index = Some(seq_idx);
+                }
                 // 宏模拟的"战斗用时"按实际模拟推进到的时刻算（含末尾空闲/channel），
                 // 但 clamp 到 macro_duration —— 否则 simulate_macro break 时 current_time 略超 max_duration
                 // 会让 fight_time 比固化路径（fight_time = macro_duration）多 0.x 秒。
@@ -7727,6 +7816,27 @@ fn simulate_core(
                 timeline.extend(macro_tl);
                 macro_debug.extend(debug);
                 macro_eval::merge_line_execution_stats(&mut macro_line_stats, line_stats);
+            }
+            continue;
+        }
+
+        if let Some(frozen) = req.solidified_casts.get(&seq_idx.to_string()) {
+            let begin = timeline.len();
+            let ctx = macro_eval::CastCtx {
+                skill_by_id: &skill_by_id, recipes_table, dmg_ctx: dmg_ctx.as_ref(),
+                network_delay: delay_sec, is_macro: false,
+            };
+            match macro_solidify::replay(frozen, name, &mut player, &skill_map,
+                &mut timeline, &mut prev_time, &mut is_first_main, &ctx) {
+                Ok(()) => {
+                    for event in timeline[begin..].iter_mut().filter(|e| !e.triggered) {
+                        event.sequence_index = Some(seq_idx);
+                    }
+                    last_cast_time = player.current_time;
+                    macro_last_skill = timeline.iter().rev().find(|e| !e.triggered)
+                        .map(|e| e.name.split('·').next().unwrap_or(&e.name).to_string());
+                }
+                Err(reason) => { skipped.push((seq_idx, reason)); }
             }
             continue;
         }
@@ -8137,6 +8247,7 @@ fn simulate_core(
 
            timeline.push(CastEvent {
                 sequence_index: Some(seq_idx),
+                solidify: None,
                name: event_name,
                 skill_id: skill.skill_id,
                 cast_time,
@@ -10119,6 +10230,7 @@ async fn run_auto_optimize_compute(
             sequence: vec!["__macro__".to_string(); max_slots],
             channel_ticks: HashMap::new(),
             timing_offsets: HashMap::new(),
+            solidified_casts: HashMap::new(),
             qijin_buffs: HashMap::new(),
             macro_text: Some(req.macro_text.clone()),
             macro_duration: Some(req.duration),
@@ -11984,6 +12096,11 @@ fn spawn_icon_prefetch(
 
 #[tokio::main]
 async fn main() {
+    // Local research protocol; exits before settings, credentials or userdata load.
+    if std::env::args().any(|arg| arg == "--exact-macro-oracle") {
+        macro_exact::cli();
+        return;
+    }
     std::panic::set_hook(Box::new(|info| {
         eprintln!("[PANIC] {info}");
     }));
@@ -12097,6 +12214,7 @@ async fn main() {
         agent_provenance: Arc::new(RwLock::new(agent_provenance)),
         agent_providers: Arc::new(agent_providers),
         agent_runs,
+        exact_jobs: Arc::new(macro_exact_http::Manager::default()),
         agent_sessions,
         agent_knowledge,
         version: Arc::new(RwLock::new(version)),
@@ -12153,6 +12271,7 @@ async fn main() {
         .route("/api/icon/:id", get(icon_proxy))
         .route("/api/formations", get(list_formations))
         .route("/api/simulate", post(simulate))
+        .route("/api/macro/diagnose", post(macro_diagnostic::handler).layer(axum::extract::DefaultBodyLimit::max(8 * 1024 * 1024)))
         .route(
             "/api/agent/tools/scenario",
             post(agent::http::scenario_handler),
@@ -12209,7 +12328,23 @@ async fn main() {
         .route("/api/resume/save", post(resume_save))
         .route("/api/resume/load", get(resume_load))
         .route("/api/settings", get(settings_load).post(settings_save))
+        .route("/api/loop-tabs", get(loop_tabs::load).post(loop_tabs::save))
         .route("/api/macro/from_sequence", post(macro_from_sequence))
+        .route("/api/macro/exact", get(macro_exact_http::current).post(macro_exact_http::create)
+            .layer(axum::extract::DefaultBodyLimit::max(8 * 1024 * 1024)))
+        .route("/api/macro/exact/:id", get(macro_exact_http::status))
+        .route("/api/macro/exact/:id/source", get(macro_exact_http::source))
+        .route("/api/macro/exact/:id/cancel", post(macro_exact_http::cancel))
+        .route("/api/macro/exact/:id/pause", post(macro_exact_http::pause))
+        .route("/api/macro/exact/:id/resume", post(macro_exact_http::resume))
+        .route(
+            "/api/macro/assist",
+            post(macro_assist::handler).layer(axum::extract::DefaultBodyLimit::max(8 * 1024 * 1024)),
+        )
+        .route(
+            "/api/macro/assist/program",
+            post(macro_assist::program_handler).layer(axum::extract::DefaultBodyLimit::max(8 * 1024 * 1024)),
+        )
         .route("/api/macro/prune_candidates", post(macro_prune_candidates))
         .route("/api/macro/swap_candidates", post(macro_swap_candidates))
         .route(
@@ -12230,7 +12365,7 @@ async fn main() {
         .route("/api/optimizer/analyze", post(optimizer_analyze))
         .route(
             "/api/optimizer/start",
-            post(optimizer::runtime::start_handler),
+            post(optimizer::runtime::start_handler).layer(axum::middleware::from_fn_with_state(state.clone(), macro_exact_http::legacy_admission)),
         )
         .route(
             "/api/optimizer/stop",
@@ -12274,7 +12409,7 @@ async fn main() {
         )
         .route("/api/rl/env/:id/info", get(rl::http::info_handler))
         .route("/api/rl/env/:id/close", post(rl::http::close_handler))
-        .route("/api/rl/train/start", post(rl::training::start_handler))
+        .route("/api/rl/train/start", post(rl::training::start_handler).layer(axum::middleware::from_fn_with_state(state.clone(), macro_exact_http::legacy_admission)))
         .route("/api/rl/train/stop", post(rl::training::stop_handler))
         .route("/api/rl/train/status", get(rl::training::status_handler))
         .route("/api/rl/train/stream", get(rl::training::stream_handler))
@@ -12284,7 +12419,7 @@ async fn main() {
             get(rl::training::get_runtime_params_handler)
                 .post(rl::training::set_runtime_params_handler),
         )
-        .route("/api/rl/analyze/start", post(rl::analysis::start_handler))
+        .route("/api/rl/analyze/start", post(rl::analysis::start_handler).layer(axum::middleware::from_fn_with_state(state.clone(), macro_exact_http::legacy_admission)))
         .route("/api/rl/analyze/stop", post(rl::analysis::stop_handler))
         .route("/api/rl/analyze/status", get(rl::analysis::status_handler))
         .route("/api/rl/analyze/stream", get(rl::analysis::stream_handler))
@@ -12292,7 +12427,7 @@ async fn main() {
             "/api/rl/analyze/latest_actions",
             get(rl::analysis::latest_actions_handler),
         )
-        .route("/api/rl/pretrain/start", post(rl::pretrain::start_handler))
+        .route("/api/rl/pretrain/start", post(rl::pretrain::start_handler).layer(axum::middleware::from_fn_with_state(state.clone(), macro_exact_http::legacy_admission)))
         .route("/api/rl/pretrain/stop", post(rl::pretrain::stop_handler))
         .route("/api/rl/pretrain/status", get(rl::pretrain::status_handler))
         .route("/api/rl/pretrain/stream", get(rl::pretrain::stream_handler))
@@ -12306,7 +12441,7 @@ async fn main() {
         .route("/api/equip/calculate", post(equip_calculate))
         .route("/api/equip/meta", get(equip_meta))
         .route("/api/equip/haste_tiers", get(equip_haste_tiers))
-        .route("/api/equip/auto_optimize", post(equip_auto_optimize))
+        .route("/api/equip/auto_optimize", post(equip_auto_optimize).layer(axum::middleware::from_fn_with_state(state.clone(), macro_exact_http::legacy_admission)))
         .route(
             "/api/equip/auto_optimize/progress",
             get(equip_auto_optimize_progress),

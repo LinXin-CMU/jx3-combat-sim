@@ -1,0 +1,27 @@
+{
+  "version": "CangShengZhuShiTest",
+  "mount": "FenShanJin",
+  "horizon": 30.0,
+  "simulation": {
+    "haste_level": 0,
+    "sequence": [
+      "盾猛", "盾压", "盾刀", "盾刀", "盾刀", "盾飞", "斩刀", "血怒", "阵云结晦", "阵云结晦", "绝刀", "绝刀",
+      "盾回", "盾猛", "盾压", "盾刀", "盾刀", "盾刀", "盾飞", "斩刀", "阵云结晦", "绝刀", "绝刀"
+    ],
+    "talents": [30769, 38969, 91001, 91002, 21281, 91003, 13414],
+    "recipes": [3005],
+    "initial_rage": 0,
+    "network_delay": 0,
+    "attributes": {
+      "vitality": 45.0, "li_dao": 44.0, "gen_gu": 44.0, "yuan_qi": 44.0, "shen_fa": 44.0,
+      "base_attack": 38466.0, "weapon_damage": 10986.0, "surplus_value": 0.0,
+      "crit_level": 54841.0, "crit_effect_level": 0.0, "overcome_level": 29480.0,
+      "strain_level": 66031.0, "haste_level": 0.0
+    },
+    "target": {"level": 54, "defense_bonus": 0.0, "damage_cof": 0.0},
+    "equipment": {}, "team_buffs": [], "formation": null, "pre_releases": [], "pauses": [],
+    "boss_attack_interval": null, "hanjia_expectation": true, "dunya_reset_seed": 1,
+    "tiegu_mode": 0, "experimental": false, "channel_ticks": {}, "timing_offsets": {},
+    "qijin_buffs": {}, "macro_text": null, "macro_duration": 30.0, "lite": false, "lite_keep_timeline": false
+  }
+}

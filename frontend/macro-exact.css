@@ -1,0 +1,39 @@
+.macro-exact { padding: 18px; box-sizing: border-box; font-size: 12px; line-height: 1.7; }
+.macro-exact h2 { font-size: 21px; font-weight: 600; margin: 6px 0; letter-spacing: .02em; }
+.macro-exact h3 { margin: 0; font-size: 13px; }
+.macro-exact p { margin: 8px 0; }
+.em-eyebrow { color: var(--gold); font-size: 10px; letter-spacing: .15em; }
+.em-intro > p, .em-settings > p, .em-muted, .em-footer { color: var(--text-muted); font-size: 11px; }
+.em-settings, .em-run, .em-preview { margin-top: 16px; padding: 15px; border: 1px solid var(--border-soft); border-radius: 12px; background: var(--surface2); }
+.em-settings > label:first-child { display: flex; align-items: center; gap: 14px; justify-content: space-between; }
+.em-settings input[type="number"] { min-width: 0; width: 185px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 7px; padding: 8px; background: var(--surface); color: var(--text); font: inherit; }
+.em-check { display: flex; gap: 7px; align-items: center; margin-top: 10px; }
+.em-check input { accent-color: var(--gold); }
+.em-settings .harness-primary { margin-top: 6px; width: 100%; }
+.em-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.em-status { color: var(--text-muted); font-size: 10px; border: 1px solid var(--border); border-radius: 20px; padding: 2px 8px; }
+.em-status[data-exact="true"] { color: var(--green); border-color: var(--green); }
+.em-controls { display: flex; gap: 7px; flex-wrap: wrap; margin: 12px 0; }
+.em-controls select { min-width: 0; max-width: 150px; border: 1px solid var(--border); border-radius: 5px; padding: 4px 6px; background: var(--surface); color: var(--text); font: inherit; }
+#em_run_feedback:empty { display: none; }
+.macro-exact button:disabled { opacity: .5; cursor: default; }
+#em_macro, #em_best_macro { width: 100%; box-sizing: border-box; resize: vertical; min-height: 150px; margin: 8px 0; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font: 11px/1.9 Consolas, monospace; white-space: pre; overflow: auto; }
+#em_runtime { font-variant-numeric:tabular-nums; white-space:nowrap; }
+#em_macro { height:340px; padding:8px 0; tab-size:4; scrollbar-gutter:stable; }
+#em_macro:empty::before { content:attr(data-empty); display:block; padding:0 12px; white-space:pre-wrap; color:var(--text-dim); }
+.em-code-line { position:relative; display:block; min-height:1.9em; width:max-content; min-width:100%; box-sizing:border-box; padding:0 12px 0 44px; }
+.em-code-line::before { content:attr(data-line); position:sticky; display:inline-block; left:0; width:30px; margin-left:-38px; margin-right:8px; text-align:right; color:var(--text-dim); user-select:none; background:var(--surface); }
+.em-line-changed { background:color-mix(in srgb,var(--green) 9%,transparent); box-shadow:inset 3px 0 var(--green); animation:em-line-pulse 1.4s ease-out 2; }
+.em-change { color:inherit; border-radius:2px; background:color-mix(in srgb,var(--green) 22%,transparent); animation:em-change-pulse 1.4s ease-out 2; }
+.em-code-line[data-removed]::before { color:var(--green); text-decoration:underline; text-underline-offset:3px; }
+.em-delta { display:block; min-height:0; color:var(--green); font:10px/1.5 Consolas,var(--font-ui),monospace; }
+.em-delta:empty { display:none; }
+@keyframes em-line-pulse { 0%,100% { background:color-mix(in srgb,var(--green) 9%,transparent); } 35% { background:color-mix(in srgb,var(--green) 19%,transparent); } }
+@keyframes em-change-pulse { 0%,100% { background:color-mix(in srgb,var(--green) 22%,transparent); box-shadow:none; } 35% { background:color-mix(in srgb,var(--green) 42%,transparent); box-shadow:0 0 8px color-mix(in srgb,var(--green) 35%,transparent); } }
+@media (prefers-reduced-motion:reduce) { .em-line-changed,.em-change { animation:none; } }
+#em_feedback { color: var(--gold); overflow-wrap: anywhere; }
+#em_metrics, #em_difference { white-space: pre-line; }
+.em-details { margin-top: 16px; padding: 0 4px; }
+.em-details summary { cursor: pointer; color: var(--text-muted); }
+.em-details pre { max-height: 270px; overflow: auto; white-space: pre-wrap; font-size: 11px; }
+.em-footer { padding: 7px 4px; }

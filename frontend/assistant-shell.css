@@ -1,0 +1,72 @@
+/* Shared, non-modal assistant. Uses the application theme in both light/dark modes. */
+/* Hide the retired entry before the sequential scripts mount the shared shell. */
+#sim_ai_fab { display: none !important; }
+.assistant-shell { position: fixed; z-index: 950; display: flex; flex-direction: column; min-width: 0; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 18px; box-shadow: 0 24px 90px #0005, 0 3px 12px #0002; isolation: isolate; }
+.assistant-shell[hidden], .assistant-panel[hidden] { display: none !important; }
+.assistant-handle { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 15px 16px 13px; cursor: grab; touch-action: none; user-select: none; border-radius: 18px 18px 0 0; background: linear-gradient(135deg, var(--surface), var(--surface2)); }
+.assistant-brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.assistant-sigil { display: grid; place-items: center; color: var(--gold); width: 32px; height: 36px; font-size: 33px; }
+.assistant-sigil svg { width: 29px; height: 32px; }
+.assistant-brand strong { display: block; font-size: 15px; letter-spacing: .1em; }
+.assistant-brand div > span { display: block; color: var(--text-muted); font-size: 10px; margin-top: 5px; letter-spacing: .02em; }
+.assistant-window-actions { display: flex; gap: 5px; }
+.assistant-window-actions button { width: 30px; height: 30px; border: 0; background: transparent; color: var(--text-muted); border-radius: 8px; cursor: pointer; font-family: inherit; font-size: 19px; line-height: 1; }
+.assistant-window-actions button:hover { background: var(--surface-hover); color: var(--text); }
+.assistant-tabs { display: flex; gap: 5px; padding: 0 14px 12px; border-bottom: 1px solid var(--border-soft); }
+.assistant-tabs button { display: flex; align-items: center; justify-content: center; flex: 1; gap: 8px; padding: 10px 8px; border: 1px solid transparent; border-radius: 9px; color: var(--text-muted); background: transparent; cursor: pointer; font: inherit; font-size: 12px; }
+.assistant-tabs button small { font-size: 10px; opacity: .7; }
+.assistant-tabs button[aria-selected="true"] { color: var(--gold); background: var(--gold-tint); border-color: var(--gold-dim); }
+.assistant-panel { min-height: 0; flex: 1; overflow: auto; overscroll-behavior: contain; border-radius: 0 0 18px 18px; }
+.assistant-analysis { display: flex; overflow: hidden; }
+.assistant-shell .sim-ai-dock.assistant-embedded { position: relative; inset: auto; z-index: auto; display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0; border: 0; border-radius: 0 0 18px 18px; box-shadow: none; visibility: visible; opacity: 1; transform: none; transition: none; pointer-events: auto; }
+.assistant-shell .sim-ai-dock-head { min-height: 42px; background: transparent; padding: 6px 15px; }
+.assistant-shell .sim-ai-dock-brand .sim-ai-mark, .assistant-shell #sim_ai_close { display: none; }
+.assistant-shell .sim-ai-dock-brand strong { font-size: 11px; color: var(--text-muted); font-weight: 500; }
+.assistant-shell .sim-ai-dock-brand span:last-child { font-size: 10px; }
+.assistant-shell .sim-ai-chat { flex: 1; min-height: 80px; }
+.assistant-shell .sim-ai-compose { flex-shrink: 0; padding: 13px 15px; background: var(--surface); border-top: 1px solid var(--border-soft); }
+.assistant-shell .sim-ai-input-wrap textarea { border-radius: 10px; min-height: 74px; padding: 12px; line-height: 1.7; }
+.assistant-shell .sim-ai-context { margin: 8px 15px; border-radius: 9px; }
+.assistant-shell .sim-ai-quick { padding: 8px 15px; gap: 6px; }
+.assistant-shell .sim-ai-quick .sim-btn { border-radius: 20px; font-size: 11px; }
+.assistant-shell .sim-ai-bubble { border-radius: 12px; }
+.assistant-resize-left { position: absolute; z-index: 3; left: -5px; top: 56px; bottom: 24px; width: 10px; cursor: ew-resize; touch-action: none; border-radius: 6px; }
+.assistant-resize-left:hover, .assistant-resize-left:focus-visible { background: var(--gold-dim); outline: none; }
+.assistant-resize-corner { position: absolute; right: 1px; bottom: 1px; width: 18px; height: 18px; cursor: nwse-resize; touch-action: none; background: linear-gradient(135deg,transparent 60%,var(--border) 61%,var(--border) 66%,transparent 67%); border-radius: 0 0 16px 0; }
+.assistant-ball {
+  --spirit-metal: #e8ca8a; --spirit-glow: 228, 185, 103;
+  position: fixed; z-index: 951; isolation: isolate; box-sizing: border-box;
+  width: 56px; height: 56px; display: grid; place-content: center; justify-items: center; gap: 1px;
+  padding: 0; border: 1px solid #bfa16c; border-radius: 50%;
+  background: radial-gradient(ellipse at 32% 12%, #496064 0%, #243c40 35%, #14282e 70%, #0e1c23 100%);
+  color: var(--spirit-metal); font-family: var(--font-ui); font-style: normal;
+  box-shadow: inset 0 1px 1px #fff6, inset 0 -2px 5px #0008, 0 4px 12px #101b2540, 0 0 0 2px #bfa16c22;
+  cursor: grab; user-select: none; touch-action: none; -webkit-tap-highlight-color: transparent;
+  transition: transform .22s ease, box-shadow .25s ease, opacity .2s;
+}
+.assistant-ball::before { content: ''; position: absolute; z-index: -1; inset: -8px; border-radius: 50%; background: radial-gradient(circle, rgba(var(--spirit-glow), .22), transparent 70%); opacity: .5; transition: opacity .3s; pointer-events: none; }
+.assistant-ball::after { content: ''; position: absolute; inset: 4px; border: 1px solid rgba(var(--spirit-glow), .25); border-radius: 50%; box-shadow: inset 0 0 7px #0003; pointer-events: none; }
+.assistant-ball:hover { transform: translateY(-2px); box-shadow: inset 0 1px 1px #fff8, inset 0 -2px 5px #0006, 0 8px 20px #101b254d, 0 0 16px rgba(var(--spirit-glow), .3); }
+.assistant-ball:hover::before { opacity: 1; }
+.assistant-ball:active { transform: scale(.96); }
+.assistant-ball[aria-expanded="true"] { opacity: 0; visibility: hidden; pointer-events: none; }
+.assistant-ball-ring { position: absolute; inset: -4px; padding: 1px; border-radius: 50%; background: conic-gradient(from 25deg, transparent 5%, rgba(var(--spirit-glow), .15) 18%, var(--spirit-metal) 28%, transparent 31%, transparent 55%, rgba(var(--spirit-glow), .15) 68%, var(--spirit-metal) 78%, transparent 81%); -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0); mask-composite: exclude; animation: assistant-orbit 14s linear infinite; pointer-events: none; }
+.assistant-ball-shine { position: absolute; inset: 1px; overflow: hidden; border-radius: 50%; pointer-events: none; }
+.assistant-ball-shine::before { content: ''; position: absolute; inset: -50%; background: linear-gradient(110deg, transparent 40%, #fff2 48%, #fff3 50%, transparent 58%); transform: translateX(-80%); animation: assistant-sheen 9s ease-in-out infinite; }
+.assistant-ball-mark { position: relative; display: grid; place-items: center; width: 27px; height: 27px; filter: drop-shadow(0 1px 2px #0006); transition: filter .25s; pointer-events: none; }
+.assistant-ball-mark svg { display: block; width: 100%; height: 100%; }
+.assistant-ball:hover .assistant-ball-mark { filter: drop-shadow(0 0 4px rgba(var(--spirit-glow), .65)); }
+.assistant-ball-label { position: relative; font: 600 11px/14px var(--font-ui); letter-spacing: .14em; padding-left: .14em; color: #f4dfb4; text-shadow: 0 1px 2px #0008; pointer-events: none; }
+.assistant-ball-activity { position: absolute; z-index: 1; top: 0; right: 0; width: 8px; height: 8px; border: 2px solid #20363b; background: #a9e0c7; border-radius: 50%; box-shadow: 0 0 7px #a9e0c799; pointer-events: none; }
+.assistant-ball[data-busy="true"]::before { animation: assistant-breathe 2.4s ease-in-out infinite; }
+.assistant-ball[data-busy="true"] .assistant-ball-ring { animation-duration: 4s; }
+.assistant-ball[aria-expanded="true"] *, .assistant-ball[aria-expanded="true"]::before, .assistant-ball[aria-expanded="true"] *::before { animation-play-state: paused; }
+.assistant-dragging .assistant-ball { transform: none; }
+.assistant-dragging .assistant-ball *, .assistant-dragging .assistant-ball::before, .assistant-dragging .assistant-ball *::before { animation-play-state: paused; }
+@keyframes assistant-orbit { to { transform: rotate(360deg); } }
+@keyframes assistant-sheen { 0%, 72% { transform: translateX(-80%); } 90%, 100% { transform: translateX(80%); } }
+@keyframes assistant-breathe { 0%, 100% { opacity: .4; transform: scale(.94); } 50% { opacity: 1; transform: scale(1.08); } }
+.assistant-dragging, .assistant-dragging * { user-select: none !important; cursor: grabbing !important; }
+.assistant-shell button:focus-visible, .assistant-ball:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+@media (max-width: 600px) { .assistant-shell { border-radius: 14px; } .assistant-handle { padding: 12px; } .assistant-tabs { padding: 0 10px 10px; } .assistant-tabs button small { display: none; } }
+@media (prefers-reduced-motion: reduce) { .assistant-ball, .assistant-ball *, .assistant-ball::before, .assistant-ball *::before { animation: none !important; transition: none !important; } .assistant-ball:hover, .assistant-ball:active { transform: none; } .assistant-shell .sim-ai-dock * { animation: none !important; } }

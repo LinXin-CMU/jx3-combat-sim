@@ -1787,6 +1787,7 @@ mod tests {
 
     fn event(name: &str, skill_id: u32, cast_time: f64, gcd: f64, rage: i32) -> CastEvent {
         let state = EventState {
+            time: cast_time,
             rage,
             block_value: None,
             berserk_value: None,
@@ -1795,9 +1796,11 @@ mod tests {
             buffs: Vec::new(),
             target_buffs: Vec::new(),
             skill_cds: Vec::new(),
+            skill_states: None,
         };
        CastEvent {
             sequence_index: None,
+            solidify: None,
            name: name.to_string(),
             skill_id,
             cast_time,
@@ -1860,6 +1863,7 @@ mod tests {
             talents: Vec::new(),
             channel_ticks: HashMap::new(),
             timing_offsets: HashMap::new(),
+            solidified_casts: HashMap::new(),
             network_delay: 100,
             recipes: Vec::new(),
             qijin_buffs: HashMap::new(),
@@ -2275,6 +2279,7 @@ mod tests {
     #[test]
     fn buff_coverage_keeps_time_coverage_and_average_stacks_separate() {
         let state_with_stacks = |stacks| EventState {
+            time: 0.0,
             rage: 0,
             block_value: None,
             berserk_value: None,
@@ -2289,6 +2294,7 @@ mod tests {
             }],
             target_buffs: Vec::new(),
             skill_cds: Vec::new(),
+            skill_states: None,
         };
         let track = BuffTimelineTrack {
             buff_id: 42,

@@ -1972,6 +1972,7 @@
   }
 
   async function captureScenario(surface = 'simulation') {
+    if (typeof attributesReady !== 'undefined') await attributesReady;
     if (surface === 'equipment') {
       const captured = await window.Jx3Equip?.captureAgentContext?.();
       if (!captured?.simulation) throw new Error('无法读取当前配装。请先完成配装并选择有效的 DPS 来源。');
@@ -1993,7 +1994,12 @@
     return { simulation: scenario, equipment_workspace: null };
   }
 
-  function setDockOpen(open, focusInput) {
+  function setDockOpen(open, focusInput, embedded = false) {
+    if (window.Jx3Assistant && !embedded) {
+      if (open) window.Jx3Assistant.open('analysis', !!focusInput);
+      else window.Jx3Assistant.close();
+      return;
+    }
     if (!els.dock) return;
     els.dock.classList.toggle('open', open);
     els.dock.setAttribute('aria-hidden', String(!open));
@@ -2005,7 +2011,7 @@
       if (focusInput) setTimeout(() => els.dockQuestion.focus(), 80);
     } else {
       toggleDockHistory(false);
-      els.dockFab.focus({ preventScroll: true });
+      if (!window.Jx3Assistant) els.dockFab.focus({ preventScroll: true });
     }
   }
 
@@ -2441,7 +2447,7 @@
       if (els.dock?.classList.contains('open') && !activeRun) setDockOpen(false);
       return;
     }
-    if (els.dockFab) els.dockFab.hidden = false;
+    if (els.dockFab) els.dockFab.hidden = !!window.Jx3Assistant;
     const changed = dockMode !== next;
     dockMode = next;
     if (els.dockTitle) els.dockTitle.textContent = next === 'equipment' ? '配装分析助手' : '循环分析助手';
@@ -2465,6 +2471,7 @@
     await Promise.all([loadProviders(), loadSessions()]);
   }
 
+  window.Jx3AgentDock = { setEmbeddedVisible: (open, focus) => setDockOpen(open, focus, true), refresh: updateScenarioState };
   els.provider.addEventListener('change', () => selectProvider(els.provider));
   els.dockProvider?.addEventListener('change', () => selectProvider(els.dockProvider));
   els.run.addEventListener('click', startRun);

@@ -176,6 +176,7 @@ impl FitnessCtx {
             recipes_table,
             &skill_by_id,
             &scen.pauses,
+            None,
         );
 
         let total: f64 = timeline.iter().filter_map(|e| e.damage_total).sum();

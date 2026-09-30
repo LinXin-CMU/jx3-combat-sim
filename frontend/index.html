@@ -5,8 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>剑网3 苍云PVE循环模拟器</title>
   <link rel="icon" href="favicon.ico" type="image/x-icon">
-  <link rel="stylesheet" href="style.css?v=20260908-toolbar-position2">
-  <link rel="stylesheet" href="agent.css?v=20260906-macropages1">
+  <link rel="stylesheet" href="style.css?v=20261001-stage2native1">
+  <link rel="stylesheet" href="agent.css?v=20261001-stage2native1">
+  <link rel="stylesheet" href="macro-assist.css?v=20261001-stage2native1">
+  <link rel="stylesheet" href="assistant-shell.css?v=20261001-stage2native1">
+  <link rel="stylesheet" href="macro-exact.css?v=20261001-stage2native1">
+  <link rel="stylesheet" href="loop-tabs.css?v=20261001-stage2native1">
 </head>
 <body>
   <div class="container">
@@ -14,7 +18,7 @@
     <div class="top-bar">
       <div class="tb-brand" title="分山劲伤害计算器 · 苍云 · 外功 · 130级">
         <span class="tb-brand-name tb-brand-shimmer" data-text="苍云器灵">苍云器灵</span>
-        <span class="tb-brand-tag">v2.0.6-20260501</span>
+        <span class="tb-brand-tag">v2.1.0-20261001.1</span>
       </div>
       <button class="tb-btn" id="btn_mount_picker" title="切换心法 / 武学版本">
         <span class="tb-label">心法</span>
@@ -1927,6 +1931,26 @@
         <!-- 右侧：序列 + 技能按钮栏 -->
         <div class="sim-right-col" id="sim_right_col">
           <section class="panel sim-sequence-panel" id="panel_manual">
+            <div class="ma-mode-bar">
+              <div class="ma-mode-primary">
+              <div class="ma-mode-switch" role="group" aria-label="序列操作模式">
+                <button type="button" class="ma-button" id="macro_assist_edit" aria-pressed="true" title="编辑、移动或复制技能；保留写宏时选中的组合和分析结果。">编辑序列</button>
+                <button type="button" class="ma-button" id="macro_assist_toggle" aria-pressed="false" aria-controls="macro_assist_panel" title="单击或框选连续技能组合，立即显示选择并自动分析；序列或配置变化后自动更新。">写宏</button>
+              </div>
+              <span id="macro_assist_status" role="status" aria-live="polite">单击或框选技能，分析可用宏条件</span>
+              </div>
+              <div id="macro_compare_heading" class="ma-compact-heading ma-compare-heading" data-macro-draft hidden>
+                <strong>实际循环对照</strong><span id="macro_compare_status" role="status">运行宏后显示</span>
+                <div class="ma-compare-options">
+                  <select id="macro_compare_layer" aria-label="对照差异层级" title="默认只标漏放、多放和顺序差异；可加入时间、资源和技能档位差异。"><option value="skills">技能差异</option><option value="states">含状态差异</option></select>
+                  <label title="按滚动进度同步两侧序列；关闭后可分别滚动。"><input type="checkbox" id="macro_compare_sync" checked>同步滚动</label>
+                </div>
+                <button type="button" class="ma-button" id="macro_compare_first" disabled>首处差异</button>
+              </div>
+            </div>
+            <div id="macro_workspace" class="ma-workspace">
+            <div class="ma-top-row">
+            <div class="ma-template">
             <div class="sim-sequence" id="sim_sequence">
               <p class="placeholder-text">请点击下方技能按钮生成模拟技能序列</p>
             </div>
@@ -1960,6 +1984,45 @@
                   <button type="button" class="seq-zoom-btn" id="seq_zoom_in" title="放大序列技能块，更容易查看图标和角标。" aria-label="放大序列">+</button>
                 </div>
               </div>
+            </div>
+            </div>
+            <div id="macro_split_top_width" class="ma-splitter ma-splitter-v" role="separator" tabindex="0" aria-orientation="vertical" aria-label="调整模板和实际循环宽度" aria-controls="sim_sequence macro_compare_panel" title="拖动调整两侧循环宽度；方向键微调，双击恢复均分。"></div>
+            <section id="macro_compare_panel" class="ma-compare-panel" aria-label="宏实际循环对照" hidden>
+              <div id="macro_compare_sequence" class="sim-sequence" aria-label="宏实际技能序列"><p class="ma-empty">在下方编写宏，点击“运行对照”。</p></div>
+              <div id="macro_compare_summary" class="ma-compare-summary">左侧红底提示缺失，右侧绿底提示多放；状态差异可按需开启。</div>
+            </section>
+            </div>
+            <div id="macro_split_height" class="ma-splitter ma-splitter-h" role="separator" tabindex="0" aria-orientation="horizontal" aria-label="调整循环和写宏区域高度" aria-controls="sim_sequence macro_compare_panel macro_assist_panel macro_editor_panel" title="拖动调整上下区域高度；方向键微调，双击恢复默认比例。"></div>
+            <div class="ma-bottom-row">
+            <section id="macro_editor_panel" class="ma-editor-panel" data-macro-draft data-tab="draft" aria-label="写宏与选段条件" hidden>
+              <div class="ma-review-tabs" role="tablist" aria-label="模板写宏工具">
+                <button type="button" class="ma-button" id="macro_review_draft" role="tab" aria-selected="true" aria-controls="macro_draft_pane">宏草稿</button>
+                <button type="button" class="ma-button" id="macro_review_conditions" role="tab" aria-selected="false" aria-controls="macro_assist_panel">选段候选条件</button>
+              </div>
+              <section class="ma-panel" id="macro_assist_panel" role="tabpanel" aria-labelledby="macro_review_conditions" hidden>
+                <div class="ma-panel-heading"><strong>选段写宏助手</strong><span class="ma-auto-label">保留选择，自动更新</span></div>
+                <div id="macro_assist_selection" class="ma-selection-preview" role="status" aria-live="polite">尚未选择技能</div>
+                <div class="ma-content" id="macro_assist_content"></div>
+              </section>
+              <div class="ma-draft-pane" id="macro_draft_pane" role="tabpanel" aria-labelledby="macro_review_draft">
+              <div class="ma-compact-heading"><strong>写宏</strong><button type="button" class="ma-button" id="macro_draft_import" title="从当前宏复制到草稿，不修改已保存的宏。">载入当前宏</button><button type="button" class="ma-button" id="macro_draft_undo">撤销</button><button type="button" class="ma-button" id="macro_draft_copy">复制</button><button type="button" class="ma-button ma-run" id="macro_compare_run" title="使用与模板相同的完整环境运行草稿，Ctrl+Enter。">运行对照</button></div>
+              <textarea id="macro_draft_text" hidden aria-hidden="true" tabindex="-1"></textarea>
+              <div class="ma-draft-columns">
+                <label class="ma-draft-column" for="macro_draft_shield"><span title="盾宏 / 通用宏">盾宏 / 通用宏</span><textarea id="macro_draft_shield" spellcheck="false" wrap="off" placeholder="输入盾宏或通用宏，Ctrl+Enter 运行对照。"></textarea></label>
+                <div id="macro_split_editor_width" class="ma-splitter ma-splitter-v" role="separator" tabindex="0" aria-orientation="vertical" aria-label="调整盾宏和刀宏宽度" aria-controls="macro_draft_shield macro_draft_blade" title="拖动调整盾宏与刀宏宽度；方向键微调，双击恢复均分。"></div>
+                <label class="ma-draft-column" for="macro_draft_blade"><span title="刀宏">刀宏</span><textarea id="macro_draft_blade" spellcheck="false" wrap="off" placeholder="输入刀宏，Ctrl+Enter 运行对照。"></textarea></label>
+              </div>
+              <div class="ma-editor-footer"><span id="macro_draft_count">0 字符 · 0 行</span><span id="macro_draft_status" role="status">草稿独立保留</span></div>
+              </div>
+            </section>
+            <div id="macro_split_bottom_width" class="ma-splitter ma-splitter-v" role="separator" tabindex="0" aria-orientation="vertical" aria-label="调整宏编辑区和诊断区宽度" aria-controls="macro_editor_panel macro_review" title="拖动调整写宏与诊断区宽度；方向键微调，双击恢复默认比例。"></div>
+            <section id="macro_review" class="ma-review" data-tab="diagnosis" aria-label="宏诊断与条件建议">
+              <div class="ma-review-tabs"><strong id="macro_review_diagnosis">分歧诊断与改法</strong></div>
+              <p class="ma-review-empty ma-empty">运行对照后，从首处分歧开始诊断。也可点击上方技能，查看阻断原因和可验证的改法。</p>
+              <div id="macro_compare_detail" class="ma-compare-detail" role="tabpanel" aria-labelledby="macro_review_diagnosis" hidden></div>
+
+            </section>
+            </div>
             </div>
           </section>
 
@@ -2078,7 +2141,7 @@
         </footer>
       </aside>
 
-      <button type="button" class="sim-ai-fab" id="sim_ai_fab" aria-controls="sim_ai_dock" aria-expanded="false">
+      <button type="button" class="sim-ai-fab" id="sim_ai_fab" aria-controls="sim_ai_dock" aria-expanded="false" hidden>
         <span class="sim-ai-fab-icon" aria-hidden="true">✦</span>
         <span class="sim-ai-fab-label"><b>AI 分析</b><small id="sim_ai_fab_context">基于当前循环</small></span>
       </button>
@@ -2828,6 +2891,7 @@
        这样主题/字体/显示模式等所有 init 直接读到账号同步后的值（换设备/origin/清缓存都跟随）。 -->
   <script>
   (function () {
+    window.Jx3LoopTabsExpected = true;
     function loadSeq(list) {
       if (!list.length) return;
       var s = document.createElement('script');
@@ -2836,19 +2900,20 @@
       s.onload = next; s.onerror = next;
       document.body.appendChild(s);
     }
-    var SCRIPTS = ['state.js', 'app.js?v=20260908-toolbar-position2', 'agent.js?v=20260908-equip1'];
+    var SCRIPTS = ['state.js?v=20261001-stage2native1', 'macro-solidify.js?v=20261001-stage2native1', 'app.js?v=20261001-stage2native1', 'macro-alignment.js?v=20261001-stage2native1', 'macro-layout.js?v=20261001-stage2native1', 'macro-state-diff.js?v=20261001-stage2native1', 'macro-draft-panes.js?v=20261001-stage2native1', 'macro-repair.js?v=20261001-stage2native1', 'macro-repair-group.js?v=20261001-stage2native1', 'macro-repair-search.js?v=20261001-stage2native1', 'macro-repair-panel.js?v=20261001-stage2native1', 'macro-diagnostic.js?v=20261001-stage2native1', 'macro-editor.js?v=20261001-stage2native1', 'macro-assist.js?v=20261001-stage2native1', 'loop-tabs.js?v=20261001-stage2native1', 'agent.js?v=20261001-stage2native1', 'assistant-shell.js?v=20261001-stage2native1', 'harness-workspace.js?v=20261001-stage2native1', 'macro-exact.js?v=20261001-stage2native1'];
     var go = function () { loadSeq(SCRIPTS); };
     try {
       fetch('/api/settings', { cache: 'no-store' })
         .then(function (r) { return r.json(); })
         .then(function (obj) {
+          window.Jx3BootSettings = obj && typeof obj === 'object' ? obj : {};
           if (obj && typeof obj === 'object') {
             for (var k in obj) {
               var normalizedKey = String(k || '').toLowerCase().replace(/[^a-z0-9]/g, '');
               var sensitiveKey = ['apikey', 'authorization', 'credential', 'password',
                 'accesstoken', 'refreshtoken', 'bearertoken', 'clientsecret', 'secret', 'token']
                 .some(function (marker) { return normalizedKey.indexOf(marker) >= 0; });
-              if (!sensitiveKey && Object.prototype.hasOwnProperty.call(obj, k) && obj[k] != null) {
+              if (!sensitiveKey && k.indexOf('jx3_loop_tabs_v1:') !== 0 && k.indexOf('jx3_macro_draft_v1:') !== 0 && Object.prototype.hasOwnProperty.call(obj, k) && obj[k] != null) {
                 try { localStorage.setItem(k, String(obj[k])); } catch (e) {}
               }
             }

@@ -1023,6 +1023,7 @@ mod tests {
             talents: Vec::new(),
             channel_ticks: HashMap::new(),
             timing_offsets: HashMap::new(),
+            solidified_casts: HashMap::new(),
             network_delay: 0,
             recipes: Vec::new(),
             qijin_buffs: HashMap::new(),

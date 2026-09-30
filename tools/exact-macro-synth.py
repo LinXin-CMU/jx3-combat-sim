@@ -1,0 +1,1562 @@
+"""CEGIS macro synthesis: unrestricted prototype or legacy bounded Z3 search.
+
+Conditions, rank resolution, castability and complete replay come exclusively
+from the Rust execution oracle. Python only solves ordered rule selection.
+"""
+import argparse
+import hashlib
+import importlib.util
+import json
+import math
+import re
+from pathlib import Path
+import queue
+import random
+import subprocess
+import sys
+import threading
+import time
+
+import z3
+
+ROOT = Path(__file__).resolve().parents[1]
+CANCELLED = threading.Event()
+RUNNING = threading.Event()
+RUNNING.set()
+ACTIVE_SOLVER = None
+SOLVER_LOCK = threading.Lock()
+INTERRUPTED = threading.Event()
+PAUSED_SECONDS = 0.0
+
+
+def interrupt_active_solver():
+    # z3 Solver.interrupt is explicitly safe from another thread and affects
+    # only a running check, not condition encoding or a different solver.
+    with SOLVER_LOCK:
+        if ACTIVE_SOLVER is not None:
+            INTERRUPTED.set()
+            ACTIVE_SOLVER.interrupt()
+
+
+class Cancelled(Exception):
+    pass
+
+
+def check_cancelled():
+    global PAUSED_SECONDS
+    if CANCELLED.is_set():
+        raise Cancelled("cancelled by user")
+    if not RUNNING.is_set():
+        pause_started = time.perf_counter()
+        print(json.dumps({"phase": "paused"}), flush=True)
+        try:
+            while not RUNNING.wait(0.05):
+                if CANCELLED.is_set():
+                    raise Cancelled("cancelled by user")
+        finally:
+            PAUSED_SECONDS += time.perf_counter() - pause_started
+        if not CANCELLED.is_set():
+            print(json.dumps({"phase": "resumed"}), flush=True)
+    if CANCELLED.is_set():
+        raise Cancelled("cancelled by user")
+
+
+def write(path, value):
+    # Packed truth columns stay packed on disk. The expanded bytes exist only
+    # in the solver; full final evidence is written directly by Rust locally.
+    def packed(row):
+        return {k: v for k, v in row.items() if k != "truth"} if "truth_hex" in row else row
+    if isinstance(value, dict) and "rows" in value:
+        value = dict(value, rows=[packed(r) for r in value["rows"]])
+    elif isinstance(value, list) and value and isinstance(value[0], dict) and "truth" in value[0]:
+        value = [packed(r) for r in value]
+    # Thousands of truth-vector elements do not benefit from indentation.
+    # Keep the identical JSON schema while avoiding hundreds of MB of spaces
+    # per replay; small human-readable reports remain formatted.
+    bulk = (isinstance(value, dict) and "rows" in value) or (
+        isinstance(value, list) and value and isinstance(value[0], dict) and "truth" in value[0])
+    path.write_text(json.dumps(value, ensure_ascii=False, indent=None if bulk else 2,
+                               separators=(",", ":") if bulk else None, default=lambda x: list(x) if isinstance(x, bytes) else str(x)), encoding="utf-8")
+
+
+class Oracle:
+    def __init__(self, exe):
+        self.proc = subprocess.Popen([str(exe), "--exact-macro-oracle"], cwd=ROOT / "backend",
+                                     stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                     encoding="utf-8", bufsize=1,
+                                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        self.deadline = float("inf")
+        self.replay_timeout = 60.0
+        self.responses = queue.Queue()
+        self.legacy_protocol = False
+        bit_bytes = [bytes((n >> bit) & 1 for bit in range(8)) for n in range(256)]
+        def receive():
+            try:
+                for line in self.proc.stdout:
+                    if line.startswith("EXACT_JSON "):
+                        started = time.perf_counter()
+                        result = json.loads(line[len("EXACT_JSON "):])
+                        for row in result.get("rows", []):
+                            if "truth_hex" in row:
+                                row["truth"] = b"".join(map(bit_bytes.__getitem__, bytes.fromhex(row["truth_hex"])))[:row["truth_count"]]
+                        result.setdefault("timings_ms", {})["python_decode"] = (time.perf_counter()-started)*1000
+                        result["timings_ms"]["response_bytes"] = len(line.encode("utf-8"))
+                        self.responses.put(result)
+            finally:
+                self.responses.put(None)
+        self.reader = threading.Thread(target=receive, daemon=True)
+        self.reader.start()
+
+    def run(self, request):
+        check_cancelled()
+        started = time.perf_counter()
+        request = dict(request)
+        if self.legacy_protocol:
+            for key in ("compact_result", "stop_on_divergence", "archive_path"):
+                request.pop(key, None)
+        else:
+            request["compact_result"] = True
+        self.proc.stdin.write(json.dumps(request, ensure_ascii=False) + "\n")
+        self.proc.stdin.flush()
+        end = min(self.deadline, time.perf_counter() + self.replay_timeout)
+        while True:
+            check_cancelled()
+            if time.perf_counter() >= end:
+                self.proc.kill()
+                raise TimeoutError("real simulator replay exceeded its time budget")
+            try:
+                result = self.responses.get(timeout=min(0.1, end-time.perf_counter()))
+                break
+            except queue.Empty:
+                continue
+        if result is None:
+            raise RuntimeError(f"execution oracle exited: {self.proc.poll()}")
+        if not self.legacy_protocol and result.get("status") == "error" and "unknown field" in result.get("error", "") and any(
+                key in result["error"] for key in ("compact_result", "stop_on_divergence", "archive_path")):
+            # Rolling deployment: an existing router can still spawn its older
+            # binary while the shared Python files have already been updated.
+            self.legacy_protocol = True
+            return self.run(request)
+        result.setdefault("timings_ms", {})["round_trip"] = (time.perf_counter()-started)*1000
+        return result
+
+    def close(self):
+        # Stop must not wait for an in-flight simulator replay to complete.
+        if CANCELLED.is_set() and self.proc.poll() is None:
+            self.proc.kill()
+        try:
+            self.proc.stdin.close()
+        except OSError:
+            pass
+        try:
+            self.proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.proc.kill()
+            self.proc.wait()
+
+
+def row_key(row):
+    return (tuple(row["truth"]), tuple(row["executable"]), tuple(row["allowed"]),
+            row.get("wait_allowed", not row["allowed"]), row.get("cursor"))
+
+
+def acceptance_prefix(comparison):
+    return comparison.get("acceptance_prefix", min(comparison["exact_prefix"], comparison["state_prefix"]))
+
+
+class PathSamples:
+    """Search branches, never a universal conjunction of alternative trajectories.
+
+    A branch supplies observations for its reached prefix; the teacher supplies
+    only the still-unreached suffix. Every resulting program replays from t=0.
+    The frontier bound controls search memory, not legal rules or runtime.
+    """
+    def __init__(self, teacher):
+        self.teacher = teacher
+        self.paths = {}
+        self.latest = None
+        self.rejected = set()
+        self.teacher_positive_only = False
+
+    def add(self, text, replay):
+        identity = hashlib.sha256(text.encode()).hexdigest()
+        c = replay["comparison"]
+        self.paths[identity] = {"text": text, "replay": replay,
+            "prefix": acceptance_prefix(c),
+            "rank": (acceptance_prefix(c), c["order_prefix"], -c["max_time_error_on_order_prefix"])}
+        self.latest = identity
+        ranked = sorted(self.paths, key=lambda k: self.paths[k]["rank"], reverse=True)
+        # Keep promising paths and recent alternatives. Neither gets frozen.
+        keep = set(ranked[:4] + list(self.paths)[-4:])
+        self.paths = {k:v for k,v in self.paths.items() if k in keep}
+        self.rejected.intersection_update(keep)
+        return identity
+
+    def select(self, variant):
+        ranked = sorted((k for k in self.paths if k not in self.rejected),
+                        key=lambda k: self.paths[k]["rank"], reverse=True)
+        if not ranked or variant % 4 == 0:
+            return None, [r for r in self.teacher if r['allowed']] if self.teacher_positive_only else self.teacher, None
+        if variant % 4 == 1:
+            identity = ranked[0]
+        elif variant % 4 == 2 and self.latest in ranked:
+            identity = self.latest
+        else:
+            identity = ranked[(variant // 4) % len(ranked)]
+        path = self.paths[identity]
+        # The teacher's timed prefix is an ALTERNATIVE, not another hard path.
+        rows = path["replay"]["rows"] + [r for r in self.teacher if r["cursor"] >= path["prefix"]
+                                               and (not self.teacher_positive_only or r['allowed'])]
+        return identity, rows, path["replay"]
+
+
+def expand_thresholds(atoms, states):
+    """Legal one-decimal neighbors of the actual failure, not guessed fields."""
+    known = set(atoms)
+    timed = {re.split(r"[<>]", a, maxsplit=1)[0] for a in atoms
+             if a.startswith(("bufftime:", "tbufftime:"))}
+    fresh = set()
+    for state in states:
+        if not isinstance(state, dict):
+            continue
+        for prefix, key in (("bufftime:", "buffs"), ("tbufftime:", "target_buffs")):
+            for buff in state.get(key, []):
+                field = prefix + buff["name"]
+                remaining = buff.get("remaining", 0)
+                if field not in timed or remaining <= 0:
+                    continue
+                point = math.floor(remaining * 10 + 1e-8)
+                for n in range(max(0, point - 2), point + 4):
+                    for op in ("<", ">"):
+                        text = f"{field}{op}{n / 10:.1f}"
+                        if text not in known:
+                            fresh.add(text)
+    return atoms + sorted(fresh)
+
+
+def conflict(rows):
+    """Return observable indistinguishability in this FINITE atom/action language."""
+    groups = {}
+    for row in rows:
+        check_cancelled()
+        key = (tuple(row["truth"]), tuple(row["executable"]))
+        allowed = set(row["allowed"])
+        if row.get("wait_allowed", not allowed):
+            allowed.add(-1)
+        if not allowed:
+            return {"kind": "finite_observable_conflict", "states": [row]}
+        if key in groups:
+            options, evidence = groups[key]
+            options &= allowed
+            if not options:
+                return {"kind": "finite_observable_conflict", "states": evidence + [row]}
+            evidence.append(row)
+        else:
+            groups[key] = (allowed, [row])
+    return None
+
+
+def solve(rows, atoms, actions, slots, terms, timeout_ms, blocked=(), deadline=float("inf")):
+    global ACTIVE_SOLVER
+    encoding_started = time.perf_counter()
+    all_bits = (1 << len(rows)) - 1
+    # Rebuilt on EVERY iteration: observational aliases may split after a CEX.
+    groups = {}
+    for i, atom in enumerate(atoms):
+        check_cancelled()
+        mask = sum(1 << j for j, row in enumerate(rows) if row["truth"][i])
+        groups.setdefault(mask, []).append(i)
+    masks, choices = [all_bits], [None]
+    for mask, ids in groups.items():
+        if mask not in (0, all_bits):
+            masks.append(mask)
+            choices.append(ids[0])
+    solver = z3.Solver()
+    solver.set(timeout=timeout_ms, random_seed=0)
+    act, cond, variables = [], [], []
+    for slot in range(slots):
+        aa = [z3.Bool(f"action_{slot}_{a}") for a in range(len(actions)+1)]
+        cs = [z3.Bool(f"atom_{slot}_{k}") for k in range(1,len(masks))]
+        act.append(aa)
+        cond.append(cs)
+        variables += aa + cs
+        solver.add(z3.PbEq([(a,1) for a in aa],1))
+        if cs:
+            solver.add(z3.PbLe([(c,1) for c in cs], terms))
+        if slot:
+            solver.add(z3.Implies(act[slot - 1][0], aa[0]))
+        for c in cs:
+            solver.add(z3.Implies(aa[0], z3.Not(c)))
+    group_hits = {}
+    for s, row in enumerate(rows):
+        check_cancelled()
+        if time.perf_counter() >= deadline:
+            return ({"status": "unknown", "reason": "wall_budget_during_encoding", "solve_ms": 0.0,
+                     "encoding_ms": (time.perf_counter()-encoding_started)*1000,
+                     "slots": slots, "terms": terms, "sample_count": len(rows),
+                     "distinct_atoms": len(masks)-1}, "; UNKNOWN: encoding budget exhausted before complete constraints\n")
+        earlier = z3.BoolVal(False)
+        for slot in range(slots):
+            bad_terms = [c for k,c in enumerate(cond[slot],1) if not (masks[k] & (1 << s))]
+            executable = z3.Or([act[slot][a+1] for a,v in enumerate(row["executable"]) if v])
+            hit = z3.And(executable, z3.Not(z3.Or(bad_terms)))
+            selected = z3.And(hit,z3.Not(earlier))
+            solver.add(z3.Implies(selected,z3.Or([act[slot][a+1] for a in row["allowed"]])))
+            earlier = z3.Or(earlier,hit)
+        if row["allowed"] and not row.get("wait_allowed", False):
+            solver.add(earlier)
+        if row["allowed"]:
+            group_hits.setdefault(row.get("cursor", s), []).append(earlier)
+    for hits in group_hits.values():
+        solver.add(z3.Or(hits))
+    for group in {tuple(row["allowed"]) for row in rows if row["allowed"]}:
+        solver.add(z3.Or([aa[i+1] for aa in act for i in group]))
+    # A scheduling-only replay failure blocks that entire candidate, never a
+    # matched prefix. Only models from this exact vocabulary/shape are blocked.
+    for values in blocked:
+        if len(values) == len(variables):
+            solver.add(z3.Or([v != bool(n) for v, n in zip(variables, values)]))
+    start = time.perf_counter()
+    if deadline != float("inf"):
+        solver.set(timeout=max(1,min(timeout_ms,int((deadline-start)*1000))))
+    elapsed = 0.0
+    while True:
+        check_cancelled()
+        with SOLVER_LOCK:
+            INTERRUPTED.clear()
+            ACTIVE_SOLVER = solver
+        checking = time.perf_counter()
+        try:
+            status = solver.check()
+        finally:
+            elapsed += (time.perf_counter() - checking) * 1000
+            with SOLVER_LOCK:
+                ACTIVE_SOLVER = None
+        interrupted = INTERRUPTED.is_set()
+        check_cancelled()
+        if status == z3.unknown and interrupted:
+            # Resume the same constraints after a user pause. This is neither
+            # UNSAT nor a reason to discard the current search shape.
+            continue
+        break
+    result = {"status": str(status), "solve_ms": elapsed, "encoding_ms": (start-encoding_started)*1000, "slots": slots, "terms": terms,
+              "sample_count": len(rows), "distinct_atoms": len(masks) - 1,
+              "dedup_groups": [[atoms[i] for i in ids] for ids in groups.values() if len(ids) > 1]}
+    smt = solver.to_smt2()
+    if status == z3.sat:
+        model = solver.model()
+        rules = []
+        for aa, cs in zip(act, cond):
+            action = next(i for i,a in enumerate(aa) if z3.is_true(model.eval(a)))
+            if action:
+                indices = [choices[i] for i,c in enumerate(cs,1) if z3.is_true(model.eval(c))]
+                rules.append({"action": action-1, "atoms": indices})
+        result["rules"] = rules
+        result["model_values"] = [int(z3.is_true(model.eval(v))) for v in variables]
+        result["choice_ids"] = choices
+    elif status == z3.unknown:
+        result["reason"] = solver.reason_unknown()
+    return result, smt
+
+
+class SampleIndex:
+    """Incremental truth/castability columns over append-only observations.
+
+    Equivalence is still rebuilt from the complete columns on each solve, so a
+    new counterexample always splits formerly identical atoms.
+    """
+    def __init__(self):
+        self.identity = None
+        self.count = 0
+
+    def extend(self, rows, atoms, actions):
+        identity = (id(rows), id(atoms), id(actions))
+        if self.identity != identity or self.count > len(rows):
+            self.identity, self.count = identity, 0
+            self.truth = [0] * len(atoms)
+            self.executable = [0] * len(actions)
+            self.compatible = [0] * len(actions)
+            self.positive = 0
+        for i in range(self.count, len(rows)):
+            check_cancelled()
+            row, bit = rows[i], 1 << i
+            for k, value in enumerate(row["truth"]):
+                if value:
+                    self.truth[k] |= bit
+            for a, value in enumerate(row["executable"]):
+                if value:
+                    self.executable[a] |= bit
+            for a in row["allowed"]:
+                self.compatible[a] |= bit
+            if row["allowed"]:
+                self.positive |= bit
+        self.count = len(rows)
+        return self
+
+
+def wait_witness(replay, indices):
+    """A reversible cast-now branch, NOT an unconditional negative WAIT label.
+
+    Another macro may reach this event via other states or use a different
+    bufftime threshold to wake earlier. Keep the real edge and alternatives in
+    evidence; failure of this branch says nothing about all legal macros.
+    """
+    failure = replay.get("probe_failure") or {}
+    if failure.get("kind") != "missed_decision_time" or not replay.get("rows"):
+        return None
+    row = replay["rows"][-1]
+    if row["cursor"] != failure["index"]:
+        return None
+    return {"row": indices[row_key(row)], "cursor": row["cursor"],
+            "time": row["time"], "next_time": row.get("wait_next_time", failure["time"]),
+            "latest": row.get("decision_latest"), "cast_now": bool(row["allowed"]),
+            "wake_atoms": row.get("wake_atoms", [])}
+
+
+def row_truth(row):
+    if "truth" in row:
+        return row["truth"]
+    packed = bytes.fromhex(row["truth_hex"])
+    return bytes((packed[i // 8] >> (i % 8)) & 1 for i in range(row["truth_count"]))
+
+
+def repair_signature(replay, rules=None):
+    difference = replay.get("comparison", {}).get("first_difference") or {}
+    index = difference.get("index", -1)
+    actual = replay.get("actual", [])
+    event = actual[index] if 0 <= index < len(actual) else {}
+    rows = replay.get("rows", [])
+    if not rows:
+        return None
+    row = rows[-1]
+    # Equal snapshots reached by different macros are different search branches:
+    # another rule can still preempt after this one is repaired.
+    program = hashlib.sha256(json.dumps(rules, sort_keys=True).encode()).digest() if rules is not None else None
+    return (program, index, event.get("macro_line"), (replay.get("probe_failure") or {}).get("kind"),
+            bytes(row_truth(row)), tuple(row["executable"]), tuple(row.get("rejected_actions", [])))
+
+
+def clock_gates(atoms, row, difference, tolerance):
+    """False now, but scheduled to become true in the target cast window."""
+    expected, observed = difference.get('expected') or {}, difference.get('actual') or {}
+    if expected.get('skill_id') != observed.get('skill_id') or observed.get('time', 0) >= expected.get('time', 0):
+        return []
+    state = row.get('state') or {}
+    remaining = {prefix+b['name']:b['remaining'] for prefix,key in
+        (("bufftime:","buffs"),("tbufftime:","target_buffs")) for b in state.get(key, [])}
+    truth = row_truth(row)
+    gates = []
+    for i,atom in enumerate(atoms):
+        if truth[i]:
+            continue
+        match = re.fullmatch(r"((?:t?bufftime):.+)<([0-9]+\.[0-9])", atom)
+        if match and match[1] in remaining:
+            wake = row['time'] + remaining[match[1]] - float(match[2]) + 1e-7
+            if expected['time'] - tolerance <= wake <= expected['time'] + tolerance:
+                gates.append((abs(wake-expected['time']), i))
+    return [i for _,i in sorted(gates)]
+
+
+def guard_trials(rules, atoms, replay):
+    """Split the actually preempting rule using this replay's aligned prefix.
+
+    These are local search branches, never permanent prefix constraints. Keep
+    the old time thresholds in every split; deleting one can change scheduling
+    everywhere. A full replay must accept even a sample-compatible split.
+    """
+    difference = replay.get("comparison", {}).get("first_difference") or {}
+    cursor = difference.get("index", -1)
+    actual, rows = replay.get("actual", []), replay.get("rows", [])
+    if not rules or not rows or not 0 <= cursor < len(actual):
+        return []
+    event = actual[cursor]
+    line = (event.get("macro_line") or 0) - 1
+    if event.get("macro_page", 1) != 1 or not 0 <= line < len(rules) or rows[-1]["cursor"] != cursor:
+        return []
+    rule = rules[line]
+    if rule["action"] not in rows[-1].get("rejected_actions", []):
+        return []
+    negative = row_truth(rows[-1])
+    positives = []
+    for row in rows:
+        check_cancelled()
+        index = row["cursor"]
+        if index >= cursor or actual[index].get("macro_line") != line + 1 or rule["action"] not in row["allowed"]:
+            continue
+        values = row_truth(row)
+        if all(values[i] for i in rule["atoms"]):
+            positives.append(values)
+    clocks = clock_gates(atoms, rows[-1], difference, replay['comparison'].get('time_tolerance_seconds', 0.125))
+    if not positives:
+        used = {re.split(r"[<>=]", atoms[i], maxsplit=1)[0] for i in rule['atoms']}
+        trials = []
+        for atom in clocks:
+            if re.split(r"[<>=]", atoms[atom], maxsplit=1)[0] in used:
+                continue
+            proposed = rules[:line] + [{'action':rule['action'], 'atoms':rule['atoms']+[atom]}] + rules[line+1:]
+            trials.append({'rules':proposed, 'line':line+1, 'repair':'early_cast_clock_gate', 'split_count':1})
+        # This bound is a local exploration queue, never a term/rule bound.
+        return trials[:8] + [{"rules": rules[:line] + rules[line + 1:], "line": line + 1,
+                 "repair": "preempting_rule_drop", "split_count": 0}]
+    # Avoid stacking bounds on the same field inside one AND line.
+    field = lambda text: re.split(r"[<>=]", text, maxsplit=1)[0]
+    used = {field(atoms[i]) for i in rule["atoms"]}
+    columns = [(i, sum(1 << k for k, values in enumerate(positives) if values[i]))
+               for i in range(len(atoms)) if not negative[i] and field(atoms[i]) not in used]
+    columns = [(i, mask) for i, mask in columns if mask]
+    # Correct skill released too early: try a guard whose actual timer will
+    # flip inside this event's acceptance window, rather than any false atom.
+    # This is scheduler guidance only; the unchanged executor validates it.
+    clocks = set(clocks)
+    trials, seen = [], set()
+    for variant in range(8):
+        remaining, split = (1 << len(positives)) - 1, []
+        while remaining:
+            check_cancelled()
+            candidates = [(i, mask) for i, mask in columns if mask & remaining]
+            if variant < 4 and remaining == (1 << len(positives)) - 1 and any(i in clocks for i,_ in candidates):
+                candidates = [p for p in candidates if p[0] in clocks]
+            if not candidates:
+                break
+            candidates.sort(key=lambda pair: (-(pair[1] & remaining).bit_count(), "bufftime:" in atoms[pair[0]], len(atoms[pair[0]]), atoms[pair[0]]))
+            largest = (candidates[0][1] & remaining).bit_count()
+            tied = [pair for pair in candidates if (pair[1] & remaining).bit_count() == largest]
+            atom, mask = tied[variant % len(tied)]
+            split.append({"action": rule["action"], "atoms": rule["atoms"] + [atom]})
+            remaining &= ~mask
+        if remaining:
+            continue
+        proposed = rules[:line] + split + rules[line + 1:]
+        signature = json.dumps(proposed, sort_keys=True)
+        if signature not in seen:
+            seen.add(signature)
+            trials.append({"rules": proposed, "line": line + 1, "repair": "preempting_rule_split", "split_count": len(split)})
+    return trials
+
+
+def threshold_trials(rules, atoms, replay):
+    """Prioritize small legal threshold edits at the first divergent cast.
+
+    These are UNTESTED hypotheses, not sample-SAT witnesses. No state from the
+    divergent suffix receives a target label. Full Rust replay is the only
+    acceptance test, and unrestricted construction resumes after this finite
+    neighborhood. Rule count and character count are not optimization goals.
+    """
+    difference = replay.get("comparison", {}).get("first_difference")
+    if not difference or not rules:
+        return []
+    cursor = difference["index"]
+    actual = replay.get("actual", [])
+    expected = difference.get("expected") or {}
+    observed = difference.get("actual") or {}
+    later = observed.get("time", 0) >= expected.get("time", 0)
+    lines = []
+    missed_row = None
+    if cursor < len(actual):
+        if actual[cursor].get("macro_page", 1) != 1:
+            return []
+        line = (actual[cursor].get("macro_line") or 0) - 1
+        if 0 <= line < len(rules):
+            lines = [line]
+    elif (replay.get("probe_failure") or {}).get("kind") == "missed_decision_time":
+        # Early-stop replays intentionally have no actual[cursor]. Use only the
+        # last ALIGNED decision and its oracle-approved actions, not a guessed
+        # action label on an already divergent state.
+        rows = replay.get("rows", [])
+        if rows and rows[-1]["cursor"] == cursor:
+            missed_row = rows[-1]
+            truth = row_truth(missed_row) if "truth" in missed_row or "truth_hex" in missed_row else None
+            if truth is not None:
+                lines = [i for i, rule in enumerate(rules)
+                         if rule["action"] in missed_row["allowed"]
+                         and missed_row["executable"][rule["action"]]]
+                lines.sort(key=lambda i: (sum(not truth[a] for a in rules[i]["atoms"]), i))
+                later = True
+    lookup = {atom: i for i, atom in enumerate(atoms)}
+    trials = []
+    for line in lines:
+        for position, atom_id in enumerate(rules[line]["atoms"]):
+            if missed_row is not None and truth[atom_id]:
+                continue
+            match = re.fullmatch(r"((?:t?bufftime):.+)([<>])([0-9]+\.[0-9])", atoms[atom_id])
+            if not match:
+                continue
+            direction = 1 if later == (match[2] == "<") else -1
+            point = round(float(match[3]) * 10)
+            for offset in (direction, -direction, 2 * direction, -2 * direction):
+                if point + offset < 0:
+                    continue
+                text = f"{match[1]}{match[2]}{(point + offset) / 10:.1f}"
+                replacement = lookup.get(text)
+                if replacement is None or replacement in rules[line]["atoms"]:
+                    continue
+                proposed = [{"action": r["action"], "atoms": list(r["atoms"])} for r in rules]
+                proposed[line]["atoms"][position] = replacement
+                trials.append({"rules": proposed, "line": line + 1,
+                               "from": atoms[atom_id], "to": text})
+    return trials
+
+
+LOCAL_REPLAYS_PER_PREFIX = 24
+LOCAL_FRONTIER_LIMIT = 64
+
+
+def repair_trials(rules, atoms, replay):
+    """Choose a local method from the real first divergence, not iteration age.
+
+    Missing casts need a legal wake/threshold hypothesis. When an executed
+    rule preempts the expected cast, separate that rule first; changing its
+    clock threshold blindly can disturb many earlier decisions.
+    """
+    failure = (replay.get("probe_failure") or {}).get("kind")
+    if failure == "missed_decision_time":
+        return coverage_trials(rules, atoms, replay) + threshold_trials(rules, atoms, replay)
+    return guard_trials(rules, atoms, replay) + coverage_trials(rules, atoms, replay) + threshold_trials(rules, atoms, replay)
+
+
+def coverage_trials(rules, atoms, replay):
+    """Add a missing legal action guard without rebuilding unrelated rules.
+
+    A previous hit before the insertion position protects the observation.
+    Only executable wrong actions in unprotected aligned observations need
+    exclusion. These are reversible hypotheses, not a frozen matched prefix.
+    New predicates can change wake times; every trial therefore replays t=0.
+    """
+    rows = replay.get("rows", [])
+    difference = replay.get("comparison", {}).get("first_difference") or {}
+    cursor = difference.get("index", -1)
+    if not rows or rows[-1]["cursor"] != cursor or not rows[-1]["allowed"]:
+        return []
+    values = [row_truth(r) for r in rows]
+    positive = values[-1]
+    event = (replay.get("actual", []) + [None])[cursor] if 0 <= cursor <= len(replay.get("actual", [])) else None
+    position = ((event.get("macro_line") or 1) - 1) if event else len(rules)
+    if event and event.get("macro_page", 1) != 1:
+        return []
+    positions = list(dict.fromkeys([max(0, min(position, len(rules))), 0]))
+    candidates, seen = [], set()
+    for position in positions:
+        protected = [any(r["executable"][rule["action"]] and all(v[a] for a in rule["atoms"])
+                         for rule in rules[:position]) for r, v in zip(rows, values)]
+        for action in rows[-1]["allowed"]:
+            if not rows[-1]["executable"][action]:
+                continue
+            bad = [v for r,v,p in zip(rows, values, protected)
+                   if not p and r["executable"][action] and action not in r["allowed"]]
+            columns = [(a, sum(1 << i for i,v in enumerate(bad) if not v[a]))
+                       for a, truth in enumerate(positive) if truth]
+            for style in range(3):
+                check_cancelled()
+                remaining, selected = (1 << len(bad)) - 1, []
+                while remaining:
+                    options = [(a, mask & remaining) for a, mask in columns if mask & remaining]
+                    if not options:
+                        break
+                    timed = lambda a: atoms[a].startswith(("bufftime:", "tbufftime:"))
+                    weight = 4 if style == 1 else 1
+                    a, hits = max(options, key=lambda p: (p[1].bit_count() / (weight if timed(p[0]) else 1),
+                                                         not timed(p[0]), -len(atoms[p[0]]),
+                                                         p[0] if style == 2 else -p[0]))
+                    selected.append(a)
+                    remaining &= ~hits
+                if remaining:
+                    continue
+                # Keep only separating terms, avoiding implied bounds in a line.
+                for a in list(reversed(selected)):
+                    if all(any(not v[b] for b in selected if b != a) for v in bad):
+                        selected.remove(a)
+                trial = rules[:position] + [{"action":action, "atoms":selected}] + rules[position:]
+                key = json.dumps(trial, sort_keys=True)
+                if key not in seen:
+                    seen.add(key)
+                    candidates.append({"rules":trial, "line":position+1, "repair":"missing_action_guard"})
+    return candidates
+
+
+class SearchScheduler:
+    """A bounded local *turn*, followed by unbounded whole-program search.
+
+    This bounds neither legal macro size nor total search time. A new verified
+    prefix resets the local turn; stale descendants cannot starve construction.
+    """
+    def __init__(self):
+        self.frontier = []
+        self.probes = 0
+        self.exhausted = False
+
+    def improved(self, trials):
+        self.frontier = trials[:LOCAL_FRONTIER_LIMIT]
+        self.probes = 0
+        self.exhausted = False
+
+    def extend(self, trials, urgent=False):
+        if self.exhausted:
+            return
+        available = LOCAL_FRONTIER_LIMIT - len(self.frontier)
+        if urgent:
+            self.frontier = (trials + self.frontier)[:LOCAL_FRONTIER_LIMIT]
+        elif available > 0:
+            self.frontier.extend(trials[:available])
+
+    def next(self, seen_text, render):
+        if self.exhausted:
+            return None
+        while self.frontier and self.probes < LOCAL_REPLAYS_PER_PREFIX:
+            trial = self.frontier.pop(0)
+            if render(trial["rules"]) in seen_text:
+                continue
+            self.probes += 1
+            return trial
+        if self.probes >= LOCAL_REPLAYS_PER_PREFIX:
+            self.exhausted = True
+            self.frontier.clear()
+        return None
+
+
+def construct(rows, atoms, actions, variant=0, progress=None, seed=None, obligations=(),
+              cache=None, preferred_atoms=(), repair_seed=True):
+    """Unbounded ordered AND-list witness; no rule/term/character objective.
+
+    On the remaining samples a rule may hit only compatible executable rows.
+    The conjunction of ALL atoms true at an anchor is its narrowest guard in
+    this finite positive-atom language. If it still hits a wrong executable
+    row, no conjunction covering that anchor can be the next rule. Otherwise
+    construct a separating guard, then peel its hits. Earlier correct hits
+    protect later rules, including later conditions that are true there.
+
+    Each rule removes >=1 positive sample, so rows bound the witness size,
+    not a configured slot limit. Any compatible decision list stays compatible
+    on the remainder: greedy safe peeling cannot destroy sample feasibility.
+    Rebuilt from scratch after each counterexample; never freezes a prefix.
+    """
+    started = time.perf_counter()
+    paused_before = PAUSED_SECONDS
+    n = len(rows)
+    all_bits = (1 << n) - 1
+    index = (cache or SampleIndex()).extend(rows, atoms, actions)
+    groups = {}
+    for i, mask in enumerate(index.truth):
+        check_cancelled()
+        groups.setdefault(mask, []).append(i)
+    masks, choices = [], []
+    rng = random.Random(variant)
+    for mask, ids in groups.items():
+        if mask in (0, all_bits):
+            continue
+        ids.sort(key=lambda i: (i not in preferred_atoms, len(atoms[i]), atoms[i]))
+        choices.append(ids[0] if not variant or ids[0] in preferred_atoms else rng.choice(ids))
+        masks.append(mask)
+    columns = list(range(len(masks)))
+    if variant:
+        rng.shuffle(columns)
+    columns.sort(key=lambda k: choices[k] not in preferred_atoms)
+    def separating_score(k, uncovered):
+        # Alternate stable-state and coverage-first witnesses. This is search
+        # ordering, not a bound/penalty on the emitted macro or condition count.
+        timed = atoms[choices[k]].startswith(("bufftime:", "tbufftime:"))
+        gain = (uncovered & ~masks[k]).bit_count()
+        weight = 4 if variant % 4 in (0, 2) and timed else 1
+        return (gain / weight, gain, not timed)
+    anchor_columns = []
+    for i in range(n):
+        check_cancelled()
+        bit = 1 << i
+        anchor_columns.append([k for k in columns if masks[k] & bit])
+    executable, compatible, positive = index.executable, index.compatible, index.positive
+    required = {}
+    for i, row in enumerate(rows):
+        check_cancelled()
+        if row["allowed"]:
+            key = ("event", row["cursor"]) if "wait_allowed" in row and "cursor" in row else ("row", i)
+            required[key] = required.get(key, 0) | (1 << i)
+            if not row.get("wait_allowed", False):
+                required[("row", i)] = 1 << i
+    for i in obligations:
+        if rows[i]["allowed"]:
+            required[("witness", i)] = 1 << i
+    requirements = list(required.values())
+    unmet = dict(required)
+    pending = all_bits
+    rules, witnesses = [], []
+    repaired_rules = 0
+    last_progress = 0.0
+    # Reuse only rules that remain valid on the CURRENT samples. This is a
+    # search preference, never a frozen prefix. Split a conflicting rule into
+    # safe guards for its still-correct observations before trying a global
+    # replacement. Dropping the whole rule also drops its scheduler thresholds
+    # and needlessly disrupts unrelated waits. Every emitted split is checked
+    # against ALL remaining executable negatives, with no rule/term budget.
+    for rule in seed or ():
+        check_cancelled()
+        action = rule["action"]
+        hits = pending & executable[action]
+        for atom in rule["atoms"]:
+            hits &= index.truth[atom]
+        if not hits:
+            continue
+        if not hits & ~compatible[action]:
+            rules.append({"action": action, "atoms": list(rule["atoms"])})
+            pending &= ~hits
+            unmet = {k: mask for k, mask in unmet.items() if not mask & hits}
+            continue
+        if not repair_seed:
+            continue
+        remaining_good = hits & compatible[action]
+        while remaining_good:
+            check_cancelled()
+            anchor = (remaining_good & -remaining_good).bit_length() - 1
+            bad = pending & executable[action] & ~compatible[action]
+            selected = list(rule["atoms"])
+            uncovered = bad
+            for atom in selected:
+                uncovered &= index.truth[atom]
+            inseparable = uncovered
+            for k in anchor_columns[anchor]:
+                inseparable &= masks[k]
+            if inseparable:
+                # This seed region cannot be repaired in place. The unrestricted
+                # cover below can still change conditions, action or priority.
+                remaining_good &= ~(1 << anchor)
+                continue
+            while uncovered:
+                check_cancelled()
+                k = max(anchor_columns[anchor], key=lambda c: separating_score(c, uncovered))
+                selected.append(choices[k])
+                uncovered &= masks[k]
+            # Do not pile a weaker old bound on top of a stronger new bound.
+            # Sample-level irredundancy only; runtime equivalence is NEVER
+            # inferred from this deletion, and the candidate is fully replayed.
+            for atom in list(reversed(selected)):
+                check_cancelled()
+                wrong = bad
+                for other in selected:
+                    if other != atom:
+                        wrong &= index.truth[other]
+                if not wrong:
+                    selected.remove(atom)
+            covered = pending & executable[action]
+            for atom in selected:
+                covered &= index.truth[atom]
+            assert covered & (1 << anchor) and not covered & ~compatible[action]
+            rules.append({"action": action, "atoms": selected})
+            repaired_rules += 1
+            pending &= ~covered
+            remaining_good &= ~covered
+            unmet = {k: mask for k, mask in unmet.items() if not mask & covered}
+    while unmet:
+        check_cancelled()
+        indices = [i for i in range(n) if pending & positive & (1 << i)]
+        if variant:
+            rng.shuffle(indices)
+        blockers = []
+        found = False
+        for anchor in indices:
+            check_cancelled()
+            opts = [a for a in rows[anchor]["allowed"] if rows[anchor]["executable"][a]]
+            if variant:
+                rng.shuffle(opts)
+            for action in opts:
+                bad = pending & executable[action] & ~compatible[action]
+                # This is the maximal guard: decisive feasibility check with
+                # every available true atom, not an arbitrary term budget.
+                inseparable = bad
+                for k in anchor_columns[anchor]:
+                    inseparable &= masks[k]
+                    if not inseparable:
+                        break
+                if inseparable:
+                    blockers.append({"anchor": anchor, "action": action,
+                                     "wrong_row": (inseparable & -inseparable).bit_length() - 1})
+                    continue
+                # Cover incompatible rows. No cap on terms; each chosen atom
+                # must separate at least one as-yet-unseparated wrong hit.
+                uncovered, selected = bad, []
+                while uncovered:
+                    check_cancelled()
+                    k = max(anchor_columns[anchor], key=lambda c: separating_score(c, uncovered))
+                    assert uncovered & ~masks[k]
+                    selected.append(k)
+                    uncovered &= masks[k]
+                # Row-local irredundancy, NOT stage-two macro compression:
+                # remove a term only if the other terms already exclude every
+                # wrong hit. In particular weaker implied bounds disappear.
+                for k in list(reversed(selected)):
+                    check_cancelled()
+                    hits = bad
+                    for other in selected:
+                        if other != k:
+                            hits &= masks[other]
+                    if not hits:
+                        selected.remove(k)
+                hits = pending & executable[action]
+                for k in selected:
+                    hits &= masks[k]
+                assert hits & (1 << anchor) and not hits & ~compatible[action]
+                rules.append({"action": action, "atoms": [choices[k] for k in selected]})
+                witnesses.append({"anchor": anchor, "covered_samples": hits.bit_count()})
+                pending &= ~hits
+                unmet = {k: mask for k,mask in unmet.items() if not mask & hits}
+                found = True
+                break
+            if found:
+                break
+        if not found:
+            return {"status": "unsat", "method": "unbounded_ordered_cover",
+                    "reason": "No next rule exists in this finite one-page positive-AND atom language; not a claim about all legal macros.",
+                    "conflict": {"kind": "finite_and_priority_conflict", "blockers": blockers,
+                                 "remaining_rows": [i for i in range(n) if pending & (1 << i)]},
+                    "partial_rules": rules,
+                    "solve_ms": (time.perf_counter()-started-PAUSED_SECONDS+paused_before)*1000, "slots": None, "terms": None,
+                    "sample_count": n, "distinct_atoms": len(masks)}
+        now = time.perf_counter()
+        if progress and now - last_progress >= 0.5:
+            progress({"phase": "constructing", "rule_count": len(rules),
+                      "covered_samples": (positive & ~pending).bit_count(),
+                      "positive_samples": positive.bit_count(), "sample_count": n,
+                      "distinct_atoms": len(masks)})
+            last_progress = now
+    # Independently select each row's first executable hit, including WAIT.
+    # This is a sample certificate; only the Rust replay can certify exactness.
+    selected_bits = 0
+    for row_index, row in enumerate(rows):
+        check_cancelled()
+        selected = next((r["action"] for r in rules if row["executable"][r["action"]]
+                         and all(row["truth"][i] for i in r["atoms"])), None)
+        assert (selected is None and row.get("wait_allowed", not row["allowed"])) or selected in row["allowed"]
+        if selected is not None:
+            selected_bits |= 1 << row_index
+    assert all(mask & selected_bits for mask in requirements)
+    return {"status": "sat", "method": "unbounded_ordered_cover", "rules": rules,
+            "sample_certificate": witnesses, "solve_ms": (time.perf_counter()-started-PAUSED_SECONDS+paused_before)*1000,
+            "slots": None, "terms": None, "rule_count": len(rules),
+            "max_terms_used": max((len(r["atoms"]) for r in rules), default=0),
+            "sample_count": n, "distinct_atoms": len(masks), "variant": variant,
+            "seed_rules": len(seed or ()), "repaired_rules": repaired_rules,
+            "search_obligations": list(obligations)}
+
+
+def macro_text(rules, atoms, actions):
+    lines = []
+    for rule in rules:
+        action = actions[rule["action"]]
+        # The native grammar is equal-precedence and right-associative:
+        # P&Q|R means P&(Q|R). Explicit operator chains preserve that order;
+        # arbitrary DNF cannot be rendered by flattening branches with '|'.
+        guard = "&".join(atoms[i] for i in rule["atoms"])
+        if 'ops' in rule:
+            if len(rule['ops']) != max(0,len(rule['atoms'])-1) or any(op not in ('&','|') for op in rule['ops']):
+                raise ValueError('one condition operator is required between each leaf')
+            guard = atoms[rule['atoms'][0]] + ''.join(op+atoms[i] for op,i in zip(rule['ops'],rule['atoms'][1:])) if rule['atoms'] else ''
+        alternatives = "|".join(atoms[i] for i in rule.get("any_atoms", [])) if 'ops' not in rule else ''
+        if alternatives:
+            guard += ("&" if guard else "") + alternatives
+        lines.append(f"/{'fcast' if action['fcast'] else 'cast'} " +
+                     (f"[{guard}] " if guard else "") + action["name"])
+    # A real, always-false macro is useful for empty targets in solver tests.
+    return "\n".join(lines) or "/cast [rage<0] 盾刀"
+
+
+def compression_module():
+    spec = importlib.util.spec_from_file_location("exact_macro_compress", ROOT / "tools/exact_macro_compress.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def compression_check(solver):
+    """Interrupt/resume a local compression check with the existing controls."""
+    global ACTIVE_SOLVER
+    while True:
+        check_cancelled()
+        with SOLVER_LOCK:
+            INTERRUPTED.clear()
+            ACTIVE_SOLVER = solver
+        try:
+            status = solver.check()
+        finally:
+            with SOLVER_LOCK:
+                ACTIVE_SOLVER = None
+        interrupted = INTERRUPTED.is_set()
+        check_cancelled()
+        if status == z3.unknown and interrupted:
+            continue
+        return status
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("scene", type=Path, help="Frozen version/mount/simulation/horizon JSON")
+    parser.add_argument("--exe", type=Path, default=ROOT / "backend/target/debug/jx3-combat-sim.exe")
+    parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--seconds", type=float, default=float("inf"))
+    parser.add_argument("--solver-ms", type=int, default=20000)
+    parser.add_argument("--iterations", type=int, default=sys.maxsize)
+    parser.add_argument("--sizes", default="8:2,12:3,20:4,32:5", help="rule slots:AND terms, expanded on UNSAT/UNKNOWN")
+    parser.add_argument("--compress", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--compress-deep", action="store_true", help="experimental whole-program CEGIS after ordinary compression stalls")
+    parser.add_argument("--strategy", choices=("prototype", "bounded"), default="prototype")
+    args = parser.parse_args()
+    run_job(args)
+
+
+def run_job(args):
+    args.out.mkdir(parents=True, exist_ok=True)
+    scene = json.loads(args.scene.read_text(encoding="utf-8-sig"))
+    prototype = getattr(args, "strategy", "bounded") == "prototype"
+    if prototype:
+        scene.setdefault("time_tolerance_seconds", 1 / 16)
+        scene.setdefault("acceptance", "skills_and_time")
+    tolerance = scene.get("time_tolerance_seconds", 1e-7)
+    sizes = [] if prototype else [tuple(map(int, v.split(":"))) for v in args.sizes.split(",")]
+    started = time.perf_counter()
+    oracle = Oracle(args.exe.resolve())
+    if getattr(args, "web", False):
+        oracle.replay_timeout = float("inf")
+        print(json.dumps({"phase": "preparing", "oracle_pid": oracle.proc.pid}), flush=True)
+    oracle.deadline = started + args.seconds
+    report = {"schema": "exact-macro-v1", "status": "budget_exhausted", "iterations": [],
+              "language": "one unfiltered page, ordered /cast or /fcast; extraction AND clauses, compression native right-associated AND/OR chains",
+              "stage1_character_objective": None,
+              "stage2_character_objective": "copyable UTF-16 text length" if args.compress else None,
+              "acceptance": scene.get("acceptance", "skills_and_state"),
+              "acceptance_details": "identical active skills/order/count/channel ticks; absolute per-cast tolerance without cumulative drift; states reported independently for skills_and_time",
+              "time_tolerance_seconds": tolerance, "maximum_auto_tolerance_seconds": 0.125 if prototype else tolerance,
+              "relaxations": [],
+              "solver_version": z3.get_version_string(), "sizes": sizes,
+              "strategy": "unbounded_ordered_cover" if prototype else "bounded_z3",
+              "rule_limit": None if prototype else sizes[-1][0],
+              "terms_per_rule_limit": None if prototype else sizes[-1][1],
+              "threshold_decimal_places": 1,
+              "wall_time_limit_seconds": None if args.seconds == float("inf") else args.seconds,
+              "solver_check_limit_ms": args.solver_ms or None,
+              "endpoint": "runtime starts decisions at t <= horizon; final delayed cast also compared; all waits through horizon checked"}
+    best_rank, best_rules = None, None
+    print(json.dumps({"phase":"preparing", "stage":"extraction"}), flush=True)
+    scheduler = SearchScheduler()
+    local_seen, local_expansions = set(), 0
+    def preview(text, replay, rules=None, repair_origin=None):
+        nonlocal best_rank, best_rules, local_seen, local_expansions
+        comparison = replay["comparison"]
+        # Partial replays have no final cast count; rank only the measured prefix.
+        rank = (comparison["reproduced"], acceptance_prefix(comparison), comparison["exact_prefix"],
+                comparison["order_prefix"], -comparison["max_time_error_on_order_prefix"])
+        if best_rank is None or rank > best_rank:
+            prefix_improved = best_rank is None or rank[:4] > best_rank[:4]
+            best_rank = rank
+            best_rules = rules
+            # A prettier divergent suffix must not continuously restart the
+            # local queue at the same failing prefix and starve global search.
+            if prototype and prefix_improved:
+                scheduler.improved(repair_trials(rules, atoms, replay))
+                local_seen = {repair_signature(replay, rules)}
+                local_expansions = 0
+            value = {"phase": "best", "macro": text, "comparison": comparison}
+            write(args.out / "best.json", value)
+            write(args.out / "best-replay.json", replay)
+            print(json.dumps(value, ensure_ascii=False), flush=True)
+        if prototype and rules and rank[:4] == best_rank[:4]:
+            signature = repair_signature(replay, rules)
+            # One repair can expose a second preempting rule at the SAME cursor.
+            # Explore distinct local failures without pretending the prefix has
+            # improved. This finite queue then yields to unrestricted search.
+            if signature is not None and signature not in local_seen and not scheduler.exhausted and local_expansions < 32:
+                local_seen.add(signature)
+                local_expansions += 1
+                followups = repair_trials(rules, atoms, replay)
+                scheduler.extend(followups, urgent=bool(repair_origin and repair_origin.get("repair") == "preempting_rule_split"))
+
+    try:
+        prepared = oracle.run(scene)
+        write(args.out / "target.json", prepared)
+        report["preparation_status"] = prepared["status"]
+        if "comparison" in prepared:
+            report["preparation_comparison"] = prepared["comparison"]
+        print(json.dumps({"phase": "prepared", "status": prepared["status"],
+                          "target_count": len(prepared.get("target", [])),
+                          "atom_count": len(prepared.get("atoms", []))}), flush=True)
+        if prepared["status"] != "ok":
+            report["status"] = prepared["status"]
+            report["preparation_details"] = {k: prepared[k] for k in ("skipped", "probe_failure", "error") if k in prepared}
+            return
+        if prototype and scene.get("acceptance") == "skills_and_time":
+            # A finite cycle is validated through its last tolerated active cast,
+            # not followed by an invented six-second mandatory silence period.
+            end = max(e["time"] for e in prepared["target"]) + 0.125 + 1e-7
+            scene["horizon"] = max(0.1, end)
+            prepared = oracle.run(scene)
+            if prepared["status"] != "ok":
+                raise RuntimeError("target failed while establishing its active-cast endpoint")
+            write(args.out / "target.json", prepared)
+            report["active_cast_endpoint_seconds"] = scene["horizon"]
+        # Store the simulator's fully materialized environment, preserving every
+        # scene field. Its digest binds the target AND candidate to one scene.
+        scene["simulation"] = prepared["simulation"]
+        write(args.out / "scene.json", scene)
+        report["scenario_sha256"] = hashlib.sha256(json.dumps(scene, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+        provenance = {"executable_sha256": hashlib.sha256(args.exe.read_bytes()).hexdigest(), "files": {}}
+        for name in ("exact-macro-synth.py", "exact-macro-worker.py", "exact_macro_compress.py",
+                     "exact_macro_reorder.py", "exact_macro_conditions.py", "exact_macro_global.py", "requirements-exact-macro.txt"):
+            path = ROOT / "tools" / name
+            provenance["files"]["tools/" + name] = hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in sorted((ROOT / "backend/src").rglob("*.rs")):
+            provenance["files"][path.relative_to(ROOT).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+        version_dir = {"CangShengZhuShiTest": "2026_10_苍生铸世测试服", "AnYingQianJi": "2026_04_暗影千机", "ShanHaiYuanLiu": "2025_10_山海源流", "AnYingQianJiTest": "2026_04_暗影千机测试服"}[scene["version"]]
+        for path in sorted((ROOT / "backend/data" / version_dir).rglob("*.toml")):
+            provenance["files"][path.relative_to(ROOT).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+        write(args.out / "provenance.json", provenance)
+        atoms, actions = prepared["atoms"], prepared["actions"]
+        write(args.out / "atoms.json", atoms)
+        write(args.out / "actions.json", actions)
+        rows, seen = [], set()
+        for row in prepared["rows"]:
+            if (prototype or row["allowed"]) and row_key(row) not in seen:
+                rows.append(row)
+                seen.add(row_key(row))
+        indices = {row_key(row): i for i, row in enumerate(rows)}
+        sample_index = SampleIndex()
+        paths = PathSamples(rows)
+        active_path = None
+        focus = None
+        restart_next = False
+
+        def activate(identity, source, replay=None):
+            nonlocal rows, seen, indices, focus, active_path
+            rows, seen = [], set()
+            for row in source:
+                key = row_key(row)
+                if key not in seen:
+                    rows.append(row)
+                    seen.add(key)
+            indices = {row_key(row): i for i, row in enumerate(rows)}
+            focus = wait_witness(replay, indices) if replay else None
+            active_path = identity
+
+        def learn(replay, text):
+            nonlocal focus
+            if prototype:
+                identity = paths.add(text, replay)
+                path = paths.paths[identity]
+                source = replay["rows"] + [r for r in paths.teacher if r["cursor"] >= path["prefix"]
+                                          and (not paths.teacher_positive_only or r['allowed'])]
+                previous = len(rows)
+                activate(identity, source, replay)
+                return max(0, len(rows) - previous)
+            added = 0
+            for row in replay["rows"]:
+                key = row_key(row)
+                if key not in seen:
+                    indices[key] = len(rows)
+                    rows.append(row)
+                    seen.add(key)
+                    added += 1
+            focus = wait_witness(replay, indices)
+            return added
+        size = 0
+        blocked = []
+        variant = 0
+        tried_candidates = set()
+
+        last_verification = None
+        def verify(text, screening=False):
+            nonlocal last_verification
+            # Most stage-two edits need only a cheap verdict, so observe one
+            # legal predicate. Whole-program CEGIS selectively repeats failures
+            # with the complete atom catalog for ONE aligned path branch.
+            # Probe atoms are diagnostics: the REAL candidate's own condition
+            # tree still drives selection and wake-up times. Successful edits
+            # always get an independent full-catalog replay for evidence and
+            # the next batch's guidance. Stage one retains every truth column.
+            result = oracle.run(dict(scene, candidate=text, atoms=["rage<0"] if screening else atoms, stop_on_divergence=True))
+            first_ms = result.get('timings_ms',{}).get('round_trip',0)
+            if result["status"] != "ok":
+                raise RuntimeError(f"oracle verification failed: {result['status']}")
+            if result["comparison"]["reproduced"]:
+                # A successful search replay always gets an independent full
+                # replay. Full states never cross the browser or solver pipe.
+                archive = args.out / ("full-" + hashlib.sha256(text.encode()).hexdigest()[:16] + ".json")
+                result = oracle.run(dict(scene, candidate=text, atoms=atoms,
+                    archive_path=str(archive.resolve())))
+                if (result["status"] != "ok" or not result["comparison"]["reproduced"]
+                        or result["comparison"].get("completed_full_replay") is not True or result.get("truncated", False)):
+                    raise RuntimeError("full certification disagreed with search replay")
+                result["archive_file"] = archive.name
+                result.setdefault('timings_ms',{})['verification_total'] = first_ms + result['timings_ms'].get('round_trip',0)
+            else:
+                result.setdefault('timings_ms',{})['verification_total'] = first_ms
+            last_verification = result
+            return result
+
+        def publish(text, iteration, rules=None):
+            print(json.dumps({"phase": "candidate", "iteration": iteration, "macro": text,
+                              "rule_count": len(text.splitlines()), "time_tolerance_seconds": tolerance}, ensure_ascii=False), flush=True)
+            check_cancelled()
+            print(json.dumps({"phase": "replaying", "iteration": iteration}), flush=True)
+            replay = verify(text)
+            preview(text, replay, rules)
+            print(json.dumps({"phase": "replayed", "iteration": iteration,
+                              "comparison": replay["comparison"]}), flush=True)
+            return replay
+
+        def finish_exact(rules, text, replay, iteration):
+            # This is the only stage transition, including an immediately
+            # successful first draft. Freeze the original scene, endpoint and
+            # final tolerance; compression never calls relax or learns labels
+            # from a diverged suffix. B is neither an input nor a dependency.
+            report["status"] = "exact"
+            report["comparison"] = replay["comparison"]
+            (args.out / "exact.txt").write_text(text, encoding="utf-8")
+            write(args.out / "verified.json", replay)
+            write(args.out / "constraints.json", rows)
+            if not args.compress:
+                return
+            module = compression_module()
+            compression_started, compression_paused = time.perf_counter(), PAUSED_SECONDS
+            frozen = json.loads(json.dumps(scene))
+            write(args.out / "compression-contract.json", {"scene":frozen,
+                "baseline_macro_sha256":hashlib.sha256(text.encode()).hexdigest(),
+                "comparison":replay["comparison"], "baseline_archive":replay.get("archive_file"),
+                "character_count":"UTF-16 code units of copyable text, including brackets/spaces/newlines"})
+            (args.out / "compact.txt").write_text(text, encoding="utf-8")
+            write(args.out / "compact-verified.json", replay)
+            report["compression"] = {"status":"running", "initial_chars":module.char_count(text),
+                                      "best_chars":module.char_count(text), "trial_count":0}
+            def progress(summary):
+                report["compression"] = summary
+                write(args.out / "compression-summary.json", summary)
+                print(json.dumps({"phase":"compressing", "stage":"compression", "compression":summary}), flush=True)
+            def boundary():
+                check_cancelled()
+                if time.perf_counter()-started-PAUSED_SECONDS >= args.seconds:
+                    raise TimeoutError("compression run budget exhausted")
+            def local_check(solver):
+                boundary()
+                status = compression_check(solver)
+                boundary()
+                return status
+            def trial_verify(candidate, trial, kind):
+                assert scene == frozen, "compression changed the acceptance contract"
+                n = iteration + trial
+                print(json.dumps({"phase":"candidate", "stage":"compression", "iteration":n,
+                    "macro":candidate, "rule_count":len(candidate.splitlines()),
+                    "time_tolerance_seconds":tolerance, "method":kind}, ensure_ascii=False), flush=True)
+                (args.out / f"compact-candidate-{trial:04d}.txt").write_text(candidate,encoding="utf-8")
+                check_cancelled()
+                print(json.dumps({"phase":"replaying", "iteration":n}), flush=True)
+                result = verify(candidate,screening=True)
+                write(args.out / f"compact-replay-{trial:04d}.json", result)
+                print(json.dumps({"phase":"replayed", "iteration":n,
+                                  "comparison":result["comparison"]}), flush=True)
+                return result
+            def accepted(candidate, result, summary):
+                value = {"phase":"best", "stage":"compression", "macro":candidate,
+                         "comparison":result["comparison"], "char_count":summary["best_chars"]}
+                (args.out / "compact.txt").write_text(candidate, encoding="utf-8")
+                write(args.out / "compact-verified.json", result)
+                write(args.out / "best.json", value)
+                write(args.out / "best-replay.json", result)
+                print(json.dumps(value, ensure_ascii=False), flush=True)
+            def counterexample(candidate, result, trial, kind):
+                boundary()
+                observed = verify(candidate)
+                if observed['comparison'] != result['comparison'] or observed.get('actual_fingerprint') != result.get('actual_fingerprint'):
+                    raise RuntimeError('full counterexample observation changed native replay')
+                write(args.out / f'compact-counterexample-{trial:04d}.json',observed)
+                return observed
+            local_constraints = []
+            def diagnostic(info, smt):
+                local_constraints.append(info)
+                if smt:
+                    (args.out / f"compression-{len(local_constraints):04d}.smt2").write_text(smt,encoding="utf-8")
+                write(args.out / "compression-solvers.json", local_constraints)
+            try:
+                _, compact_replay, trials, summary = module.compress(rules,atoms,actions,replay,
+                    lambda r:macro_text(r,atoms,actions), trial_verify, boundary,
+                    local_check, accepted, progress, diagnostic,
+                    lambda:time.perf_counter()-started-PAUSED_SECONDS < args.seconds,
+                    feedback=counterexample,deep_search=getattr(args,'compress_deep',False))
+                report["comparison"] = compact_replay["comparison"]
+                report["compression_stop"] = summary["status"]
+                write(args.out / "compression.json", trials)
+            finally:
+                # Stop/error must leave the last certified macro and its full
+                # evidence intact. Partial pending trials never replace it.
+                write(args.out / "compression-summary.json", report["compression"])
+                report["compression_elapsed_ms"] = max(0, (time.perf_counter()-compression_started
+                                                            -PAUSED_SECONDS+compression_paused)*1000)
+                report["compression_solve_ms"] = sum(item.get("solve_ms",0) for item in local_constraints)
+
+        def relax(reason):
+            nonlocal tolerance, rows, seen, variant, blocked, tried_candidates, indices, focus, best_rules, best_rank, local_expansions, paths
+            if not prototype or tolerance >= 0.125:
+                return False
+            scheduler.improved([])
+            local_seen.clear()
+            local_expansions = 0
+            previous = tolerance
+            tolerance = 0.125
+            scene["time_tolerance_seconds"] = tolerance
+            report["time_tolerance_seconds"] = tolerance
+            report["relaxations"].append({"from_seconds": previous, "to_seconds": tolerance, "reason": reason})
+            print(json.dumps({"phase": "relaxing", "time_tolerance_seconds": tolerance}), flush=True)
+            refreshed = oracle.run(dict(scene, atoms=atoms))
+            if refreshed["status"] != "ok":
+                raise RuntimeError("reference failed while rebuilding tolerant constraints")
+            write(args.out / "target-relaxed.json", refreshed)
+            rows, seen = [], set()
+            for row in refreshed["rows"]:
+                if row_key(row) not in seen:
+                    rows.append(row); seen.add(row_key(row))
+            variant, blocked, tried_candidates = 0, [], set()
+            indices = {row_key(row): i for i, row in enumerate(rows)}
+            paths = PathSamples(rows)
+            focus = None
+            # Replay/rank the saved seed under the NEW acceptance window before
+            # using it. Never compare rankings from different tolerances.
+            if best_rules is not None:
+                saved_rules = best_rules
+                best_rank = None
+                saved_text = macro_text(saved_rules, atoms, actions)
+                saved_replay = verify(saved_text)
+                preview(saved_text, saved_replay, saved_rules)
+                learn(saved_replay, saved_text)
+                tried_candidates.add(saved_text)
+            write(args.out / "scene.json", scene)
+            report["scenario_sha256"] = hashlib.sha256(json.dumps(scene, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+            return True
+
+        def expand(reason):
+            nonlocal atoms, paths, focus
+            if not prototype:
+                return False
+            states = [p["replay"]["rows"][-1].get("state") for p in paths.paths.values()
+                      if p["replay"].get("rows")]
+            extended = expand_thresholds(atoms, states)
+            if len(extended) == len(atoms) or len(extended) > 30000:
+                return False
+            count = len(atoms)
+            print(json.dumps({"phase": "expanding", "from_atoms": count,
+                              "to_atoms": len(extended), "reason": reason}), flush=True)
+            refreshed = oracle.run(dict(scene, atoms=extended))
+            if refreshed["status"] != "ok":
+                raise RuntimeError("reference failed while expanding the legal condition catalog")
+            atoms = extended
+            write(args.out / "atoms.json", atoms)
+            paths = PathSamples(refreshed["rows"])
+            activate(None, paths.teacher)
+            report.setdefault("condition_expansions", []).append({"from": count, "to": len(atoms), "reason": reason})
+            if best_rules is not None:
+                text = macro_text(best_rules, atoms, actions)
+                replay = verify(text)
+                preview(text, replay, best_rules)
+                learn(replay, text)
+                scheduler.improved(repair_trials(best_rules, atoms, replay))
+            return True
+
+        # Always obtain an honest, replayed baseline before hard constraints
+        # can reject the finite language. This is a normal macro, not a script.
+        if prototype:
+            draft_rows = [r for r in rows if r["allowed"]]
+            draft = construct(draft_rows, atoms, actions)
+            report["draft_solve_ms"] = draft["solve_ms"]
+            rules = draft.get("rules", draft.get("partial_rules", []))
+            if not rules:
+                distinct = dict.fromkeys(r["allowed"][0] for r in draft_rows)
+                rules = [{"action": a, "atoms": []} for a in distinct]
+            text = macro_text(rules, atoms, actions)
+            write(args.out / "draft.json", draft)
+            replay = publish(text, 0, rules)
+            tried_candidates.add(text)
+            learn(replay, text)
+            if replay["comparison"]["reproduced"]:
+                finish_exact(rules,text,replay,0)
+                return
+
+        for iteration in range(1, args.iterations + 1):
+            check_cancelled()
+            remaining = args.seconds - (time.perf_counter() - started)
+            if remaining <= 0:
+                break
+            print(json.dumps({"phase": "solving", "iteration": iteration}), flush=True)
+            local_trial = scheduler.next(tried_candidates, lambda rules: macro_text(rules, atoms, actions))
+            if prototype and not local_trial:
+                if variant > 0 and variant % 16 == 0 and expand("stalled_whole_program_search"):
+                    variant += 1
+                    continue
+                activate(*paths.select(variant))
+            evidence = None if local_trial else conflict(rows)
+            if evidence:
+                evidence["path_id"] = active_path
+                write(args.out / "conflict.json", evidence)
+                if prototype and active_path is not None:
+                    paths.rejected.add(active_path)
+                    activate(None, paths.teacher)
+                    focus = None
+                    # This incoming trajectory failed; rebuild the whole macro.
+                    # Its existence says nothing about another reachable path.
+                    restart_next = True
+                    evidence = conflict(rows)
+                    if evidence is None:
+                        print(json.dumps({"phase": "branching", "reason": "rejected_path_released"}), flush=True)
+                if evidence is None:
+                    pass
+                elif relax("indistinguishable_observations"):
+                    continue
+                elif prototype:
+                    if expand("finite_observation_conflict"):
+                        variant += 1
+                        continue
+                    # Teacher snapshots are construction guidance, not a demand
+                    # that every tolerated program visit the same wait states.
+                    paths.teacher_positive_only = True
+                    activate(None, [r for r in paths.teacher if r["allowed"]])
+                    restart_next = True
+                else:
+                    report["status"] = "finite_language_conflict"
+                    report["reason"] = "当前条件仍存在冲突，已保留真实回放最好的宏。"
+                    break
+            if local_trial:
+                result = {"status": "candidate", "method": "local_guard_split" if local_trial.get("repair") else "local_threshold_repair",
+                          "rules": local_trial["rules"], "solve_ms": 0.0,
+                          "slots": None, "terms": None, "sample_count": len(rows),
+                          "distinct_atoms": None, "rule_count": len(local_trial["rules"]),
+                          "edit": {k: v for k, v in local_trial.items() if k != "rules"}}
+            elif prototype:
+                # A missed wait produces a reversible cast-now branch at the
+                # LAST aligned state. If impossible, release that branch and
+                # prefer real wake-up thresholds instead. Never turn it into
+                # a permanent WAIT=false label or a global UNSAT claim.
+                obligations = [focus["row"]] if focus and focus["cast_now"] else []
+                preferred = focus["wake_atoms"] if focus else []
+                seed = None if restart_next or iteration % 8 == 0 else best_rules
+                restart_next = False
+                result = construct(rows, atoms, actions, variant,
+                                   lambda p: print(json.dumps(dict(p, iteration=iteration)), flush=True),
+                                   seed=seed, obligations=obligations, cache=sample_index,
+                                   preferred_atoms=preferred, repair_seed=variant % 2 == 0)
+                if focus:
+                    result["wait_refinement"] = focus
+                if result["status"] != "sat" and obligations:
+                    branch = result
+                    result = construct(rows, atoms, actions, variant, seed=seed,
+                                       cache=sample_index, preferred_atoms=preferred, repair_seed=variant % 2 == 0)
+                    result["solve_ms"] += branch["solve_ms"]
+                    result["wait_refinement"] = dict(focus, cast_now_branch="infeasible_released")
+                variant += 1  # Never restart the same seed on every new sample.
+            else:
+                result, smt = solve(rows, atoms, actions, *sizes[size],
+                                    args.solver_ms if remaining == float("inf") else min(args.solver_ms, max(1, int(remaining*1000))), blocked,
+                                    deadline=started+args.seconds)
+                (args.out / f"iteration-{iteration:03d}.smt2").write_text(smt, encoding="utf-8")
+            write(args.out / f"iteration-{iteration:03d}.json", result)
+            summary = {k: result[k] for k in ("status", "solve_ms", "slots", "terms", "sample_count", "distinct_atoms")}
+            for k in ("method", "rule_count", "max_terms_used", "variant", "seed_rules", "repaired_rules", "wait_refinement", "edit"):
+                if k in result:
+                    summary[k] = result[k]
+            summary["path_id"] = active_path if prototype else None
+            if "reason" in result:
+                summary["reason"] = result["reason"]
+            report["iterations"].append(summary)
+            print(json.dumps({"iteration": iteration, **summary}), flush=True)
+            if result["status"] not in ("sat", "candidate"):
+                if prototype:
+                    if relax("finite_and_conflict"):
+                        continue
+                    write(args.out / "conflict.json", result.get("conflict"))
+                    if active_path is not None:
+                        paths.rejected.add(active_path)
+                    if expand("finite_and_conflict"):
+                        continue
+                    if active_path is None:
+                        paths.teacher_positive_only = True
+                    restart_next = True
+                    summary["refinement"] = "release_infeasible_path_and_rebuild"
+                    continue
+                had_blocked = bool(blocked)
+                size += 1
+                blocked = []
+                if size == len(sizes):
+                    report["status"] = "bounded_unsat" if result["status"] == "unsat" else "unknown"
+                    if had_blocked and result["status"] == "unsat":
+                        report["status"] = "runtime_search_exhausted"
+                    report["reason"] = result.get("reason", "Only the stated finite catalog and rule bounds are UNSAT.")
+                    break
+                continue
+            text = macro_text(result["rules"], atoms, actions)
+            if prototype and text in tried_candidates:
+                restart_next = True
+                if variant >= 8 and relax("repeated_witness_without_timing_progress"):
+                    continue
+                summary["refinement"] = "try_another_sample_witness"
+                continue
+            tried_candidates.add(text)
+            (args.out / f"candidate-{iteration:03d}.txt").write_text(text, encoding="utf-8")
+            print(json.dumps({"phase": "candidate", "iteration": iteration, "macro": text,
+                              "rule_count": len(result["rules"]), "time_tolerance_seconds": tolerance}, ensure_ascii=False), flush=True)
+            check_cancelled()
+            print(json.dumps({"phase": "replaying", "iteration": iteration,
+                              "rule_count": len(result["rules"])}), flush=True)
+            replay = verify(text)
+            write(args.out / f"replay-{iteration:03d}.json", replay)
+            summary["comparison"] = replay["comparison"]
+            summary["timings_ms"] = replay.get("timings_ms", {})
+            report["comparison"] = replay["comparison"]
+            preview(text, replay, result["rules"], local_trial)
+            print(json.dumps({"phase": "replayed", "iteration": iteration, **summary}), flush=True)
+            if replay["comparison"]["reproduced"]:
+                finish_exact(result["rules"],text,replay,iteration)
+                break
+            # Only rows emitted while the exact action/time prefix was aligned.
+            # Include all new prefix wait states; never label the diverged suffix.
+            added = learn(replay, text)
+            summary["added_counterexamples"] = added
+            summary["rejected_transitions"] = sum(bool(r.get("rejected_actions")) for r in replay["rows"])
+            if focus:
+                summary["wait_counterexample"] = focus
+            if added:
+                blocked = []  # atom equivalence partition will be rebuilt
+            else:
+                if prototype:
+                    restart_next = not bool(focus)
+                    if variant >= 8 and not focus:
+                        relax("timing_search_stalled")
+                    summary["refinement"] = "wait_edge_branch" if focus else "rebuild_whole_witness_for_runtime_scheduling"
+                else:
+                    blocked.append(result["model_values"])
+                    summary["refinement"] = "whole_candidate_blocked_for_runtime_scheduling"
+        write(args.out / "constraints.json", rows)
+    except Cancelled:
+        if report["status"] == "exact":
+            report["compression_stop"] = "cancelled"
+        else:
+            report["status"] = "cancelled"
+    except TimeoutError as error:
+        if report["status"] == "exact":
+            report["compression_stop"] = "budget_exhausted"
+        else:
+            report["status"] = "budget_exhausted"
+        report["reason"] = str(error)
+    except Exception as error:
+        if report["status"] == "exact":
+            report["compression_stop"] = "cancelled" if CANCELLED.is_set() else "error"
+        else:
+            report["status"] = "cancelled" if CANCELLED.is_set() else "error"
+        report["reason"] = str(error)
+        raise
+    finally:
+        oracle.close()
+        if report.get("compression") and report.get("compression_stop"):
+            report["compression"]["status"] = report["compression_stop"]
+            write(args.out / "compression-summary.json", report["compression"])
+        best_path = args.out / "best.json"
+        if best_path.exists():
+            report["comparison"] = json.loads(best_path.read_text(encoding="utf-8"))["comparison"]
+        report["wall_elapsed_ms"] = (time.perf_counter() - started)*1000
+        report["elapsed_ms"] = max(0, report["wall_elapsed_ms"] - PAUSED_SECONDS*1000)
+        report["extraction_solve_ms"] = report.get("draft_solve_ms", 0) + sum(i["solve_ms"] for i in report["iterations"])
+        report["total_solve_ms"] = report["extraction_solve_ms"] + report.get("compression_solve_ms",0)
+        write(args.out / "report.json", report)
+        print(json.dumps({k:v for k,v in report.items() if k in ("status","comparison","reason","elapsed_ms","total_solve_ms")}, ensure_ascii=False), flush=True)
+
+
+if __name__ == "__main__":
+    main()

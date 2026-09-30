@@ -4,6 +4,9 @@ use crate::{frames_to_sec, macro_engine::*, CastEvent, Player, RecipeEntry, Skil
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
+#[path = "macro_diagnostic/evidence.rs"]
+pub(crate) mod diagnostic_evidence;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 调试输出结构
 // ─────────────────────────────────────────────────────────────────────────────
@@ -156,6 +159,25 @@ pub struct PoolEntry {
     pub line: usize,
     pub skill_name: String,
     pub is_fcast: bool,
+}
+
+/// Read-only atom observations for synthesis. Use the native condition evaluator
+/// without allocating skill pools, rendered condition strings or debug records
+/// for every atom at every decision (millions of allocations on a long cycle).
+pub(crate) fn evaluate_condition_truths<'a>(
+    page: &MacroPage,
+    player: &'a Player,
+    skill_map: &'a HashMap<&'a str, Vec<&'a SkillSpec>>,
+    skill_by_id: &'a HashMap<u32, &'a SkillSpec>,
+    last_skill: Option<String>,
+) -> Vec<bool> {
+    let state = Phase1State {
+        player, skill_map, skill_by_id, last_skill,
+        buff_lookup: player.buff_idx_lookup(),
+        target_buff_lookup: player.target_idx_lookup(),
+    };
+    page.lines.iter().map(|line| line.condition.as_ref()
+        .is_none_or(|condition| eval_condition(condition, &state))).collect()
 }
 
 /// 阶段一：扫描宏页所有行，构建技能池
@@ -835,6 +857,7 @@ pub fn execute_cast(
 
    out.push(CastEvent {
         sequence_index: None,
+        solidify: None,
        name: event_name,
         skill_id: actual_skill.skill_id,
         cast_time,
@@ -975,6 +998,7 @@ pub fn simulate_macro(
     recipes_table: &[RecipeEntry],
     skill_by_id: &HashMap<u32, &SkillSpec>,
     pauses: &[(f64, f64)],
+    mut trace: Option<&mut crate::macro_diagnostic::Collector>,
 ) -> (
     Vec<CastEvent>,
     Vec<MacroStepDebug>,
@@ -998,15 +1022,20 @@ pub fn simulate_macro(
         .collect();
     pause_ranges.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
     // 如果当前时间落在某个停手窗口中或之前，直接跳到窗口结束
+    let record_replay = max_casts == 1 && !player.lite_mode
+        && !trace.as_ref().is_some_and(|t| t.exact.is_some());
+    let replay_start = player.current_time;
+    let mut replay_waits = Vec::new();
     let skip_pause = |player: &mut Player,
                       prev_time: &mut f64,
                       timeline: &mut Vec<CastEvent>,
                       skill_by_id: &HashMap<u32, &SkillSpec>,
                       dmg_ctx: Option<&(crate::Attributes, crate::TargetConfig)>,
                       recipes_table: &[RecipeEntry],
-                      pauses: &[(f64, f64)]| {
+                      pauses: &[(f64, f64)], waits: &mut Vec<f64>| {
         for &(ps, pe) in pauses {
             if player.current_time >= ps && player.current_time < pe {
+                if record_replay { waits.push(pe - replay_start); }
                 let mut tick = player.process_buff_ticks(*prev_time, pe);
                 crate::fill_tick_events(&mut tick, skill_by_id, dmg_ctx, recipes_table, player);
                 timeline.extend(tick);
@@ -1017,7 +1046,7 @@ pub fn simulate_macro(
     };
     let mut timeline = Vec::new();
     let debug_steps = Vec::new();
-    let collect_execution_stats = !player.lite_mode;
+    let collect_execution_stats = !player.lite_mode && !trace.as_ref().is_some_and(|t| t.exact.is_some());
     let mut line_stats = if collect_execution_stats {
         config
             .pages
@@ -1096,20 +1125,22 @@ pub fn simulate_macro(
             dmg_ctx,
             recipes_table,
             &pause_ranges,
+            &mut replay_waits,
         );
 
         // 选择活跃宏页（体态翻页）
         let page_idx = select_page(config, player);
 
-        // 阶段一：构建技能池（debug 关闭：debug_steps 已注释，不消费）
+        let tracing = trace.as_ref().is_some_and(|collector| collector.contains(player.current_time));
+        // Step 1 的实际扫描结果同时供累计统计与按需诊断使用。
         let _t_p1 = std::time::Instant::now();
-        let (pool, new_last, p1_debug) = evaluate_phase1(
+        let (mut pool, new_last, p1_debug) = evaluate_phase1(
             &config.pages[page_idx],
             player,
             skill_map,
             skill_by_id,
             last_skill.clone(),
-            collect_execution_stats,
+            collect_execution_stats || tracing,
         );
         let _ns_p1 = _t_p1.elapsed().as_nanos() as u64;
         crate::perf_add(|p| {
@@ -1127,12 +1158,26 @@ pub fn simulate_macro(
             }
         }
 
-        // 更新 last_skill（池中最后一个）
+        // Phase 1 returns the incoming last_skill unchanged; only successful casts update it.
         if new_last.is_some() {
             last_skill = new_last;
         }
 
+        // Optional local synthesis instrumentation. Candidate mode is read-only.
+        // Teacher mode replays the reference through the same phase 2 and cast path;
+        // it is never enabled when verifying a generated macro.
+        if let Some(probe) = trace.as_deref_mut().and_then(|t| t.exact.as_mut()) {
+            probe.observe(player, skill_map, skill_by_id, last_skill.as_deref(),
+                *is_first_main, network_delay, &mut pool);
+            if probe.should_stop() { break; }
+        }
+
         if pool.is_empty() {
+            if tracing {
+                let collector = trace.as_deref_mut().unwrap();
+                let index = collector.record(player, page_idx, last_skill.as_deref(), p1_debug, Vec::new(), None);
+                collector.focus(index, config, player, skill_map, skill_by_id);
+            }
             // 无技能通过条件，跳到下一次状态可能变化的时刻
             let _t_adv = std::time::Instant::now();
             let _t_next = std::time::Instant::now();
@@ -1147,7 +1192,10 @@ pub fn simulate_macro(
             } else {
                 player.current_time + min_advance
             };
+            let target = trace.as_deref_mut().and_then(|t| t.exact.as_mut())
+                .map_or(target, |p| p.next_time(player, target, *is_first_main, network_delay));
             let target = target.min(max_duration + min_advance);
+            if record_replay { replay_waits.push(target - replay_start); }
             let _t_ticks = std::time::Instant::now();
             let mut tick_events = player.process_buff_ticks(*prev_time, target);
             let _ns_ticks = _t_ticks.elapsed().as_nanos() as u64;
@@ -1186,7 +1234,7 @@ pub fn simulate_macro(
             player,
             skill_map,
             skill_by_id,
-            collect_execution_stats,
+            collect_execution_stats || tracing,
         );
         let _ns_p2 = _t_p2.elapsed().as_nanos() as u64;
         crate::perf_add(|p| {
@@ -1220,6 +1268,12 @@ pub fn simulate_macro(
                 }
             }
         }
+        let trace_index = if tracing {
+            let collector = trace.as_deref_mut().unwrap();
+            let index = collector.record(player, page_idx, last_skill.as_deref(), p1_debug, p2_debug, phase2_result.as_ref().map(|r| (r.line, r.skill_name.clone())));
+            collector.focus(index, config, player, skill_map, skill_by_id);
+            index
+        } else { None };
         let result = match phase2_result {
             Some(r) => r,
             None => {
@@ -1237,7 +1291,10 @@ pub fn simulate_macro(
                 } else {
                     player.current_time + min_advance
                 };
+                let target = trace.as_deref_mut().and_then(|t| t.exact.as_mut())
+                    .map_or(target, |p| p.next_time(player, target, *is_first_main, network_delay));
                 let target = target.min(max_duration + min_advance);
+                if record_replay { replay_waits.push(target - replay_start); }
                 let _t_ticks = std::time::Instant::now();
                 let mut tick_events = player.process_buff_ticks(*prev_time, target);
                 let _ns_ticks = _t_ticks.elapsed().as_nanos() as u64;
@@ -1275,30 +1332,8 @@ pub fn simulate_macro(
             crate::resolve_combo_follow(result.skill, player, skill_by_id).unwrap_or(result.skill);
 
         // /fcast 打断引导
-        if result.is_fcast && player.channel_end > player.current_time + 0.001 {
-            let skill_id = player.channel_skill_id;
-            let interrupt_at = player.next_cast_time(actual_skill);
-            let (old_ticks, actual_ticks) = player.interrupt_channel(interrupt_at);
-            // 修正 timeline 中引导技能的跳数和时长
-            if let Some(ev) = timeline
-                .iter_mut()
-                .rev()
-                .find(|e| e.skill_id == skill_id && !e.triggered)
-            {
-                ev.channel_ticks = Some(actual_ticks);
-                let interval = frames_to_sec(player.channel_interval_frame);
-                let first = frames_to_sec(player.channel_first_frame);
-                ev.channel_duration = Some(if actual_ticks <= 1 {
-                    first
-                } else {
-                    first + (actual_ticks - 1) as f64 * interval
-                });
-            }
-            // 盾舞：修正怒气
-            if skill_id == 13048 && player.stance() == crate::Stance::Shield {
-                let over_rage = (old_ticks as i32 - actual_ticks as i32).max(0);
-                player.add_rage(-over_rage);
-            }
+        if result.is_fcast {
+            crate::macro_solidify::interrupt(player, actual_skill, &mut timeline);
         }
 
         // 释放：使用 execute_cast 统一处理 tick/cast/脚本/emit/advance
@@ -1318,10 +1353,23 @@ pub fn simulate_macro(
             &cast_ctx,
         );
         if let Some(event) = outcome.events.iter_mut().find(|event| !event.triggered) {
+            // Only inline one-cast calls are frozen; batch search results stay compact.
+            if record_replay {
+                event.solidify = Some(crate::macro_solidify::FrozenCast {
+                    skill_id: actual_skill.skill_id, waits: replay_waits.clone(), fcast: result.is_fcast,
+                });
+            }
             event.macro_page = Some(page_idx + 1);
             event.macro_line = Some(result.line);
         }
+        if let (Some(collector), Some(index)) = (trace.as_deref_mut(), trace_index) {
+            collector.finish(index, outcome.cast_success, outcome.events.iter().find(|event| !event.triggered).map(|event| event.cast_time));
+        }
+        if let Some(probe) = trace.as_deref_mut().and_then(|t| t.exact.as_mut()) {
+            probe.finish(&outcome, &result.skill_name, result.is_fcast);
+        }
         timeline.extend(outcome.events);
+        if trace.as_ref().and_then(|t| t.exact.as_ref()).is_some_and(|p| p.should_stop()) { break; }
         if outcome.cast_success {
             if collect_execution_stats {
                 let offset = page_offsets[page_idx];

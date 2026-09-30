@@ -429,7 +429,7 @@ function scheduleAttrsAutosave() {
 }
 
 // 页面初始化
-loadAttrs(true);
+const attributesReady = loadAttrs(true);
 refreshAttrsProfiles();
 
 let _attrsAutosaveTimer = null;
@@ -567,7 +567,7 @@ function getSimHasteLevel() {
 function getSimAttrs() {
   const a = getAttrs();
   if (_hasteOverride != null) a.haste_level = _hasteOverride;
-  return a;
+  return window.Jx3HarnessWorkspace?.completeAttributes?.(a) || a;
 }
 
 // ── 渲染战斗属性（数据全部来自后端）──────────────────────────────
@@ -2359,6 +2359,9 @@ function updateBlockValue(bv, maxBv) {
     blockFill.classList.toggle('block-high', pct >= 60);
   }
   if (blockVal) blockVal.textContent = bv;
+  blockRow.title = `格挡值：${bv} / ${max}`;
+  blockRow.setAttribute('aria-valuenow', String(bv));
+  blockRow.setAttribute('aria-valuemax', String(max));
 }
 
 /** 暴怒仅属于测试服分山劲的阵云结晦；脱战准备满 120，运行值以后端为准。 */
@@ -2413,6 +2416,8 @@ function resetSkillButtons() {
   const blockVal = document.getElementById('sim_block_value');
   if (blockFill) { blockFill.style.height = '100%'; blockFill.classList.add('block-high'); }
   if (blockVal) blockVal.textContent = '100';
+  const blockRow = document.getElementById('sim_block_row');
+  if (blockRow && blockRow.style.display !== 'none') updateBlockValue(100, 100);
   updateBerserkValue(isBerserkEnabled() ? 120 : null, 120);
 }
 
@@ -2431,11 +2436,11 @@ const timingOffsets = {};
 
 
 /** 从序列 DOM 读取技能名列表（包括隐藏的 __切体态延迟中__） */
-function readSequence() {
+function readSequence(container = document.getElementById('sim_sequence')) {
   const out = [];
-  document.querySelectorAll('#sim_sequence .sim-seq-item').forEach(el => {
+  container.querySelectorAll('.sim-seq-item').forEach(el => {
     // 预释放：完全不进 sequence 数组，单独通过 getPreReleases() / pre_releases 字段发后端
-    if (el.classList.contains('seq-pre-release')) return;
+    if (el.classList.contains('seq-pre-release') || el.classList.contains('seq-auto')) return;
     const skill = el.dataset.skill || el.querySelector('.seq-label')?.textContent.trim();
     // 清除冷却：发送 __clearCD__:目标技能名
     if (skill === '__clearCD__' && el.dataset.clearcdTarget) {
@@ -2449,9 +2454,9 @@ function readSequence() {
 
 /** 收集所有预释放项 → [{skill, time_before}]，给后端 pre_releases 字段用。
  *  与 sequence 完全分离：DOM 中的 .seq-pre-release 不进 sequence 数组，由这个 helper 单独传 */
-function getPreReleases() {
+function getPreReleases(container = document.getElementById('sim_sequence')) {
   const out = [];
-  document.querySelectorAll('#sim_sequence .sim-seq-item.seq-pre-release').forEach(el => {
+  container.querySelectorAll('.sim-seq-item.seq-pre-release').forEach(el => {
     const skill = el.dataset.skill;
     const t = parseFloat(el.dataset.preTime);
     if (skill && Number.isFinite(t) && t > 0) {
@@ -2459,6 +2464,38 @@ function getPreReleases() {
     }
   });
   return out;
+}
+
+// Foreground and background panes must use the same complete scene and sequence semantics.
+function getSequenceChannelTicks(container = document.getElementById('sim_sequence')) {
+  const channels = {};
+  [...container.querySelectorAll('.sim-seq-item:not(.seq-pre-release):not(.seq-auto)')].forEach((item, index) => {
+    if (Number(item.dataset.channelTicks) > 0) channels[index] = Number(item.dataset.channelTicks);
+  });
+  return channels;
+}
+function buildSimulateRequest(options = {}) {
+  const container = options.container || document.getElementById('sim_sequence');
+  const items = [...container.querySelectorAll('.sim-seq-item:not(.seq-pre-release):not(.seq-auto)')];
+  const sequence = readSequence(container), offsets = {}, qijin = {};
+  items.forEach((item, index) => {
+    const offset = Number(item.dataset.timingOffset);
+    if (offset < 0 || offset > .001) offsets[index] = offset < 0 ? -1 : offset;
+    if (item.dataset.qijinBuff) qijin[index] = Number(item.dataset.qijinBuff);
+  });
+  const body = { haste_level: getSimHasteLevel(), sequence, talents: getSelectedTalents(),
+    channel_ticks: getSequenceChannelTicks(container), timing_offsets: offsets,
+    solidified_casts: window.Jx3MacroSolidify?.read(items) || {}, qijin_buffs: qijin,
+    macro_text: sequence.includes('__macro__') ? (options.macroText ?? buildMacroText()) : undefined,
+    attributes: getSimAttrs(), target: getTarget(), initial_rage: adminInitialRage,
+    network_delay: parseInt(document.getElementById('sim_delay').value) || 0, recipes: getSelectedRecipes(),
+    boss_attack_interval: getBossAttackInterval(), hanjia_expectation: isHanjiaExpectationEnabled(),
+    ...(typeof getDunyaResetOptions === "function" ? getDunyaResetOptions() : {}), tiegu_mode: getTieguMode(), experimental: isExperimental(),
+    equipment: getEquipmentMap(), team_buffs: getTeamBuffs(), formation: getCurrentFormation(),
+    pre_releases: getPreReleases(container), ...(options.lite ? { lite: true, lite_keep_timeline: true } : {}) };
+  const duration = options.macroDuration ?? macroLastDuration;
+  if (sequence.length && sequence.every((skill, index) => skill === '__macro__' || body.solidified_casts[index]) && duration > 0) body.macro_duration = duration;
+  return body;
 }
 
 /** 获取序列中可见技能项（排除隐藏项如 __切体态延迟中__），与后端 timeline 一一对应 */
@@ -2484,6 +2521,8 @@ function showChannelBar(seqItem, seqIdx, ticks, maxTicks) {
     tick.addEventListener('click', (e) => {
       e.stopPropagation();
       channelOverrides[seqIdx] = i;
+      const item = document.querySelector(`#sim_sequence .sim-seq-item[data-sequence-index="${seqIdx}"]`);
+      if (item) { delete item.dataset.solidifiedCast; item.dataset.channelTicks = String(i); }
       hideChannelBar();
       runSimulate();
     });
@@ -2563,6 +2602,7 @@ function showTimingBar(seqItem, seqIdx, currentOffset, maxOffset) {
       e.stopPropagation();
       // 最后一格 → 存 -1（跟随最大值），加速变化时自动跟随 GCD 窗口末尾
       timingOffsets[seqIdx] = isLast ? -1 : val;
+      if (seqItem) delete seqItem.dataset.solidifiedCast;
       if (seqItem && seqItem.dataset) seqItem.dataset.timingOffset = isLast ? '-1' : String(val);
       hideTimingBar();
     });
@@ -2623,6 +2663,9 @@ let onSimulateComplete = null;
 
 /** 最新模拟结果（供战斗统计使用） */
 let lastSimResult = null;
+// Requests started by an older edit or another foreground pane must not repaint the current editor.
+let simRequestGeneration = 0;
+let simPendingGeneration = 0;
 
 /** 计算当前循环模拟"输入"的指纹 —— 给发送到 A 等场景判 timeline 是否过期用
  *  覆盖序列、宏、奇穴、秘籍、属性、目标、延迟、起手怒气 等影响结果的全部输入 */
@@ -2632,11 +2675,14 @@ function computeLoopInputsHash() {
     const macro = (typeof buildMacroText === 'function') ? buildMacroText() : '';
     const talents = (typeof getSelectedTalents === 'function') ? getSelectedTalents() : [];
     const recipes = (typeof getSelectedRecipes === 'function') ? getSelectedRecipes() : [];
-    const attrs = (typeof getAttrs === 'function') ? getAttrs() : {};
+    const attrs = (typeof getSimAttrs === 'function') ? getSimAttrs() : {};
     const target = (typeof getTarget === 'function') ? getTarget() : {};
     const delay = parseInt(document.getElementById('sim_delay')?.value || '0') || 0;
     const payload = {
       seq,
+      sequence_details: buildLoopConfig().sequence,
+      haste_level: getSimHasteLevel(), macro_duration: macroLastDuration,
+      mount: currentMount,
       macro,
       t: [...talents].sort(),
       r: [...recipes].sort(),
@@ -2644,6 +2690,9 @@ function computeLoopInputsHash() {
       tg: target,
       d: delay,
       rage: (typeof adminInitialRage !== 'undefined') ? adminInitialRage : null,
+      boss_interval: getBossAttackInterval(), hanjia: isHanjiaExpectationEnabled(),
+      tiegu: getTieguMode(), experimental: isExperimental(), reset: getDunyaResetOptions(),
+      equipment: getEquipmentMap(), team_buffs: getTeamBuffs(), formation: getCurrentFormation(),
     };
     // 简单 hash：djb2
     const s = JSON.stringify(payload);
@@ -2685,10 +2734,20 @@ function _markSeqInvalidLite(result) {
 
 /** 调用后端模拟并刷新显示，序列为空时重置面板 */
 // 共享：给序列项添加时间、角标、hover tooltip、自动触发技能
-function decorateSeqItems(result) {
-  // 清除上次自动插入的换行符（避免属性更新后重复/错位）
-  document.querySelectorAll('#sim_sequence .seq-break-auto').forEach(e => e.remove());
-  const allItems = document.querySelectorAll('#sim_sequence .sim-seq-item');
+function bindSeqResultTooltip(item, content) {
+  item._seqResultTooltip = content;
+  if (item._seqResultTooltipBound) return;
+  item._seqResultTooltipBound = true;
+  item.addEventListener('mouseenter', () => showTooltip(item, typeof item._seqResultTooltip === 'function' ? item._seqResultTooltip() : item._seqResultTooltip));
+  item.addEventListener('mouseleave', hideTooltip);
+}
+function decorateSeqItems(result, options = {}) {
+  const seq = options.container || document.getElementById('sim_sequence');
+  const readOnly = !!options.readOnly;
+  const automaticDisplay = options.automaticDisplay ?? !readOnly;
+  // 自动技能和换行是显示结果，重绘前移除，不能参与主动技能的索引映射。
+  seq.querySelectorAll('.seq-auto, .seq-break-auto').forEach(e => e.remove());
+  const allItems = seq.querySelectorAll('.sim-seq-item');
   const visibleItems = [];
   const visibleToBackendIdx = [];
   // 预释放项不进 backend sequence；backendIdx 只对非预释放项递增（与 readSequence 输出对齐）
@@ -2702,6 +2761,11 @@ function decorateSeqItems(result) {
     _bIdx++;
   });
   const mainCasts = result.timeline.filter(t => !t.triggered);
+  const castsBySequence = new Map(), castIndices = new Map();
+  mainCasts.forEach((cast, index) => {
+    castIndices.set(cast, index);
+    if (cast.sequence_index != null && !castsBySequence.has(cast.sequence_index)) castsBySequence.set(cast.sequence_index, cast);
+  });
   // mc → el 反向 Map：用 mc 对象引用作 key，避免浮点 cast_time 字符串比对的 round 不一致
   const mcToEl = new Map();
   let prevTime = 0;
@@ -2709,6 +2773,9 @@ function decorateSeqItems(result) {
   visibleItems.forEach((el, vi) => {
     const seqIdx = visibleToBackendIdx[vi];
     el.dataset.sequenceIndex = String(seqIdx);
+    delete el.dataset.macroAssistIndex;
+    delete el.dataset.castTime;
+    el.onclick = null;
     el.querySelectorAll('.seq-time, .seq-channel-badge, .seq-cd-wait-badge, .seq-timing-badge, .seq-rank-badge, .seq-qijin-warn, .seq-yuange-badge').forEach(e => e.remove());
     el.classList.remove('seq-invalid', 'seq-xuenu-static');
     if (el.dataset.skill === '__macro__') delete el.dataset.resolvedSkill;
@@ -2719,7 +2786,7 @@ function decorateSeqItems(result) {
     const isMacro = el.dataset.skill === '__macro__';
     if (label && el.dataset.skill && !isMacro) label.textContent = el.dataset.skill;
     const skillName = el.dataset.skill || el.querySelector('.seq-label')?.textContent.trim();
-    const t = mainCasts[castIdx];
+    const t = castsBySequence.size ? castsBySequence.get(seqIdx) : mainCasts[castIdx];
     const baseName = t ? t.name.split('·')[0] : null;
     const fullName = t ? t.name : null;
     // __macro__ 匹配任意技能；完整名匹配优先（雾海阵云等含·的技能）
@@ -2737,10 +2804,10 @@ function decorateSeqItems(result) {
           wrap.innerHTML = '<span class="seq-icon-fallback">空</span>';
         }
       }
-      el.addEventListener('mouseenter', () => showTooltip(el, `<b>${isMacro ? '宏' : skillName}</b><br><span style="color:#f85149">${reason}</span>`));
-      el.addEventListener('mouseleave', hideTooltip);
+      bindSeqResultTooltip(el, `<b>${isMacro ? '宏' : skillName}</b><br><span style="color:#f85149">${reason}</span>`);
       return;
     }
+    el.dataset.macroAssistIndex = String(castIndices.get(t));
     castIdx++;
     mcToEl.set(t, el);
     // __macro__ 项：用实际释放的技能名替换标签 + 同步 icon img，盾回补换行
@@ -2748,7 +2815,7 @@ function decorateSeqItems(result) {
       label.textContent = baseName;
       el.dataset.resolvedSkill = baseName;
       _updateSeqItemIcon(el, baseName);
-      if (baseName === '盾回' && el.nextElementSibling && !el.nextElementSibling.classList.contains('seq-break-wrap')) {
+      if (automaticDisplay && baseName === '盾回' && el.nextElementSibling && !el.nextElementSibling.classList.contains('seq-break-wrap')) {
         const autoBreak = createLineBreak();
         autoBreak.classList.add('seq-break-auto');
         el.after(autoBreak);
@@ -2842,8 +2909,7 @@ function decorateSeqItems(result) {
       // 移除气劲单独显示 infoLine（"移除: <buff name>"），其他技能 ID 已在标题里不重复
       return `<b>${t.name}</b> (${t.skill_id}) ${t.cast_time.toFixed(2)}s${isQijinRemove ? `<br>${infoLine}` : ''}${dmgLine}${waitInfo}${rageInfo}${resourceLine}${buffsHtml}`;
     };
-    el.addEventListener('mouseenter', () => showTooltip(el, buildTip()));
-    el.addEventListener('mouseleave', hideTooltip);
+    bindSeqResultTooltip(el, buildTip);
     // 血怒 hover：高亮被本次血怒 buff 覆盖窗口内的后续 cast。
     // 持续时间从 state_after.buffs 取（已含秘籍延长），按 name 匹配避开 buff_id 常量耦合
     if (t.skill_id === 13040) {
@@ -2854,7 +2920,7 @@ function decorateSeqItems(result) {
         const endT = startT + xn.remaining;
         el.addEventListener('mouseenter', () => {
           el.classList.add('seq-xuenu-source');
-          document.querySelectorAll('#sim_sequence .sim-seq-item[data-cast-time]').forEach(other => {
+          seq.querySelectorAll('.sim-seq-item[data-cast-time]').forEach(other => {
             if (other === el) return;
             const ct = parseFloat(other.dataset.castTime);
             if (Number.isFinite(ct) && ct >= startT - 1e-3 && ct <= endT + 1e-3) {
@@ -2864,7 +2930,7 @@ function decorateSeqItems(result) {
         });
         el.addEventListener('mouseleave', () => {
           el.classList.remove('seq-xuenu-source');
-          document.querySelectorAll('#sim_sequence .seq-xuenu-covered').forEach(o => o.classList.remove('seq-xuenu-covered'));
+          seq.querySelectorAll('.seq-xuenu-covered').forEach(o => o.classList.remove('seq-xuenu-covered'));
         });
       }
     }
@@ -2876,8 +2942,9 @@ function decorateSeqItems(result) {
     }
     if (t.max_channel_ticks) {
       const key = String(seqIdx);
-      if (channelOverrides[key] && channelOverrides[key] > t.max_channel_ticks) {
+      if (!readOnly && channelOverrides[key] && channelOverrides[key] > t.max_channel_ticks) {
         channelOverrides[key] = t.max_channel_ticks;
+        el.dataset.channelTicks = String(t.max_channel_ticks);
       }
       el.style.cursor = 'pointer';
       const badge = document.createElement('span');
@@ -2885,7 +2952,7 @@ function decorateSeqItems(result) {
       badge.textContent = t.channel_ticks + '跳';
       el.appendChild(badge);
       el._channelData = { seqIdx: key, ticks: t.channel_ticks, max: t.max_channel_ticks };
-      el.onclick = (e) => {
+      if (!readOnly) el.onclick = (e) => {
         e.stopPropagation();
         const d = el._channelData;
         showChannelBar(el, d.seqIdx, d.ticks, d.max);
@@ -2894,7 +2961,7 @@ function decorateSeqItems(result) {
     {
       const hasWindow = t.max_timing_offset && t.max_timing_offset > 0.01;
       const offset = t.timing_offset || 0;
-      const storedOff = timingOffsets[String(seqIdx)];
+      const storedOff = readOnly ? Number(el.dataset.timingOffset) : timingOffsets[String(seqIdx)];
       const isTimingMax = storedOff != null && storedOff < 0;
       const hasOffset = offset > 0.001 || isTimingMax;
       if (hasWindow || hasOffset) {
@@ -2903,17 +2970,18 @@ function decorateSeqItems(result) {
           const badge = document.createElement('span');
           badge.className = 'seq-timing-badge';
           badge.textContent = isTimingMax ? 'max' : ('+' + offset.toFixed(2));
-          badge.addEventListener('click', (ev) => {
+          if (!readOnly) badge.addEventListener('click', (ev) => {
             if (!hasWindow) {
               ev.stopPropagation();
               delete el.dataset.timingOffset;
+              delete el.dataset.solidifiedCast;
               delete timingOffsets[String(seqIdx)];
               runSimulate();
             }
           });
           el.appendChild(badge);
         }
-        if (hasWindow && !t.max_channel_ticks) {
+        if (!readOnly && hasWindow && !t.max_channel_ticks) {
           el._timingData = { seqIdx: String(seqIdx), offset, max: t.max_timing_offset };
           el.onclick = (e) => {
             e.stopPropagation();
@@ -2957,7 +3025,7 @@ function decorateSeqItems(result) {
         el.appendChild(gb);
       }
     }
-    if (skillName === '移除气劲') {
+    if (!readOnly && skillName === '移除气劲') {
       el.style.cursor = 'pointer';
       const maxOff = t.max_timing_offset || 0;
       const posBuffs = t.available_buffs || [];
@@ -2968,8 +3036,7 @@ function decorateSeqItems(result) {
         badge.className = 'seq-qijin-warn';
         badge.textContent = '\u26a0';
         el.appendChild(badge);
-        el.addEventListener('mouseenter', () => showTooltip(el, `<b>移除气劲</b><br><span style="color:#f85149">已选气劲在此位置不可用，请重新选择</span>`));
-        el.addEventListener('mouseleave', hideTooltip);
+        bindSeqResultTooltip(el, `<b>移除气劲</b><br><span style="color:#f85149">已选气劲在此位置不可用，请重新选择</span>`);
       }
       el.onclick = (e) => {
         e.stopPropagation();
@@ -3009,9 +3076,8 @@ function decorateSeqItems(result) {
   }
 
   // 被动触发的技能按时间插入
-  const seq = document.getElementById('sim_sequence');
   const AUTO_SKILLS = new Set(['盾回']);
-  const autoCasts = result.timeline.filter(t => t.triggered && AUTO_SKILLS.has(t.name));
+  const autoCasts = automaticDisplay ? result.timeline.filter(t => t.triggered && AUTO_SKILLS.has(t.name)) : [];
   for (const t of autoCasts) {
     const el = document.createElement('div');
     el.className = 'sim-seq-item seq-auto';
@@ -3037,13 +3103,50 @@ function decorateSeqItems(result) {
   }
 }
 
+function presentSimResult(result, options = {}) {
+  lastSimResult = result;
+  set('sim_fight_time', result.fight_time.toFixed(2) + 's');
+  set('sim_skill_count', result.skill_count);
+  set('sim_total_damage', formatDamage(result.total_damage));
+  set('sim_dps_value', result.dps != null && result.dps > 0 ? Math.round(result.dps).toString() : '—');
+  renderBuffList(result.buffs || []);
+  renderExpectation(result.expectation);
+  // 预览模式下过滤掉临时移除气劲产生的最后一个 timeline 事件
+  let tlEvents = result.timeline;
+  if (qijinPreviewEl) {
+    const skipIdx = tlEvents.map((t, i) => (!t.triggered && t.skill_id === 90001) ? i : -1).filter(i => i >= 0).pop();
+    if (skipIdx !== undefined && skipIdx >= 0) {
+      tlEvents = tlEvents.filter((_, i) => i !== skipIdx);
+    }
+  }
+  renderTimeline(tlEvents);
+  const trackEl = document.getElementById('timeline_track');
+  renderBuffTimeline(result.buff_timeline, parseInt(trackEl?.style.width) || 100);
+  updateSkillButtons(result.available_skills, result.stance, result.rage, result.skill_cds, result.skill_charges, result.buffs, result.remaining_gcd, result.total_gcd, result.combo_states, result.skill_effective);
+
+  // 更新格挡值条（铁骨衣专属）
+  updateBlockValue(result.block_value, result.max_block_value);
+  updateBerserkValue(result.berserk_value, result.max_berserk_value);
+
+  // 更新左栏实时面板（开战 t=0 时刻属性快照）
+  updateRealtimePanel(result.initial_stats);
+
+  if (!options.keepSequence) decorateSeqItems(result);
+  if (typeof _renderInsertSlots === 'function') _renderInsertSlots();
+  if (onSimulateComplete) onSimulateComplete(result);
+  window.dispatchEvent(new CustomEvent('jx3-sim-rendered', { detail: result }));
+}
+
 async function runSimulate(opts) {
+  const requestGeneration = ++simRequestGeneration;
+  simPendingGeneration = requestGeneration;
+  await attributesReady;
+  if (requestGeneration !== simRequestGeneration) return;
   const liteMode = !!(opts && opts.lite);
   // 先清除 auto 元素（含自动换行符），再重建索引（避免 auto 元素干扰索引）
   document.querySelectorAll('#sim_sequence .seq-auto, #sim_sequence .seq-break-auto').forEach(e => e.remove());
   const allSeqItems = document.querySelectorAll('#sim_sequence .sim-seq-item');
   Object.keys(timingOffsets).forEach(k => delete timingOffsets[k]);
-  const qijinBuffs = {};
   // 预释放项不进 backend sequence，索引以"非预释放项"计数（与 readSequence 输出 + decorateSeqItems 对齐）
   let backendIdx = 0;
   allSeqItems.forEach((el) => {
@@ -3051,14 +3154,14 @@ async function runSimulate(opts) {
     const off = parseFloat(el.dataset.timingOffset);
     if (off < 0) timingOffsets[String(backendIdx)] = -1;
     else if (off > 0.001) timingOffsets[String(backendIdx)] = off;
-    if (el.dataset.qijinBuff) qijinBuffs[String(backendIdx)] = Number(el.dataset.qijinBuff);
     backendIdx++;
   });
   const sequence = readSequence();
-  const preReleases = getPreReleases();
+  Object.keys(channelOverrides).forEach(key => delete channelOverrides[key]);
+  Object.assign(channelOverrides, getSequenceChannelTicks());
   if (sequence.length === 0) {
     // lite 模式下空序列直接返回，不重置 UI
-    if (liteMode) return;
+    if (liteMode) { if (simPendingGeneration === requestGeneration) simPendingGeneration = 0; return; }
     lastSimResult = null;
     set('sim_fight_time', '—');
     set('sim_skill_count', '—');
@@ -3069,31 +3172,35 @@ async function runSimulate(opts) {
     renderBuffTimeline([], 0);
     // 空序列也请求后端，获取初始状态下的可用技能
     try {
-      const hasteLevel = getSimHasteLevel();
       const res = await fetch(API.simulate, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ haste_level: hasteLevel, sequence: [], talents: getSelectedTalents(), network_delay: parseInt(document.getElementById('sim_delay').value) || 0, recipes: getSelectedRecipes(), attributes: getSimAttrs(), target: getTarget(), initial_rage: adminInitialRage, boss_attack_interval: getBossAttackInterval(), hanjia_expectation: isHanjiaExpectationEnabled(), tiegu_mode: getTieguMode(), experimental: isExperimental(), equipment: getEquipmentMap(), team_buffs: getTeamBuffs(),
-        formation: getCurrentFormation() }),
+        body: JSON.stringify(buildSimulateRequest()),
         signal: AbortSignal.timeout(3000),
       });
       if (res.ok) {
         const r = await res.json();
+        if (requestGeneration !== simRequestGeneration) return;
         updateSkillButtons(r.available_skills, r.stance, r.rage, r.skill_cds, r.skill_charges, r.buffs, r.remaining_gcd, r.total_gcd, r.combo_states, r.skill_effective);
         updateBlockValue(r.block_value, r.max_block_value);
         updateBerserkValue(r.berserk_value, r.max_berserk_value);
         updateRealtimePanel(r.initial_stats);
-      } else { resetSkillButtons(); }
-    } catch { resetSkillButtons(); }
+        window._lastSimBody = buildSimulateRequest();
+        window.dispatchEvent(new CustomEvent('jx3-sim-rendered', { detail: r }));
+        return r;
+      } else if (requestGeneration === simRequestGeneration) { resetSkillButtons(); }
+    } catch { if (requestGeneration === simRequestGeneration) resetSkillButtons(); }
+    finally { if (simPendingGeneration === requestGeneration) simPendingGeneration = 0; }
     return;
   }
 
-  const hasteLevel = getSimHasteLevel();
-
   // 主 runSimulate body —— 缓存到全局供「团辅 ΔDPS 分析」复用（除 team_buffs/formation/lite 外完全一致）
   // lite 模式：跳过 timeline 详情 + 不缓存 _lastSimBody（中间状态不污染 ΔDPS 基线）
-  const _baseBody = { haste_level: hasteLevel, sequence, talents: getSelectedTalents(), channel_ticks: channelOverrides, timing_offsets: timingOffsets, network_delay: parseInt(document.getElementById('sim_delay').value) || 0, recipes: getSelectedRecipes(), qijin_buffs: qijinBuffs, macro_text: sequence.includes('__macro__') ? buildMacroText() : undefined, attributes: getSimAttrs(), target: getTarget(), initial_rage: adminInitialRage, boss_attack_interval: getBossAttackInterval(), hanjia_expectation: isHanjiaExpectationEnabled(), tiegu_mode: getTieguMode(), experimental: isExperimental(), equipment: getEquipmentMap(), team_buffs: getTeamBuffs(), formation: getCurrentFormation(), pre_releases: preReleases, ...(liteMode ? { lite: true, lite_keep_timeline: true } : {}) };
+  const _baseBody = buildSimulateRequest({ lite: liteMode });
   if (!liteMode) window._lastSimBody = _baseBody;
+  const _macroAssistKey = !liteMode ? window.Jx3MacroAssist?.contextKey() : null;
+  const _macroAssistBody = !liteMode ? JSON.parse(JSON.stringify(_baseBody)) : null;
+  if (_macroAssistKey) window.Jx3MacroAssist?.simulationStarted(_macroAssistKey);
   try {
     const res = await fetch(API.simulate, {
       method: 'POST',
@@ -3103,48 +3210,28 @@ async function runSimulate(opts) {
     });
     if (!res.ok) throw new Error();
     const result = await res.json();
+    if (requestGeneration !== simRequestGeneration) return;
     if (!liteMode) {
       try { result._configHash = computeLoopInputsHash(); } catch {}
+      result._macroAssistKey = _macroAssistKey;
+      result._macroAssistBody = _macroAssistBody;
     }
     lastSimResult = result;
     if (liteMode) {
       // 仅维持固化迭代依赖：标记 seq-invalid（让 naturalMap 跳过失败项）
       _markSeqInvalidLite(result);
-      return;
+      return result;
     }
     window.dispatchEvent(new CustomEvent('jx3-sim-complete', { detail: result }));
 
-    set('sim_fight_time', result.fight_time.toFixed(2) + 's');
-    set('sim_skill_count', result.skill_count);
-    set('sim_total_damage', formatDamage(result.total_damage));
-    set('sim_dps_value', result.dps != null && result.dps > 0 ? Math.round(result.dps).toString() : '—');
-    renderBuffList(result.buffs || []);
-    renderExpectation(result.expectation);
-    // 预览模式下过滤掉临时移除气劲产生的最后一个 timeline 事件
-    let tlEvents = result.timeline;
-    if (qijinPreviewEl) {
-      const skipIdx = tlEvents.map((t, i) => (!t.triggered && t.skill_id === 90001) ? i : -1).filter(i => i >= 0).pop();
-      if (skipIdx !== undefined && skipIdx >= 0) {
-        tlEvents = tlEvents.filter((_, i) => i !== skipIdx);
-      }
-    }
-    renderTimeline(tlEvents);
-    const trackEl = document.getElementById('timeline_track');
-    renderBuffTimeline(result.buff_timeline, parseInt(trackEl?.style.width) || 100);
-    updateSkillButtons(result.available_skills, result.stance, result.rage, result.skill_cds, result.skill_charges, result.buffs, result.remaining_gcd, result.total_gcd, result.combo_states, result.skill_effective);
-
-    // 更新格挡值条（铁骨衣专属）
-    updateBlockValue(result.block_value, result.max_block_value);
-    updateBerserkValue(result.berserk_value, result.max_berserk_value);
-
-    // 更新左栏实时面板（开战 t=0 时刻属性快照）
-    updateRealtimePanel(result.initial_stats);
-
-    decorateSeqItems(result);
-    if (typeof _renderInsertSlots === 'function') _renderInsertSlots();
-    if (onSimulateComplete) onSimulateComplete(result);
+    presentSimResult(result);
+    return result;
   } catch {
-    if (!liteMode) set('sim_fight_time', '后端未连接');
+    if (requestGeneration === simRequestGeneration && !liteMode) set('sim_fight_time', '后端未连接');
+    return null;
+  } finally {
+    if (simPendingGeneration === requestGeneration) simPendingGeneration = 0;
+    if (_macroAssistKey) window.Jx3MacroAssist?.simulationFinished(_macroAssistKey);
   }
 }
 
@@ -3256,9 +3343,17 @@ seqContainer.addEventListener('drop', (e) => {
   let _previewEl = null;
   let _popupEl = null;
   let _popupCloseHandler = null;
+  let _macroStartItem = null;
+  let _macroSelecting = false;
   const MIN_DRAG = 6;
 
   function _clearSelection() {
+    _selecting = false;
+    _selectStart = null;
+    _macroStartItem = null;
+    _macroSelecting = false;
+    tooltipLocked = false;
+    document.body.classList.remove('seq-selecting');
     _selectedItems.forEach(el => el.classList.remove('seq-selected'));
     _selectedItems.clear();
     _placementMode = null;
@@ -3274,12 +3369,21 @@ seqContainer.addEventListener('drop', (e) => {
     seqContainer.style.cursor = '';
   }
 
+  window.addEventListener('jx3-loop-pane-leave', _clearSelection);
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && (_selecting || _selectedItems.size || _placementMode)) _clearSelection();
+  });
+
   // Phase 1: 框选
-  seqContainer.addEventListener('mousedown', (e) => {
+  function beginSelection(e) {
     if (e.button !== 0) return;
     if (_placementMode) return;
-    if (e.target.closest('.sim-seq-item, .seq-break-wrap, .seq-floating-toolbar, .seq-insert-indicator, .seq-select-popup')) return;
+    const macroMode = window.Jx3MacroAssist?.isActive() === true && document.getElementById('macro_editor_panel')?.dataset.tab === 'conditions';
+    if (e.target.closest('.seq-break-wrap, .seq-floating-toolbar, .seq-insert-indicator, .seq-select-popup')) return;
+    if (!macroMode && e.target.closest('.sim-seq-item')) return;
     _clearSelection();
+    _macroSelecting = macroMode;
+    _macroStartItem = macroMode ? e.target.closest('.sim-seq-item') : null;
     _selecting = true;
     tooltipLocked = true;
     hideTooltip();
@@ -3287,7 +3391,9 @@ seqContainer.addEventListener('drop', (e) => {
     const cr = seqContainer.getBoundingClientRect();
     _selectStart = { x: e.clientX, y: e.clientY, sx: e.clientX - cr.left + seqContainer.scrollLeft, sy: e.clientY - cr.top + seqContainer.scrollTop };
     e.preventDefault();
-  });
+  }
+  seqContainer.addEventListener('mousedown', beginSelection);
+  window.addEventListener('jx3-loop-background-down', event => beginSelection(event.detail));
 
   document.addEventListener('mousemove', (e) => {
     if (!_selecting) return;
@@ -3309,12 +3415,26 @@ seqContainer.addEventListener('drop', (e) => {
     _selectRectEl.style.height = (y2 - y1) + 'px';
     _selectedItems.forEach(el => el.classList.remove('seq-selected'));
     _selectedItems.clear();
+    const macroEndItem = _macroSelecting ? [...seqContainer.querySelectorAll('[data-macro-assist-index]')].find(item => {
+      const rect = item.getBoundingClientRect();
+      return e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom;
+    }) : null;
+    const macroStartIndex = _macroStartItem?.dataset.macroAssistIndex;
+    const macroEndIndex = macroEndItem?.dataset.macroAssistIndex;
     seqContainer.querySelectorAll('.sim-seq-item').forEach(item => {
       if (item.classList.contains('seq-pre-release')) return;
+      if (_macroSelecting && item.dataset.macroAssistIndex == null) return;
       const ir = item.getBoundingClientRect();
       const ix1 = ir.left - cr.left + seqContainer.scrollLeft;
       const iy1 = ir.top - cr.top + seqContainer.scrollTop;
-      if (ix1 >= x1 && iy1 >= y1 && ix1 + ir.width <= x2 && iy1 + ir.height <= y2) {
+      const inRect = _macroSelecting
+        ? ix1 < x2 && iy1 < y2 && ix1 + ir.width > x1 && iy1 + ir.height > y1
+        : ix1 >= x1 && iy1 >= y1 && ix1 + ir.width <= x2 && iy1 + ir.height <= y2;
+      const index = Number(item.dataset.macroAssistIndex);
+      const inSelection = _macroSelecting && macroStartIndex != null && macroEndIndex != null
+        ? index >= Math.min(Number(macroStartIndex), Number(macroEndIndex)) && index <= Math.max(Number(macroStartIndex), Number(macroEndIndex))
+        : inRect;
+      if (inSelection) {
         item.classList.add('seq-selected');
         _selectedItems.add(item);
       }
@@ -3326,7 +3446,15 @@ seqContainer.addEventListener('drop', (e) => {
     _selecting = false;
     document.body.classList.remove('seq-selecting');
     setTimeout(() => { tooltipLocked = false; }, 100);
+    const dragged = !!_selectRectEl;
     if (_selectRectEl) { _selectRectEl.remove(); _selectRectEl = null; }
+    if (_macroSelecting) {
+      _macroSelecting = false;
+      const items = dragged ? [..._selectedItems] : (_macroStartItem ? [_macroStartItem] : []);
+      _macroStartItem = null;
+      window.Jx3MacroAssist?.selectItems(items, { gesture: dragged ? 'range' : 'click' });
+      return;
+    }
     if (_selectedItems.size === 0) return;
     _showPopup(e.clientX, e.clientY);
   });
@@ -3396,6 +3524,7 @@ seqContainer.addEventListener('drop', (e) => {
 
   function _onPlacementClick(e) {
     if (!_placementMode) return;
+    if (e.target.closest('#macro_assist_toggle, #macro_assist_edit')) { _clearSelection(); return; }
     const target = getDropTarget(seqContainer, e.clientX, e.clientY);
     if (!target) return;
     e.preventDefault();
@@ -3405,18 +3534,21 @@ seqContainer.addEventListener('drop', (e) => {
     if (_placementMode === 'copy') {
       sorted.forEach(src => {
         const el = document.createElement('div');
-        el.className = 'sim-seq-item';
+        el.className = 'sim-seq-item' + (src.dataset.skill === '__macro__' ? ' seq-macro' : '');
         el.draggable = true;
         el.dataset.skill = src.dataset.skill;
-        el.innerHTML = _buildSeqItemInner(src.dataset.skill, {});
+        el.innerHTML = _buildSeqItemInner(src.dataset.skill, { macro: src.dataset.skill === '__macro__' });
         el.querySelector('.seq-delete')?.addEventListener('click', (ev) => {
           ev.stopPropagation(); hideTooltip(); el.remove();
           if (!seqContainer.querySelector('.sim-seq-item')) seqContainer.innerHTML = '<p class="placeholder-text">请点击下方技能按钮生成模拟技能序列</p>';
           runSimulate();
         });
         initDrag(el);
+        if (src.dataset.solidifiedCast) el.dataset.solidifiedCast = src.dataset.solidifiedCast;
         if (src.dataset.timingOffset) el.dataset.timingOffset = src.dataset.timingOffset;
         if (src.dataset.qijinBuff) el.dataset.qijinBuff = src.dataset.qijinBuff;
+        if (src.dataset.channelTicks) el.dataset.channelTicks = src.dataset.channelTicks;
+        if (src.dataset.clearcdTarget) el.dataset.clearcdTarget = src.dataset.clearcdTarget;
         seqContainer.insertBefore(el, ref);
       });
     } else {
@@ -3429,6 +3561,7 @@ seqContainer.addEventListener('drop', (e) => {
 
   function _onPlacementEsc(e) { if (e.key === 'Escape') _clearSelection(); }
   function _onPlacementRightClick(e) { if (_placementMode) { e.preventDefault(); _clearSelection(); } }
+  window.addEventListener('jx3-seq-selection-clear', _clearSelection);
 }
 
 // ── 技能 icon 映射（来自 /api/skills，按 mount 切换刷新） ─────────────────
@@ -3722,7 +3855,7 @@ function _buildSeqItemInner(skillName, opts = {}) {
 /** icon map 异步就绪 / mount 切换 / 模式切换后，只刷新 .seq-icon-wrap 子树。
  *  绝不动 label 文本（decorateSeqItems 可能把宏项 label 改成实际技能名 "绝刀"，重写会丢失） */
 function _refreshSeqItemIcons() {
-  document.querySelectorAll('#sim_sequence .sim-seq-item').forEach(el => {
+  document.querySelectorAll('#sim_sequence .sim-seq-item, #macro_compare_sequence .sim-seq-item, .ltab-passive .sim-seq-item').forEach(el => {
     const dsName = el.dataset.skill;
     if (!dsName) return;
     // 宏项：decorateSeqItems 匹配后把实际技能名存到 dataset.resolvedSkill（不受 label chip 截短影响）
@@ -3854,6 +3987,7 @@ function _renderInsertSlots() {
 /** 异步：取插入位点的 simulate 结果（截断 sequence 到 idx，跑后端）。
  *  不传 lite —— popover 需要 buffs + available_skills，lite mode 后端会清空这两项。 */
 async function _liteSimulateAt(insertIdx) {
+  const owner = window.Jx3LoopTabs?.contextToken;
   const fullSeq = readSequence();
   const truncated = fullSeq.slice(0, insertIdx);
   const hasteLevel = getSimHasteLevel();
@@ -3863,6 +3997,7 @@ async function _liteSimulateAt(insertIdx) {
     talents: getSelectedTalents(),
     channel_ticks: channelOverrides,
     timing_offsets: {},
+    solidified_casts: window.Jx3MacroSolidify?.read(document.querySelectorAll('#sim_sequence .sim-seq-item:not(.seq-auto)')) || {},
     network_delay: parseInt(document.getElementById('sim_delay').value) || 0,
     recipes: getSelectedRecipes(),
     qijin_buffs: {},
@@ -3872,7 +4007,7 @@ async function _liteSimulateAt(insertIdx) {
     initial_rage: adminInitialRage,
     boss_attack_interval: getBossAttackInterval(),
     hanjia_expectation: isHanjiaExpectationEnabled(),
-    tiegu_mode: getTieguMode(),
+    ...(typeof getDunyaResetOptions === "function" ? getDunyaResetOptions() : {}), tiegu_mode: getTieguMode(),
     experimental: isExperimental(),
     equipment: getEquipmentMap(),
     team_buffs: getTeamBuffs(),
@@ -3885,7 +4020,9 @@ async function _liteSimulateAt(insertIdx) {
     signal: AbortSignal.timeout(4000),
   });
   if (!res.ok) throw new Error('simulate failed');
-  return await res.json();
+  const result = await res.json();
+  if (owner !== window.Jx3LoopTabs?.contextToken) throw new Error('循环已切换');
+  return result;
 }
 
 // 插入技能浮动 popover 状态（同一时刻只一个实例）
@@ -4247,7 +4384,7 @@ function renderSkillBar() {
  *  - 全心法：特殊组 +清除冷却，重排序为 宏→橙武→移除气劲→清除冷却 */
 function applyExperimentalSkills(enabled) {
   if (!currentMount) return;
-  if (isCangShengFenShan()) enabled = false;
+  if (isCangShengTest()) enabled = false;
   const groups = currentMount.school_ui?.skill_groups || [];
 
   // ── 铁骨衣：旧版阵云结晦（通用组）──
@@ -6962,7 +7099,10 @@ loadFormations();
       'refreshtoken', 'bearertoken', 'clientsecret', 'secret', 'token']
       .some(marker => normalized.includes(marker));
   }
-  function canSync(key) { return !DENY.has(key) && !isSensitiveStorageKey(key); }
+  function canSync(key) {
+    // 写宏草稿只保存在本机，键内含账号范围，不能随另一个账号的设置上传。
+    return !String(key).startsWith('jx3_loop_tabs_v1:') && !String(key).startsWith('jx3_macro_draft_v1:') && !DENY.has(key) && !isSensitiveStorageKey(key);
+  }
   let pushTimer = null;
   function snapshot() {
     const obj = {};
@@ -8680,118 +8820,67 @@ document.getElementById('btn_macro_step')?.addEventListener('click', () => {
 });
 
 // 技能块固化（校准式）：把所有 __macro__ 块按当前模拟结果替换成普通技能（不可逆）
-//   两阶段流程，确保固化后释放时刻 ≈ 原宏 cast_time：
-//     ① 记录每个宏 cast 的 target cast_time（宏跑出来的释放时刻）
-//     ② 改 DOM（替换技能名 / 移除 macro 标识 / 处理盾回换行），不写 timing_offset
-//     ③ 跑一次 simulate（无 offset）→ 拿到普通序列的 actual cast_time
-//     ④ 校准：每个固化项 diff = target - actual；diff > 0 时写 dataset.timingOffset
-//     ⑤ 有写 offset 时再跑一次 simulate 让 offset 生效
-// opts.askConfirm 控制是否弹 confirm 让用户确认（默认 true，按钮路径用；导出前"自动固化"路径设 false）
-// opts.silent 控制是否完全跳过 alert（默认 false；导出前路径用 true，外层自己控制 UI 反馈）
-// 返回 { ok: bool, expanded: 处理数, unready: 剩余宏数, reason?: 失败原因 }
+// 一次记录等待检查点，再独立验证一次；验证前不改 DOM、不覆盖用户循环。
 async function _runExpandMacro(opts = {}) {
   const { askConfirm = true, silent = false } = opts;
   const seq = document.getElementById('sim_sequence');
-  if (!seq) return { ok: false, reason: 'sim_sequence 不存在' };
-  const macroItems = seq.querySelectorAll('.sim-seq-item[data-skill="__macro__"]');
-  if (macroItems.length === 0) {
-    if (!silent) alert('当前序列里没有宏块');
-    return { ok: false, reason: '当前序列里没有宏块' };
-  }
-  const mainCasts = (typeof lastSimResult !== 'undefined' && lastSimResult)
-    ? (lastSimResult.timeline || []).filter(t => !t.triggered)
-    : [];
-  if (mainCasts.length === 0) {
-    if (!silent) alert('需要先模拟一次才能转化。请在主页点 [执行宏] 或宏设置内点 [完整模拟] 跑一遍。');
-    return { ok: false, reason: '没有模拟结果（lastSimResult 为空）' };
-  }
-  // 按 DOM 顺序把 mainCast 映射到每个 sim-seq-item(跟 decorateSeqItems 同一映射规则)
-  // 跳过：__clearCD__（不产 cast）/ .seq-invalid（cast 失败的项，cast 数量少于 DOM 项数，跳过避免索引错位）
-  // / .seq-pre-release（预释放不进 sequence/timeline，跟 __clearCD__ 同语义，索引保持对齐）
-  const allItems = Array.from(seq.querySelectorAll('.sim-seq-item'));
-  const itemToCast = new Map();
-  let castIdx = 0;
-  for (const el of allItems) {
-    if (el.dataset.skill === '__clearCD__') continue;
-    if (el.classList.contains('seq-invalid')) continue;
-    if (el.classList.contains('seq-pre-release')) continue;
-    const t = mainCasts[castIdx++];
-    if (t) itemToCast.set(el, t);
-  }
-
-  const ready = [];
-  const unready = [];
-  macroItems.forEach(el => {
-    const t = itemToCast.get(el);
-    const name = t ? t.name.split('·')[0] : null;
-    if (!name || !t) unready.push(el);
-    else ready.push({ el, name, t });
-  });
-  if (ready.length === 0) {
-    if (!silent) alert('宏块尚未对应到具体技能。请先在主页点 [执行宏] 或宏设置内点 [完整模拟] 让模拟器解析后再转化。');
-    return { ok: false, reason: '宏块未对应到具体技能（lastSimResult timeline 跟 DOM 项数对不上）' };
-  }
-  if (askConfirm) {
-    let msg = `将 ${ready.length} 个宏块转化为普通技能块(不可逆)`;
-    if (unready.length > 0) msg += `，另有 ${unready.length} 个未解析的宏块将保留`;
-    if (!confirm(msg + '。继续？')) return { ok: false, reason: '用户取消' };
-  }
-
-  // 第一步：宏块 → 普通技能名，处理盾回换行
-  ready.forEach(({ el, name }) => {
-    el.dataset.skill = name;
-    delete el.dataset.timingOffset;
-    el.classList.remove('seq-macro');
-    el.querySelectorAll('.seq-macro-badge').forEach(b => b.remove());
-    if (name === '盾回' && typeof createLineBreak === 'function') {
-      const next = el.nextElementSibling;
-      if (next && next.classList.contains('seq-break-auto')) next.remove();
-      const next2 = el.nextElementSibling;
-      if (!next2 || !next2.classList.contains('seq-break-wrap')) el.after(createLineBreak());
+  const fail = reason => { if (!silent) alert(reason); return { ok: false, reason }; };
+  if (!seq?.querySelector('.sim-seq-item[data-skill="__macro__"]')) return fail('当前序列里没有宏块');
+  if (_runExpandMacro.busy) return { ok: false, reason: '正在固化' };
+  const owner = window.Jx3LoopTabs?.contextToken;
+  if (askConfirm && !confirm('将成功施放的宏块固化为可编辑技能，并保留等待。验证通过后才应用。继续？')) return { ok: false, reason: '用户取消' };
+  _runExpandMacro.busy = true;
+  const button = document.getElementById('btn_expand_macro');
+  if (button) button.disabled = true;
+  try {
+    const cached = lastSimResult;
+    const sourceIsFresh = cached?._configHash === computeLoopInputsHash()
+      && JSON.stringify(window._lastSimBody?.sequence) === JSON.stringify(readSequence())
+      && cached.timeline?.some(event => event.solidify)
+      && cached.timeline.filter(event => !event.triggered && event.is_macro).every(event => event.solidify);
+    const source = sourceIsFresh ? cached : await runSimulate();
+    if (!source || owner !== window.Jx3LoopTabs?.contextToken) return fail('循环已切换或模拟失败，未应用固化');
+    const input = JSON.stringify(buildLoopConfig().sequence);
+    const inputHash = computeLoopInputsHash();
+    const bodyBefore = JSON.stringify(window._lastSimBody);
+    const prepared = window.Jx3MacroSolidify.prepare(source, window._lastSimBody);
+    const response = await fetch(API.simulate, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(prepared.body), signal: AbortSignal.timeout(30000) });
+    if (!response.ok) throw new Error('固化验证请求失败');
+    const result = await response.json();
+    if (owner !== window.Jx3LoopTabs?.contextToken || input !== JSON.stringify(buildLoopConfig().sequence)
+        || bodyBefore !== JSON.stringify(window._lastSimBody) || inputHash !== computeLoopInputsHash()) {
+      return fail('验证期间循环或配置已改变，未应用固化');
     }
-  });
-
-  // 第二步：迭代校准 —— 宏条件等待（[buff:X] 等）导致的延后用 timing_offset 保留
-  const sortedReady = [...ready].sort((a, b) => a.t.cast_time - b.t.cast_time);
-  const TIME_DIFF_TOL = 1e-2;
-  const MAX_ITERATIONS = sortedReady.length + 2;
-  for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
-    await runSimulate({ lite: true });
-    const naturalCasts = (lastSimResult?.timeline || []).filter(t => !t.triggered);
-    const naturalMap = new Map();
-    let nIdx = 0;
-    for (const el of seq.querySelectorAll('.sim-seq-item')) {
-      if (el.dataset.skill === '__clearCD__') continue;
-      if (el.classList.contains('seq-pre-release')) continue;
-      if (el.classList.contains('seq-invalid')) continue;
-      const nt = naturalCasts[nIdx++];
-      if (nt) naturalMap.set(el, nt);
-    }
-    let added = false;
-    for (const item of sortedReady) {
-      const existingOff = parseFloat(item.el.dataset.timingOffset);
-      if (existingOff > 0.001 || existingOff < 0) continue;
-      const nt = naturalMap.get(item.el);
-      if (!nt || Math.abs(nt.cast_time - item.t.cast_time) > TIME_DIFF_TOL) {
-        const naturalT = nt ? nt.cast_time : 0;
-        const offset = Math.max(0, item.t.cast_time - naturalT);
-        if (offset > 0.001) {
-          const maxOff = nt?.max_timing_offset || 0;
-          if (maxOff > 0.01 && Math.abs(offset - maxOff) < TIME_DIFF_TOL) {
-            item.el.dataset.timingOffset = '-1';
-          } else {
-            item.el.dataset.timingOffset = offset.toFixed(4);
-          }
-          added = true;
-          break;
-        }
+    const mismatch = window.Jx3MacroSolidify.compare(source, result);
+    if (mismatch) return fail(`固化未通过验证：${mismatch}。原宏块已保留。`);
+    ++simRequestGeneration; // Older in-flight simulations cannot repaint the committed sequence.
+    const items = [...seq.querySelectorAll('.sim-seq-item:not(.seq-pre-release):not(.seq-auto)')];
+    for (const { index, name, frozen } of prepared.changes) {
+      const el = items[index];
+      el.dataset.skill = name;
+      el.dataset.solidifiedCast = JSON.stringify(frozen);
+      delete el.dataset.timingOffset;
+      delete el.dataset.channelTicks;
+      delete channelOverrides[String(index)];
+      el.classList.remove('seq-macro');
+      el.querySelectorAll('.seq-macro-badge').forEach(b => b.remove());
+      if (name === '盾回' && el.nextElementSibling?.classList.contains('seq-break-auto')) {
+        el.nextElementSibling.classList.remove('seq-break-auto');
       }
     }
-    if (!added) break;
-  }
-
-  await runSimulate();
-  return { ok: true, expanded: ready.length, unready: unready.length };
+    // Preserve the existing layout and duration, including displayed shield-return breaks.
+    window._lastSimBody = prepared.body;
+    Object.keys(timingOffsets).forEach(key => delete timingOffsets[key]);
+    Object.assign(timingOffsets, prepared.body.timing_offsets || {});
+    result._configHash = computeLoopInputsHash();
+    result._macroAssistBody = prepared.body;
+    lastSimResult = result;
+    presentSimResult(result);
+    window.dispatchEvent(new CustomEvent('jx3-sim-complete', { detail: result }));
+    return { ok: true, expanded: prepared.changes.length, unready: prepared.unready };
+  } catch (error) { return fail(error.message || '固化失败，原宏块已保留'); }
+  finally { _runExpandMacro.busy = false; if (button) button.disabled = false; }
 }
 
 // btn_expand_macro 按钮 → 调 _runExpandMacro（带 confirm）
@@ -8812,6 +8901,7 @@ function buildMacroText() {
 }
 
 async function runMacroSimulate(duration) {
+  const requestGeneration = ++simRequestGeneration;
   const macroText = buildMacroText();
   if (!macroText) return;
   const hasteLevel = getSimHasteLevel();
@@ -8834,7 +8924,7 @@ async function runMacroSimulate(duration) {
     attributes: getSimAttrs(), target: getTarget(),
     initial_rage: adminInitialRage,
     boss_attack_interval: getBossAttackInterval(),
-    hanjia_expectation: isHanjiaExpectationEnabled(), tiegu_mode: getTieguMode(), experimental: isExperimental(),
+    hanjia_expectation: isHanjiaExpectationEnabled(), ...(typeof getDunyaResetOptions === "function" ? getDunyaResetOptions() : {}), tiegu_mode: getTieguMode(), experimental: isExperimental(),
     equipment: getEquipmentMap(),
     team_buffs: getTeamBuffs(),
     formation: getCurrentFormation(),
@@ -8849,6 +8939,7 @@ async function runMacroSimulate(duration) {
     });
     if (!res.ok) throw new Error();
     const result = await res.json();
+    if (requestGeneration !== simRequestGeneration) return;
     try { result._configHash = computeLoopInputsHash(); } catch {}
     lastSimResult = result;
     window.dispatchEvent(new CustomEvent('jx3-sim-complete', { detail: result }));
@@ -8882,8 +8973,11 @@ async function runMacroSimulate(duration) {
     renderBuffTimeline(result.buff_timeline, parseInt(trackEl?.style.width) || 100);
     updateSkillButtons(result.available_skills, result.stance, result.rage, result.skill_cds, result.skill_charges, result.buffs, result.remaining_gcd, result.total_gcd, result.combo_states, result.skill_effective);
     updateBerserkValue(result.berserk_value, result.max_berserk_value);
+    updateBlockValue(result.block_value, result.max_block_value);
+    updateRealtimePanel(result.initial_stats);
+    window.dispatchEvent(new CustomEvent('jx3-sim-rendered', { detail: result }));
   } catch {
-    set('sim_fight_time', '后端未连接');
+    if (requestGeneration === simRequestGeneration) set('sim_fight_time', '后端未连接');
   }
 }
 
@@ -8896,9 +8990,8 @@ const LOOP_CONFIG_VERSION = 1;
 function buildLoopConfig() {
   const container = document.getElementById('sim_sequence');
   const sequence = [];
-  let itemIdx = 0;
   for (const node of Array.from(container.childNodes)) {
-    if (node.nodeType !== 1) continue;
+    if (node.nodeType !== 1 || node.classList.contains('seq-auto') || node.classList.contains('seq-break-auto')) continue;
     if (node.classList.contains('sim-seq-item')) {
       const skill = node.dataset.skill || '';
       let entry;
@@ -8907,14 +9000,15 @@ function buildLoopConfig() {
       else if (skill === '__战绝回怒__') entry = { type: 'wait_zhan_jue' };
       else if (node.classList.contains('seq-pre-release')) entry = { type: 'pre_release', skill, pre_time: parseFloat(node.dataset.preTime) || 5 };
       else entry = { type: 'skill', skill };
-      const ch = channelOverrides[String(itemIdx)];
+      const ch = node.classList.contains('seq-pre-release') ? undefined : Number(node.dataset.channelTicks);
       if (ch) entry.channel_ticks = ch;
       const off = parseFloat(node.dataset.timingOffset);
       if (off < 0) entry.offset_max = true;
       else if (off > 0.001) entry.offset = off;
+      if (node.dataset.solidifiedCast) entry.solidified_cast = JSON.parse(node.dataset.solidifiedCast);
       if (node.dataset.qijinBuff) entry.qijin_buff = Number(node.dataset.qijinBuff);
+      if (node.dataset.clearcdTarget) entry.clearcd_target = node.dataset.clearcdTarget;
       sequence.push(entry);
-      itemIdx++;
     } else if (node.classList.contains('seq-break-wrap')) {
       sequence.push({ type: 'break' });
     }
@@ -8954,7 +9048,7 @@ function buildLoopConfig() {
     initial_rage: adminInitialRage,
     boss_attack_interval: getBossAttackInterval(),
     macro_duration: macroLastDuration > 0 ? macroLastDuration : undefined,
-    hanjia_expectation: isHanjiaExpectationEnabled(), tiegu_mode: getTieguMode(),
+    hanjia_expectation: isHanjiaExpectationEnabled(), ...(typeof getDunyaResetOptions === "function" ? getDunyaResetOptions() : {}), tiegu_mode: getTieguMode(),
     // 团队增益：导出全量（含 enabled=false 的）以完整描述状态；导入时 applyLoopConfig 会按全量替换
     team_buffs: Array.from(window._teamBuffSelections.values()),
     // 阵法：单选 {key} | null
@@ -8962,7 +9056,7 @@ function buildLoopConfig() {
   };
 }
 
-function applyLoopConfig(cfg) {
+function applyLoopConfig(cfg, options = {}) {
   if (!cfg || typeof cfg !== 'object') throw new Error('配置不是对象');
   if (cfg.version !== LOOP_CONFIG_VERSION) {
     throw new Error(`版本不兼容：期望 ${LOOP_CONFIG_VERSION}，实际 ${cfg.version}`);
@@ -9107,7 +9201,10 @@ function applyLoopConfig(cfg) {
       continue;
     }
     if (entry.type === 'macro') {
-      addSeqItem('__macro__', { macro: true });
+      const el = addSeqItem('__macro__', { macro: true });
+      if (entry.channel_ticks) { channelOverrides[String(itemIdx)] = entry.channel_ticks; el.dataset.channelTicks = String(entry.channel_ticks); }
+      if (entry.offset_max) el.dataset.timingOffset = '-1';
+      else if (entry.offset) el.dataset.timingOffset = String(entry.offset);
       itemIdx++;
       continue;
     }
@@ -9139,7 +9236,6 @@ function applyLoopConfig(cfg) {
       if (typeof _bindPreReleaseItemClick === 'function') _bindPreReleaseItemClick(el);
       if (typeof initDrag === 'function') initDrag(el);
       container.appendChild(el);
-      itemIdx++;
       continue;
     }
     // 普通技能或 移除气劲
@@ -9169,11 +9265,13 @@ function applyLoopConfig(cfg) {
       }
     }
     if (entry.qijin_buff != null) el.dataset.qijinBuff = String(entry.qijin_buff);
+    if (entry.clearcd_target) el.dataset.clearcdTarget = String(entry.clearcd_target);
     if (entry.offset_max) el.dataset.timingOffset = '-1';
     else if (entry.offset) el.dataset.timingOffset = String(entry.offset);
     else el.dataset.timingOffset = '0';
+    if (entry.solidified_cast) el.dataset.solidifiedCast = JSON.stringify(entry.solidified_cast);
     // 兼容旧版 cast_at 字段：转换为 timingOffset（旧 castAt 是绝对时间，无法直接转偏移，忽略）
-    if (entry.channel_ticks) channelOverrides[String(itemIdx)] = entry.channel_ticks;
+    if (entry.channel_ticks) { channelOverrides[String(itemIdx)] = entry.channel_ticks; el.dataset.channelTicks = String(entry.channel_ticks); }
     itemIdx++;
   }
   // 还原后：把预释放按 preTime 倒序、与后续真实技能间补换行（兼容旧版未排序 / 无换行的 cfg）
@@ -9182,6 +9280,9 @@ function applyLoopConfig(cfg) {
   if (!container.querySelector('.sim-seq-item') && !container.querySelector('.seq-break-wrap')) {
     container.innerHTML = '<p class="placeholder-text">请点击下方技能按钮生成模拟技能序列</p>';
   }
+
+  // Harness 工作区事务先完成写入与复核，再主动回放；旧导入保持原有自动模拟。
+  if (options.skipSimulate) return;
 
   // GA 归档 / 广场方案 的 LoopConfig 带 macro_duration —— 用宏模拟走相同时长
   // 只在 sequence 全是宏占位时走 runMacroSimulate（否则会把用户手动加的盾击/盾压等真技能清空）
@@ -17305,6 +17406,7 @@ window.Jx3Nav = {
   }
 
   function save() {
+    if (window.Jx3LoopTabsExpected || window.Jx3LoopTabs?.ownsAutosave()) return;
     if (restoring) return;
     try {
       if (typeof buildLoopConfig !== 'function') return;
@@ -17334,6 +17436,7 @@ window.Jx3Nav = {
   }
 
   async function restore() {
+    if (window.Jx3LoopTabsExpected || window.Jx3LoopTabs?.ownsAutosave()) return false;
     try {
       const raw = localStorage.getItem(KEY);
       if (!raw) { console.log('[autosave] 无自动保存'); return false; }
@@ -17358,6 +17461,7 @@ window.Jx3Nav = {
           return false;
         }
       }
+      if (window.Jx3LoopTabsExpected || window.Jx3LoopTabs?.ownsAutosave()) return false;
       if (typeof applyLoopConfig !== 'function') { console.warn('[autosave] applyLoopConfig 未就绪'); return false; }
       restoring = true;
       applyLoopConfig(cfg);
@@ -17401,7 +17505,7 @@ window.Jx3Nav = {
   };
 
   // 初始恢复（等所有 init 跑完）
-  setTimeout(restore, 200);
+  window.Jx3LoopAutosave.ready = new Promise(resolve => setTimeout(() => resolve(restore()), 200));
 })();
 
 // ═══════════════════════════════════════════════════════════════════════════
