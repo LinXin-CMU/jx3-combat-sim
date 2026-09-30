@@ -1095,7 +1095,7 @@ def run_job(args):
         report["scenario_sha256"] = hashlib.sha256(json.dumps(scene, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
         provenance = {"executable_sha256": hashlib.sha256(args.exe.read_bytes()).hexdigest(), "files": {}}
         for name in ("exact-macro-synth.py", "exact-macro-worker.py", "exact_macro_compress.py",
-                     "exact_macro_reorder.py", "exact_macro_conditions.py", "exact_macro_global.py", "requirements-exact-macro.txt"):
+                     "exact_macro_reorder.py", "exact_macro_conditions.py", "exact_macro_global.py", "exact_macro_family.py", "requirements-exact-macro.txt"):
             path = ROOT / "tools" / name
             provenance["files"]["tools/" + name] = hashlib.sha256(path.read_bytes()).hexdigest()
         for path in sorted((ROOT / "backend/src").rglob("*.rs")):

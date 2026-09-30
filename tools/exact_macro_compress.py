@@ -15,6 +15,7 @@ import z3
 _PRIORITY_MODULE = None
 _CONDITION_MODULE = None
 _GLOBAL_MODULE = None
+_FAMILY_MODULE = None
 
 
 def condition_module():
@@ -60,6 +61,18 @@ def global_edits(rules, samples, check_solver, diagnostic):
         _GLOBAL_MODULE = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(_GLOBAL_MODULE)
     yield from _GLOBAL_MODULE.global_edits(rules, samples, clone, check_solver, diagnostic)
+
+
+def family_edits(rules, samples, diagnostic):
+    global _FAMILY_MODULE
+    if _FAMILY_MODULE is None:
+        spec = importlib.util.spec_from_file_location("exact_macro_family", Path(__file__).with_name("exact_macro_family.py"))
+        _FAMILY_MODULE = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_FAMILY_MODULE)
+    search = lambda p,n,s:condition_module().short_guards(
+        p,n,s,max_terms=6,max_candidates=4,branch_limit=12,max_states=192)
+    yield from _FAMILY_MODULE.family_edits(rules, samples, clone,
+        condition_search=search, diagnostic=diagnostic)
 
 
 def char_count(text):
@@ -642,9 +655,10 @@ def compress(rules, atoms, actions, baseline, render, verify, check,
     summary = {"status":"running", "initial_chars":initial, "best_chars":initial,
                "saved_chars":0, "trial_count":0, "accepted_count":0,
                "batch_trials":0, "max_batch_rules":0,
+               "family_trials":0,
                "global_branches":0,
                "deep_search":deep_search,
-               "scope":"single page; adaptive batches, native right-associated AND/OR guards, global insertion rebuilds (24 candidates/pass), beam width 4/depth 2, SAT windows 3x3" + ("; experimental whole-program beam with up to 12 separate counterexample branches" if deep_search else "")}
+               "scope":"single page; adaptive batches, native right-associated AND/OR guards, same-action subset rebuilds to 2/3 rules, global insertion rebuilds (24 candidates/pass), beam width 4/depth 2, SAT windows 3x3" + ("; experimental whole-program beam with up to 12 separate counterexample branches" if deep_search else "")}
     progress(dict(summary))
 
     def evaluate(kind, trial, allow_equal=False, batch_rules=0):
@@ -659,6 +673,8 @@ def compress(rules, atoms, actions, baseline, render, verify, check,
             summary["status"] = "budget_exhausted"
             return None
         summary["trial_count"] += 1
+        if kind.startswith('family_'):
+            summary['family_trials'] += 1
         summary["method"] = kind
         summary['last_batch_rules'] = batch_rules
         if batch_rules:
@@ -778,6 +794,16 @@ def compress(rules, atoms, actions, baseline, render, verify, check,
         if summary["best_chars"] < old_cost:
             continue
         for kind,trial in ordered(or_edits(best,samples)):
+            evaluate(kind,trial)
+            if summary['best_chars'] < old_cost:
+                break
+        if summary['best_chars'] < old_cost:
+            continue
+        # A repeated action may need several priority regions. Rebuild a
+        # donor subset into multiple guards together; intermediate programs
+        # need not reproduce the target. Keep action/shape diversity instead
+        # of letting one cheapest family consume every replay slot.
+        for kind,trial in family_edits(best,samples,diagnostic):
             evaluate(kind,trial)
             if summary['best_chars'] < old_cost:
                 break
