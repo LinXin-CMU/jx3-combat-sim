@@ -436,241 +436,71 @@ def repair_signature(replay, rules=None):
             bytes(row_truth(row)), tuple(row["executable"]), tuple(row.get("rejected_actions", [])))
 
 
+_REPAIR_MODULE = None
+
+
+def repair_module():
+    global _REPAIR_MODULE
+    if _REPAIR_MODULE is None:
+        spec = importlib.util.spec_from_file_location('exact_macro_repair',
+            Path(__file__).with_name('exact_macro_repair.py'))
+        _REPAIR_MODULE = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_REPAIR_MODULE)
+    return _REPAIR_MODULE
+
+
 def clock_gates(atoms, row, difference, tolerance):
-    """False now, but scheduled to become true in the target cast window."""
-    expected, observed = difference.get('expected') or {}, difference.get('actual') or {}
-    if expected.get('skill_id') != observed.get('skill_id') or observed.get('time', 0) >= expected.get('time', 0):
-        return []
-    state = row.get('state') or {}
-    remaining = {prefix+b['name']:b['remaining'] for prefix,key in
-        (("bufftime:","buffs"),("tbufftime:","target_buffs")) for b in state.get(key, [])}
-    truth = row_truth(row)
-    gates = []
-    for i,atom in enumerate(atoms):
-        if truth[i]:
-            continue
-        match = re.fullmatch(r"((?:t?bufftime):.+)<([0-9]+\.[0-9])", atom)
-        if match and match[1] in remaining:
-            wake = row['time'] + remaining[match[1]] - float(match[2]) + 1e-7
-            if expected['time'] - tolerance <= wake <= expected['time'] + tolerance:
-                gates.append((abs(wake-expected['time']), i))
-    return [i for _,i in sorted(gates)]
+    return repair_module().clock_gates(atoms, row, difference, tolerance)
+
+
+def repair_trials(rules, atoms, replay):
+    """Shared native-chain repair; stage one has NO character/row penalty."""
+    names = {'repair_clock_gate':'early_cast_clock_gate',
+             'repair_gate':'preempting_rule_gate',
+             'repair_split':'preempting_rule_split',
+             'repair_drop_unused':'preempting_rule_drop',
+             'repair_coverage':'missing_action_guard'}
+    results = []
+    normalize = repair_module().conditions().normalize
+    for kind, proposal in repair_module().edits(rules, atoms, replay, check_cancelled):
+        # Keep the legacy AND-only representation compact, but never discard OR.
+        copied = [dict(r) for r in proposal]
+        for r in copied:
+            if all(op == '&' for op in r.get('ops', [])):
+                r.pop('ops', None)
+        changed = next((i for i,(old,new) in enumerate(zip(rules,copied))
+                        if old['action'] != new['action'] or normalize(old) != normalize(new)),
+                       min(len(rules),len(copied)))
+        value = {'rules':copied,'line':changed+1,'repair':names.get(kind,kind)}
+        if kind == 'repair_threshold' and changed < min(len(rules),len(copied)):
+            old = normalize(rules[changed])
+            new = normalize(copied[changed])
+            leaf = next((i for i,(a,b) in enumerate(zip(old['atoms'],new['atoms'])) if a != b), None)
+            if leaf is not None:
+                value.update({'from':atoms[old['atoms'][leaf]],'to':atoms[new['atoms'][leaf]]})
+        if kind in ('repair_split','repair_drop_unused','repair_clock_gate','repair_gate'):
+            value['split_count'] = len(copied)-len(rules)+1
+        results.append(value)
+    return results
 
 
 def guard_trials(rules, atoms, replay):
-    """Split the actually preempting rule using this replay's aligned prefix.
-
-    These are local search branches, never permanent prefix constraints. Keep
-    the old time thresholds in every split; deleting one can change scheduling
-    everywhere. A full replay must accept even a sample-compatible split.
-    """
-    difference = replay.get("comparison", {}).get("first_difference") or {}
-    cursor = difference.get("index", -1)
-    actual, rows = replay.get("actual", []), replay.get("rows", [])
-    if not rules or not rows or not 0 <= cursor < len(actual):
-        return []
-    event = actual[cursor]
-    line = (event.get("macro_line") or 0) - 1
-    if event.get("macro_page", 1) != 1 or not 0 <= line < len(rules) or rows[-1]["cursor"] != cursor:
-        return []
-    rule = rules[line]
-    if rule["action"] not in rows[-1].get("rejected_actions", []):
-        return []
-    negative = row_truth(rows[-1])
-    positives = []
-    for row in rows:
-        check_cancelled()
-        index = row["cursor"]
-        if index >= cursor or actual[index].get("macro_line") != line + 1 or rule["action"] not in row["allowed"]:
-            continue
-        values = row_truth(row)
-        if all(values[i] for i in rule["atoms"]):
-            positives.append(values)
-    clocks = clock_gates(atoms, rows[-1], difference, replay['comparison'].get('time_tolerance_seconds', 0.125))
-    if not positives:
-        used = {re.split(r"[<>=]", atoms[i], maxsplit=1)[0] for i in rule['atoms']}
-        trials = []
-        for atom in clocks:
-            if re.split(r"[<>=]", atoms[atom], maxsplit=1)[0] in used:
-                continue
-            proposed = rules[:line] + [{'action':rule['action'], 'atoms':rule['atoms']+[atom]}] + rules[line+1:]
-            trials.append({'rules':proposed, 'line':line+1, 'repair':'early_cast_clock_gate', 'split_count':1})
-        # This bound is a local exploration queue, never a term/rule bound.
-        return trials[:8] + [{"rules": rules[:line] + rules[line + 1:], "line": line + 1,
-                 "repair": "preempting_rule_drop", "split_count": 0}]
-    # Avoid stacking bounds on the same field inside one AND line.
-    field = lambda text: re.split(r"[<>=]", text, maxsplit=1)[0]
-    used = {field(atoms[i]) for i in rule["atoms"]}
-    columns = [(i, sum(1 << k for k, values in enumerate(positives) if values[i]))
-               for i in range(len(atoms)) if not negative[i] and field(atoms[i]) not in used]
-    columns = [(i, mask) for i, mask in columns if mask]
-    # Correct skill released too early: try a guard whose actual timer will
-    # flip inside this event's acceptance window, rather than any false atom.
-    # This is scheduler guidance only; the unchanged executor validates it.
-    clocks = set(clocks)
-    trials, seen = [], set()
-    for variant in range(8):
-        remaining, split = (1 << len(positives)) - 1, []
-        while remaining:
-            check_cancelled()
-            candidates = [(i, mask) for i, mask in columns if mask & remaining]
-            if variant < 4 and remaining == (1 << len(positives)) - 1 and any(i in clocks for i,_ in candidates):
-                candidates = [p for p in candidates if p[0] in clocks]
-            if not candidates:
-                break
-            candidates.sort(key=lambda pair: (-(pair[1] & remaining).bit_count(), "bufftime:" in atoms[pair[0]], len(atoms[pair[0]]), atoms[pair[0]]))
-            largest = (candidates[0][1] & remaining).bit_count()
-            tied = [pair for pair in candidates if (pair[1] & remaining).bit_count() == largest]
-            atom, mask = tied[variant % len(tied)]
-            split.append({"action": rule["action"], "atoms": rule["atoms"] + [atom]})
-            remaining &= ~mask
-        if remaining:
-            continue
-        proposed = rules[:line] + split + rules[line + 1:]
-        signature = json.dumps(proposed, sort_keys=True)
-        if signature not in seen:
-            seen.add(signature)
-            trials.append({"rules": proposed, "line": line + 1, "repair": "preempting_rule_split", "split_count": len(split)})
-    return trials
+    return [trial for trial in repair_trials(rules, atoms, replay)
+            if trial.get('repair') not in ('repair_threshold','missing_action_guard')]
 
 
 def threshold_trials(rules, atoms, replay):
-    """Prioritize small legal threshold edits at the first divergent cast.
+    return [trial for trial in repair_trials(rules, atoms, replay)
+            if trial.get('repair') == 'repair_threshold']
 
-    These are UNTESTED hypotheses, not sample-SAT witnesses. No state from the
-    divergent suffix receives a target label. Full Rust replay is the only
-    acceptance test, and unrestricted construction resumes after this finite
-    neighborhood. Rule count and character count are not optimization goals.
-    """
-    difference = replay.get("comparison", {}).get("first_difference")
-    if not difference or not rules:
-        return []
-    cursor = difference["index"]
-    actual = replay.get("actual", [])
-    expected = difference.get("expected") or {}
-    observed = difference.get("actual") or {}
-    later = observed.get("time", 0) >= expected.get("time", 0)
-    lines = []
-    missed_row = None
-    if cursor < len(actual):
-        if actual[cursor].get("macro_page", 1) != 1:
-            return []
-        line = (actual[cursor].get("macro_line") or 0) - 1
-        if 0 <= line < len(rules):
-            lines = [line]
-    elif (replay.get("probe_failure") or {}).get("kind") == "missed_decision_time":
-        # Early-stop replays intentionally have no actual[cursor]. Use only the
-        # last ALIGNED decision and its oracle-approved actions, not a guessed
-        # action label on an already divergent state.
-        rows = replay.get("rows", [])
-        if rows and rows[-1]["cursor"] == cursor:
-            missed_row = rows[-1]
-            truth = row_truth(missed_row) if "truth" in missed_row or "truth_hex" in missed_row else None
-            if truth is not None:
-                lines = [i for i, rule in enumerate(rules)
-                         if rule["action"] in missed_row["allowed"]
-                         and missed_row["executable"][rule["action"]]]
-                lines.sort(key=lambda i: (sum(not truth[a] for a in rules[i]["atoms"]), i))
-                later = True
-    lookup = {atom: i for i, atom in enumerate(atoms)}
-    trials = []
-    for line in lines:
-        for position, atom_id in enumerate(rules[line]["atoms"]):
-            if missed_row is not None and truth[atom_id]:
-                continue
-            match = re.fullmatch(r"((?:t?bufftime):.+)([<>])([0-9]+\.[0-9])", atoms[atom_id])
-            if not match:
-                continue
-            direction = 1 if later == (match[2] == "<") else -1
-            point = round(float(match[3]) * 10)
-            for offset in (direction, -direction, 2 * direction, -2 * direction):
-                if point + offset < 0:
-                    continue
-                text = f"{match[1]}{match[2]}{(point + offset) / 10:.1f}"
-                replacement = lookup.get(text)
-                if replacement is None or replacement in rules[line]["atoms"]:
-                    continue
-                proposed = [{"action": r["action"], "atoms": list(r["atoms"])} for r in rules]
-                proposed[line]["atoms"][position] = replacement
-                trials.append({"rules": proposed, "line": line + 1,
-                               "from": atoms[atom_id], "to": text})
-    return trials
+
+def coverage_trials(rules, atoms, replay):
+    return [trial for trial in repair_trials(rules, atoms, replay)
+            if trial.get('repair') == 'missing_action_guard']
 
 
 LOCAL_REPLAYS_PER_PREFIX = 24
 LOCAL_FRONTIER_LIMIT = 64
-
-
-def repair_trials(rules, atoms, replay):
-    """Choose a local method from the real first divergence, not iteration age.
-
-    Missing casts need a legal wake/threshold hypothesis. When an executed
-    rule preempts the expected cast, separate that rule first; changing its
-    clock threshold blindly can disturb many earlier decisions.
-    """
-    failure = (replay.get("probe_failure") or {}).get("kind")
-    if failure == "missed_decision_time":
-        return coverage_trials(rules, atoms, replay) + threshold_trials(rules, atoms, replay)
-    return guard_trials(rules, atoms, replay) + coverage_trials(rules, atoms, replay) + threshold_trials(rules, atoms, replay)
-
-
-def coverage_trials(rules, atoms, replay):
-    """Add a missing legal action guard without rebuilding unrelated rules.
-
-    A previous hit before the insertion position protects the observation.
-    Only executable wrong actions in unprotected aligned observations need
-    exclusion. These are reversible hypotheses, not a frozen matched prefix.
-    New predicates can change wake times; every trial therefore replays t=0.
-    """
-    rows = replay.get("rows", [])
-    difference = replay.get("comparison", {}).get("first_difference") or {}
-    cursor = difference.get("index", -1)
-    if not rows or rows[-1]["cursor"] != cursor or not rows[-1]["allowed"]:
-        return []
-    values = [row_truth(r) for r in rows]
-    positive = values[-1]
-    event = (replay.get("actual", []) + [None])[cursor] if 0 <= cursor <= len(replay.get("actual", [])) else None
-    position = ((event.get("macro_line") or 1) - 1) if event else len(rules)
-    if event and event.get("macro_page", 1) != 1:
-        return []
-    positions = list(dict.fromkeys([max(0, min(position, len(rules))), 0]))
-    candidates, seen = [], set()
-    for position in positions:
-        protected = [any(r["executable"][rule["action"]] and all(v[a] for a in rule["atoms"])
-                         for rule in rules[:position]) for r, v in zip(rows, values)]
-        for action in rows[-1]["allowed"]:
-            if not rows[-1]["executable"][action]:
-                continue
-            bad = [v for r,v,p in zip(rows, values, protected)
-                   if not p and r["executable"][action] and action not in r["allowed"]]
-            columns = [(a, sum(1 << i for i,v in enumerate(bad) if not v[a]))
-                       for a, truth in enumerate(positive) if truth]
-            for style in range(3):
-                check_cancelled()
-                remaining, selected = (1 << len(bad)) - 1, []
-                while remaining:
-                    options = [(a, mask & remaining) for a, mask in columns if mask & remaining]
-                    if not options:
-                        break
-                    timed = lambda a: atoms[a].startswith(("bufftime:", "tbufftime:"))
-                    weight = 4 if style == 1 else 1
-                    a, hits = max(options, key=lambda p: (p[1].bit_count() / (weight if timed(p[0]) else 1),
-                                                         not timed(p[0]), -len(atoms[p[0]]),
-                                                         p[0] if style == 2 else -p[0]))
-                    selected.append(a)
-                    remaining &= ~hits
-                if remaining:
-                    continue
-                # Keep only separating terms, avoiding implied bounds in a line.
-                for a in list(reversed(selected)):
-                    if all(any(not v[b] for b in selected if b != a) for v in bad):
-                        selected.remove(a)
-                trial = rules[:position] + [{"action":action, "atoms":selected}] + rules[position:]
-                key = json.dumps(trial, sort_keys=True)
-                if key not in seen:
-                    seen.add(key)
-                    candidates.append({"rules":trial, "line":position+1, "repair":"missing_action_guard"})
-    return candidates
 
 
 class SearchScheduler:
@@ -1096,7 +926,7 @@ def run_job(args):
         report["scenario_sha256"] = hashlib.sha256(json.dumps(scene, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
         provenance = {"executable_sha256": hashlib.sha256(args.exe.read_bytes()).hexdigest(), "files": {}}
         for name in ("exact-macro-synth.py", "exact-macro-worker.py", "exact_macro_compress.py",
-                     "exact_macro_reorder.py", "exact_macro_conditions.py", "exact_macro_global.py", "exact_macro_family.py", "exact_macro_joint.py", "requirements-exact-macro.txt"):
+                     "exact_macro_reorder.py", "exact_macro_conditions.py", "exact_macro_global.py", "exact_macro_family.py", "exact_macro_joint.py", "exact_macro_repair.py", "requirements-exact-macro.txt"):
             path = ROOT / "tools" / name
             provenance["files"]["tools/" + name] = hashlib.sha256(path.read_bytes()).hexdigest()
         for path in sorted((ROOT / "backend/src").rglob("*.rs")):

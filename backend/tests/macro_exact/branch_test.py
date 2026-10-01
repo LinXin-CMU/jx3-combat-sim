@@ -135,7 +135,8 @@ class BranchContracts(unittest.TestCase):
                      simple_edits=lambda *args:[], feature_edits=lambda *args:[],
                      or_edits=lambda *args:[], priority_edits=lambda *args, **kwargs:[],
                      local_rewrites=lambda *args:[], family_edits=lambda *args:[],
-                     joint_edits=lambda *args, **kwargs:[], global_edits=lambda *args:[])
+                     joint_edits=lambda *args, **kwargs:[], global_edits=lambda *args:[],
+                     window_edits=lambda *args:[])
         empty[stage + '_edits'] = global_candidates
         with patch.multiple(compress, **empty):
             best, replay, records, summary = compress.compress(
@@ -192,7 +193,7 @@ class BranchContracts(unittest.TestCase):
             return failure([row([1], [], 0)])
         empty = {name:(lambda *args, **kwargs:[]) for name in ('basic_batch', 'feature_batch',
             'simple_edits', 'feature_edits', 'or_edits', 'priority_edits', 'family_edits',
-            'local_rewrites', 'global_edits')}
+            'local_rewrites', 'global_edits', 'window_edits')}
         with patch.multiple(compress, joint_edits=joint, **empty):
             best, replay, _, summary = compress.compress(rules, atoms, actions, baseline,
                 render, verify, lambda:None, lambda solver:solver.check(),

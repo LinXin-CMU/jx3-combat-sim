@@ -88,7 +88,7 @@ class OrderedSelection(unittest.TestCase):
             'actual':[{'macro_line':1}], 'rows':[last]}
         trial = synth.guard_trials(rules, atoms, replay)[0]
         self.assertEqual(trial['repair'], 'early_cast_clock_gate')
-        self.assertEqual(trial['rules'][0]['atoms'], [0,1])
+        self.assertEqual(trial['rules'][0]['atoms'], [1,0])
         self.assertEqual(rules[0]['atoms'], [0])
 
     def test_missed_cast_uses_only_aligned_executable_target_rules(self):
@@ -134,13 +134,39 @@ class OrderedSelection(unittest.TestCase):
         atoms = ["bufftime:盾飞<15.3", "bufftime:盾飞<15.2", "bufftime:盾飞<15.4", "bufftime:盾飞<15.5"]
         rules = [{"action": 0, "atoms": [0]}]
         trace = {"comparison": {"first_difference": {"index": 0, "actual": {"time": 2}, "expected": {"time": 1}}},
-                 "actual": [{"macro_line": 1, "macro_page": 1}]}
+                 "actual": [{"macro_line": 1, "macro_page": 1}],
+                 "rows": [dict(row([1,1,0,0],[1],[]),cursor=0,rejected_actions=[0])]}
         trials = synth.threshold_trials(rules, atoms, trace)
         self.assertEqual([trial["to"] for trial in trials], [atoms[2], atoms[1], atoms[3]])
         self.assertEqual(rules[0]["atoms"], [0])
         self.assertTrue(all("status" not in trial for trial in trials))
         trace["actual"] = []
         self.assertEqual(synth.threshold_trials(rules, atoms, trace), [])
+
+    def assert_threshold_metadata_after_prefix(self, prefix):
+        atoms = ['buff:A', 'buff:B', 'buff:C', 'bufftime:D<15.3',
+                 'bufftime:D<15.2', 'bufftime:D<15.4', 'bufftime:D<15.5']
+        rules = [prefix, {'action':1, 'atoms':[3]}]
+        trace = {'comparison':{'first_difference':{'index':0,
+                    'actual':{'time':2}, 'expected':{'time':1}}},
+                 'actual':[{'macro_line':2, 'macro_page':1}],
+                 'rows':[dict(row([0,0,0,1,1,0,0], [1,1], []),
+                              cursor=0, rejected_actions=[1])]}
+        trials = synth.threshold_trials(rules, atoms, trace)
+        self.assertTrue(trials)
+        self.assertEqual([trial['line'] for trial in trials], [2]*len(trials))
+        self.assertEqual([trial['from'] for trial in trials], [atoms[3]]*len(trials))
+        self.assertEqual([trial['to'] for trial in trials], [atoms[5], atoms[4], atoms[6]])
+        normalize = synth.repair_module().conditions().normalize
+        for trial in trials:
+            self.assertEqual(normalize(trial['rules'][0]), normalize(prefix))
+        self.assertEqual(rules, [prefix, {'action':1, 'atoms':[3]}])
+
+    def test_threshold_metadata_ignores_unrelated_explicit_and_normalization(self):
+        self.assert_threshold_metadata_after_prefix({'action':0, 'atoms':[0,1], 'ops':['&']})
+
+    def test_threshold_metadata_ignores_unrelated_legacy_or_normalization(self):
+        self.assert_threshold_metadata_after_prefix({'action':0, 'atoms':[0], 'any_atoms':[1,2]})
 
     def test_conflicting_seed_rule_can_split_without_limit_or_overlap(self):
         rows = [row([True, False], [True, True], [0]),

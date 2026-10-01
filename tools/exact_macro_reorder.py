@@ -77,6 +77,11 @@ def priority_edits(rules, samples, clone, limit=24, condition_search=None):
                 survivors.append(rule)
                 survivor_cost += samples.rule_cost(rule) + 1
 
+        # Even an unconditional replacement cannot beat this donor cost.
+        # Prune before building any guard query; this is an exact cost bound.
+        if survivor_cost + samples.rule_cost({'action':action, 'atoms':[]}) + 1 >= original_cost:
+            continue
+
         # Original single/pair locations already have guard/merge generators.
         # Whole families may still benefit from an interior original gap.
         known_gaps = {original_gaps[group[0]], original_gaps[group[-1]]}

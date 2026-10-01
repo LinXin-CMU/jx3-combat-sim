@@ -267,3 +267,332 @@ def short_guards(positives, negatives, samples, max_terms=8, max_candidates=8,
         cache["queries"].pop(next(iter(cache["queries"])))
     cache["queries"][query] = [condition_key(rule) for rule in result]
     return result
+
+
+def window_guards(windows, negatives, samples, max_terms=6, max_candidates=8,
+                  branch_limit=24, max_states=384, max_atoms=256,
+                  preferred_atoms=()):
+    """Find native chains hitting at least one state in EACH release window.
+
+    Windows belong to ONE immutable observation path supplied by the caller.
+    An AND prefix restricts each window to that prefix's true states; an OR
+    prefix satisfies every window it touches and leaves the others unchanged.
+    Consequently, different states cannot jointly witness an AND expression.
+    Negatives are avoided throughout the final condition, not merely at the
+    chosen witnesses. This is candidate guidance, never a runtime certificate.
+
+    Unlike short_guards, the union of windows is NOT a fixed all-positive set.
+    All clock aliases survive truth-signature deduplication. Finite atom and
+    branch quotas still limit exploration; preferred_atoms reserves source
+    leaves before feature selection and gives them early branch opportunities.
+    An exhausted depth/atom/state quota is not global UNSAT. The existing
+    short_guards implementation and its cache are deliberately independent.
+    """
+    samples.check()
+    if min(max_terms, max_candidates, branch_limit, max_states, max_atoms) <= 0:
+        return []
+    all_mask, truth, costs = samples.all, samples.truth, samples.atom_costs
+    negative = negatives & all_mask
+    original = []
+    for window in windows:
+        samples.check()
+        mask = window & all_mask
+        if not mask:
+            return []
+        original.append(mask)
+    if not original:
+        return []
+    # Negative states can never be final witnesses. This removal is exact for
+    # this one guide; it introduces neither new states nor labels from a path.
+    residual = tuple(sorted({window & ~negative for window in original}))
+    if not residual or not residual[0]:
+        return []
+    preferred = tuple(sorted({index for index in preferred_atoms
+                              if isinstance(index, int) and 0 <= index < len(truth)}))
+    texts = getattr(samples, "atoms", None)
+    stamp = (id(truth), len(truth), id(costs), len(costs), id(texts), all_mask)
+    cache = getattr(samples, "_native_window_cache", None)
+    if cache is None or cache["stamp"] != stamp:
+        clock = set()
+        if texts is not None:
+            for index, text in enumerate(texts):
+                if index % 64 == 0:
+                    samples.check()
+                if "bufftime:" in text:
+                    clock.add(index)
+        signatures = {}
+        for index, mask in enumerate(truth):
+            if index % 64 == 0:
+                samples.check()
+            signatures.setdefault(mask & all_mask, []).append(index)
+        pool = []
+        for offset, indices in enumerate(signatures.values()):
+            if offset % 64 == 0:
+                samples.check()
+            ordered = sorted(indices, key=lambda index: (costs[index], index))
+            stable = [index for index in ordered if index not in clock]
+            # Two observed clock aliases can have arbitrary different future
+            # threshold events. Do not truncate these aliases before ranking.
+            pool.extend(stable[:1] + [index for index in ordered if index in clock])
+        cache = {"stamp": stamp, "sources": (truth, costs, texts),
+                 "clock": clock, "pool": tuple(pool), "queries": {},
+                 "masks": tuple(mask & all_mask for mask in truth),
+                 "denominators": tuple(cost + 1 for cost in costs)}
+        try:
+            samples._native_window_cache = cache
+        except AttributeError:
+            pass
+    clock, masks, denominators = cache["clock"], cache["masks"], cache["denominators"]
+    query = (residual, negative, max_terms, max_candidates, branch_limit,
+             max_states, max_atoms, preferred)
+    if query in cache["queries"]:
+        return [{"atoms": list(atoms), "ops": list(ops)}
+                for atoms, ops in cache["queries"][query]]
+
+    def cycle(items, key, limit):
+        groups = {}
+        for offset, item in enumerate(items):
+            if offset % 64 == 0:
+                samples.check()
+            groups.setdefault(key(item), []).append(item)
+        result, offset = [], 0
+        while len(result) < limit:
+            changed = False
+            for position, group in enumerate(groups.values()):
+                if position % 64 == 0:
+                    samples.check()
+                if offset < len(group):
+                    result.append(group[offset])
+                    changed = True
+                    if len(result) >= limit:
+                        break
+            if not changed:
+                break
+            offset += 1
+        return result
+
+    preferred_set = set(preferred)
+    pool = set(cache["pool"]) | preferred_set
+    if len(pool) > max_atoms:
+        ranked = []
+        for offset, index in enumerate(pool):
+            if offset % 64 == 0:
+                samples.check()
+            mask = masks[index]
+            touched = sum(bool(mask & window) for window in residual)
+            excluded = (negative & ~mask).bit_count()
+            ranked.append((-(touched + excluded) / denominators[index],
+                           costs[index], index))
+        ranked.sort()
+        chosen = sorted(preferred, key=lambda index: (costs[index], index))[:max_atoms]
+        selected = set(chosen)
+        stable = [item for item in ranked if item[2] not in clock and item[2] not in selected]
+        timed = [item for item in ranked if item[2] in clock and item[2] not in selected]
+        room = max_atoms - len(chosen)
+        # A large catalogue of timer aliases must not crowd every resource or
+        # mechanism leaf out of the suffix search. Cheap inner leaves get a
+        # share alongside coverage-ranked roots in both feature categories.
+        for items, quota in ((stable, (room + 1) // 2), (timed, room // 2)):
+            if quota <= 0:
+                continue
+            cheap = sorted(items, key=lambda item: (item[1], item[2]))
+            priority = cycle([(0, item) for item in items] + [(1, item) for item in cheap],
+                             lambda item: item[0], min(len(items) * 2, quota * 2))
+            added = 0
+            for offset, (_, item) in enumerate(priority):
+                if offset % 64 == 0:
+                    samples.check()
+                if item[2] not in selected:
+                    chosen.append(item[2])
+                    selected.add(item[2])
+                    added += 1
+                    if added >= quota:
+                        break
+        for offset, (_, _, index) in enumerate(ranked):
+            if offset % 64 == 0:
+                samples.check()
+            if len(chosen) >= max_atoms:
+                break
+            if index not in selected:
+                chosen.append(index)
+                selected.add(index)
+        pool = chosen
+    pool = sorted(pool, key=lambda index: (index not in preferred_set, costs[index], index))
+
+    # Clock aliases deliberately remain separate candidates, but their
+    # observed truth can share residual calculations. Keep signature slots
+    # separate from the original leaf order so quotas and ties stay identical.
+    signatures = tuple(dict.fromkeys(masks[index] for index in pool))
+    signature_slot = {mask: offset for offset, mask in enumerate(signatures)}
+    features = [(index, signature_slot[masks[index]], costs[index], denominators[index],
+                 index not in preferred_set, index in preferred_set and index in clock)
+                for index in pool]
+    chain_entries = {}
+
+    def prune(guards):
+        unique = {}
+        for offset, (atoms, ops) in enumerate(guards):
+            if offset % 64 == 0:
+                samples.check()
+            key = atoms, ops
+            entry = chain_entries.get(key)
+            if entry is None:
+                # Internally built chains already have valid native arity.
+                # Avoid repeatedly normalizing and costing the same suffix.
+                mask = masks[atoms[-1]] if atoms else all_mask
+                for position in range(len(ops) - 1, -1, -1):
+                    leaf = masks[atoms[position]]
+                    mask = leaf & mask if ops[position] == "&" else leaf | mask
+                wake = tuple(sorted(set(atoms) & clock))
+                cost = 3 + sum(costs[index] for index in atoms) + len(ops) if atoms else 0
+                entry = (cost, atoms, ops, mask, wake)
+                chain_entries[key] = entry
+            mask, wake = entry[3:]
+            semantic = mask, wake
+            if semantic not in unique or entry[:3] < unique[semantic][:3]:
+                unique[semantic] = entry
+        ranked = sorted(unique.values(), key=lambda entry: entry[:3])
+        stable = [entry for entry in ranked if not entry[4]]
+        timed = [entry for entry in ranked if entry[4]]
+        chosen = stable[:(max_candidates + 1) // 2]
+        chosen += cycle(timed, lambda entry: entry[4], max_candidates // 2)
+        included = {(entry[1], entry[2]) for entry in chosen}
+        for offset, entry in enumerate(ranked):
+            if offset % 64 == 0:
+                samples.check()
+            if len(chosen) >= max_candidates:
+                break
+            if (entry[1], entry[2]) not in included:
+                chosen.append(entry)
+                included.add((entry[1], entry[2]))
+        chosen.sort(key=lambda entry: entry[:3])
+        return [(entry[1], entry[2]) for entry in chosen]
+
+    roots_cache, memo = {}, {}
+    window_features, blocked_features = {}, {}
+    states, budget_misses = 0, 0
+
+    def roots(remaining, blocked):
+        samples.check()
+        key = remaining, blocked
+        if key in roots_cache:
+            return roots_cache[key]
+        # AND changes blocked states and OR changes outstanding windows.
+        # Factor these two axes instead of recomputing every leaf/window
+        # intersection for each pair, including aliases with equal truth.
+        windows_data = window_features.get(remaining)
+        if windows_data is None:
+            windows_data = ([None] * len(signatures), [None] * len(signatures))
+            window_features[remaining] = windows_data
+        restricted_by_slot, untouched_by_slot = windows_data
+        negatives_data = blocked_features.get(blocked)
+        if negatives_data is None:
+            negatives_data = []
+            for offset, mask in enumerate(signatures):
+                if offset % 64 == 0:
+                    samples.check()
+                intersecting = blocked & mask
+                negatives_data.append((intersecting, (blocked & ~mask).bit_count()))
+            blocked_features[blocked] = negatives_data
+        leaves = [((), ())] if not blocked else []
+        and_roots, or_roots = [], []
+        for offset, (index, slot, cost, denominator, ordinary, preferred_clock) in enumerate(features):
+            if offset % 64 == 0:
+                samples.check()
+            mask = signatures[slot]
+            intersecting, excluded = negatives_data[slot]
+            restricted = restricted_by_slot[slot]
+            if restricted is None:
+                restricted = tuple(sorted({window & mask for window in remaining}))
+                restricted_by_slot[slot] = restricted
+            # Every restricted window must retain a SAME-ROW witness for the
+            # suffix. Empty intersections cannot be repaired by an AND tail.
+            if restricted[0]:
+                if not intersecting:
+                    leaves.append(((index,), ()))
+                progress = intersecting != blocked or restricted != remaining
+                if progress or preferred_clock:
+                    score = -excluded / denominator
+                    and_roots.append((ordinary, score, cost,
+                                      index, restricted, intersecting))
+            if not intersecting:
+                untouched = untouched_by_slot[slot]
+                if untouched is None:
+                    untouched = tuple(window for window in remaining if not window & mask)
+                    untouched_by_slot[slot] = untouched
+                if untouched and (untouched != remaining
+                                  or preferred_clock):
+                    score = -(len(remaining) - len(untouched)) / denominator
+                    or_roots.append((ordinary, score, cost,
+                                     index, untouched, blocked))
+        ordered_and, ordered_or = sorted(and_roots), sorted(or_roots)
+        branches = []
+        for offset in range(max(len(ordered_and), len(ordered_or))):
+            samples.check()
+            for operator, items in (("&", ordered_and), ("|", ordered_or)):
+                if offset < len(items):
+                    branches.append((operator, items[offset]))
+                    if len(branches) >= branch_limit:
+                        break
+            if len(branches) >= branch_limit:
+                break
+        value = prune(leaves), branches
+        roots_cache[key] = value
+        return value
+
+    def search(remaining, blocked, depth, ceiling):
+        nonlocal states, budget_misses
+        samples.check()
+        key = remaining, blocked, depth
+        if key in memo:
+            return memo[key]
+        if states >= ceiling:
+            budget_misses += 1
+            return []
+        states += 1
+        misses_before = budget_misses
+        leaves, branches = roots(remaining, blocked)
+        guards = list(leaves)
+        if depth > 1:
+            width = min(len(branches), max(1, (ceiling - states) // (depth - 1)))
+            if width < len(branches):
+                budget_misses += 1
+            active = branches[:width]
+            for position, (operator, (_, _, _, index, child_windows, child_negative)) in enumerate(active):
+                samples.check()
+                share = max(1, (ceiling - states) // (len(active) - position))
+                child_ceiling = min(ceiling, states + share)
+                suffixes = search(child_windows, child_negative, depth - 1, child_ceiling)
+                for atoms, ops in suffixes:
+                    samples.check()
+                    if index in atoms:
+                        continue
+                    if not atoms:
+                        guards.append(((index,), ()) if operator == "&" else ((), ()))
+                    else:
+                        guards.append(((index,) + atoms, (operator,) + ops))
+        result = prune(guards)
+        # Budgeted partial exploration must not block a better-funded pass.
+        if misses_before == budget_misses:
+            memo[key] = result
+        return result
+
+    best = []
+    for depth in range(1, max_terms + 1):
+        samples.check()
+        if states >= max_states:
+            break
+        reserve = max(1, (max_states - states) // (max_terms - depth + 1))
+        ceiling = min(max_states, states + reserve)
+        best = prune(best + search(residual, negative, depth, ceiling))
+    result = []
+    for atoms, ops in best:
+        samples.check()
+        rule = {"atoms": list(atoms), "ops": list(ops)}
+        mask = condition_mask(rule, truth, all_mask)
+        if not mask & negative and all(window & mask for window in original):
+            result.append(rule)
+    if len(cache["queries"]) >= 256:
+        cache["queries"].pop(next(iter(cache["queries"])))
+    cache["queries"][query] = [condition_key(rule) for rule in result]
+    return result
