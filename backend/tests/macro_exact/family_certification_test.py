@@ -62,7 +62,7 @@ class FamilyCertificationContracts(unittest.TestCase):
         with ExitStack() as mocks:
             mocks.enter_context(patch.object(compress, stage + "_edits", family))
             for name in ("simple_edits", "feature_edits", "or_edits", "priority_edits",
-                    "local_rewrites", "global_edits", "basic_batch", "feature_batch", "window_edits",
+                    "local_rewrites", "global_edits", "basic_batch", "feature_batch", "window_edits", "event_window_edits",
                     "joint_edits" if stage == "family" else "family_edits"):
                 mocks.enter_context(patch.object(compress, name, return_value=[]))
             best, replay, records, summary = compress.compress(rules, atoms, actions,

@@ -6,6 +6,8 @@ The finite neighbourhood/beam/local SAT shapes control search breadth only.
 """
 import time
 import importlib.util
+import hashlib
+import json
 from pathlib import Path
 
 import z3
@@ -53,18 +55,49 @@ def priority_edits(rules, samples, native=False):
         rules, samples, clone, condition_search=short_search if native else None)
 
 
-def window_edits(rules, samples):
+def event_window_edits(rules, samples):
     # Existential windows from this ONE source path, not extra target labels.
     preferred = tuple(dict.fromkeys(k for rule in rules
         for k in condition_module().normalize(rule)['atoms']))
-    def search(p, n, guide):
-        windows = [group & p for group in guide.groups.values() if group & p]
-        return condition_module().window_guards(windows, n, guide,
+    selected,_ = samples.selections(rules)
+    source_hits = 0
+    for bits in selected:
+        source_hits |= bits
+    expanded_events = 0
+    for group in samples.groups.values():
+        if group & ~source_hits:
+            expanded_events |= group
+    donors = {index for index,bits in enumerate(selected) if bits & expanded_events}
+    # This operator addresses expanded event witnesses. Other changes retain
+    # their own broader generators; singleton windows need no duplicate query.
+    if not donors:
+        return
+    def search(query, guide):
+        return condition_module().window_guards(query.windows, query.negatives, guide,
             max_terms=6, max_candidates=4, branch_limit=16, max_states=256,
             preferred_atoms=preferred)
     for kind, trial in search_module('exact_macro_reorder').priority_edits(
-            rules, samples, clone, condition_search=search):
-        yield kind.replace('native_guard_rebuild', 'window_guard_rebuild'), trial
+            rules, samples, clone, window_search=search,
+            group_filter=lambda group,action:any(index in donors for index in group)):
+        yield kind.replace('window_guard_rebuild','window_event_rebuild'), trial
+
+
+def window_edits(rules, samples):
+    """The existing fast witness heuristic, retained as a proposal source.
+
+    A failed restricted query never excludes the full observed-window search,
+    which gets a separate turn once this cheaper neighbourhood stagnates.
+    """
+    preferred = tuple(dict.fromkeys(k for rule in rules
+        for k in condition_module().normalize(rule)['atoms']))
+    def search(p,n,guide):
+        windows = [group & p for group in guide.groups.values() if group & p]
+        return condition_module().window_guards(windows,n,guide,
+            max_terms=6,max_candidates=4,branch_limit=16,max_states=256,
+            preferred_atoms=preferred)
+    for kind,trial in search_module('exact_macro_reorder').priority_edits(
+            rules,samples,clone,condition_search=search):
+        yield kind.replace('native_guard_rebuild','window_guard_rebuild'),trial
 
 
 def global_edits(rules, samples, check_solver, diagnostic):
@@ -93,6 +126,11 @@ def timing_edits(rules, samples, replay):
         rules, samples, replay, limit=16)
 
 
+def region_edits(rules, samples, check_solver, diagnostic, cost_bound=None, **options):
+    yield from search_module('exact_macro_region').region_edits(
+        rules, samples, clone, check_solver, diagnostic, cost_bound=cost_bound,**options)
+
+
 def char_count(text):
     # Same as the macro draft's JavaScript .length: includes brackets, spaces
     # and newlines; no unsafe operator/decimal normalization after validation.
@@ -119,16 +157,26 @@ def certified(replay):
 
 class Samples:
     """Columns from ONE certified trajectory, including its wait decisions."""
-    def __init__(self, rows, atoms, actions, check):
+    def __init__(self, rows, atoms, actions, check, provenance=None):
         self.rows, self.atoms, self.actions, self.check = rows, atoms, actions, check
+        self.provenance = dict(provenance or {})
+        # A guide is never silently combined with another macro's path.
+        path_hash = hashlib.sha256(json.dumps(self.provenance,
+            sort_keys=True,separators=(',',':')).encode())
         self.all = (1 << len(rows)) - 1
         self.truth = [0] * len(atoms)
         self.executable = [0] * len(actions)
         self.allowed = [0] * len(actions)
-        self.required, self.groups = 0, {}
+        self.required, self.groups, self.event_rows = 0, {}, {}
         for s, row in enumerate(rows):
             check()
+            path_hash.update(bytes(row['truth']))
+            path_hash.update(json.dumps((row.get('cursor',s),row.get('time'),
+                list(row['executable']),row['allowed'],row.get('wait_allowed',False)),
+                separators=(',',':')).encode())
             bit = 1 << s
+            cursor = row.get('cursor', s)
+            self.event_rows[cursor] = self.event_rows.get(cursor, 0) | bit
             for k, value in enumerate(row["truth"]):
                 if value:
                     self.truth[k] |= bit
@@ -147,6 +195,7 @@ class Samples:
         self.action_costs = [char_count(f"/{'fcast' if a.get('fcast') else 'cast'} {a.get('name','')}")
                              for a in actions]
         self.short_features = None
+        self.path_id = path_hash.hexdigest()
 
     def hit(self, rule):
         key = rule['action'], tuple(rule['atoms']), tuple(rule.get('any_atoms', ())), tuple(rule.get('ops', ())), 'ops' in rule
@@ -192,6 +241,30 @@ class Samples:
         if remaining & self.required:
             return False
         return all(group & ~remaining for group in self.groups.values())
+
+    def window_compatible(self, rules):
+        """First observed witness per event; later old snapshots disappear.
+
+        This is a proposal screen, not execution equivalence. A candidate
+        choosing earlier within a tolerated window must not also be forced
+        to cast at the source path's old deadline. Its actual new trajectory
+        is always checked from time zero by the native oracle.
+        """
+        selections, remaining = self.selections(rules)
+        selected, wrong = self.all & ~remaining, 0
+        for rule, bits in zip(rules, selections):
+            wrong |= bits & ~self.allowed[rule['action']]
+        for cursor, rows in self.event_rows.items():
+            self.check()
+            choices = selected & rows
+            if not choices:
+                if self.groups.get(cursor, 0):
+                    return False
+                continue
+            first = choices & -choices
+            if first & wrong or not first & self.groups.get(cursor, 0):
+                return False
+        return True
 
     def covers(self, positives, negatives):
         """Short alternative conjunctions; masks are guidance, not equivalence."""
@@ -243,7 +316,7 @@ class Samples:
         return result
 
 
-def branch_guide(replay, source, known=()):
+def branch_guide(replay, source, known=(), candidate_text=None):
     """Only the correctly aligned prefix of ONE reached candidate path.
 
     The native probe only emits correctly aligned pre-decision observations,
@@ -266,7 +339,10 @@ def branch_guide(replay, source, known=()):
                        tuple(r['executable']),tuple(r['allowed']),r.get('wait_allowed',False)) for r in prefix)
     if signature in known:
         return None
-    guide = Samples(prefix,source.atoms,source.actions,source.check)
+    guide = Samples(prefix,source.atoms,source.actions,source.check,
+                    dict(source.provenance, candidate_fingerprint=replay.get('actual_fingerprint'),
+                         macro_sha256=hashlib.sha256(candidate_text.encode()).hexdigest() if candidate_text is not None else None,
+                         source_path=source.path_id, kind='aligned_failure'))
     guide.global_keep_mask = (1 << len(prefix))-1
     guide.guide_kind = 'one_aligned_candidate_prefix_only'
     return cursor,signature,guide
@@ -662,7 +738,8 @@ def local_rewrites(rules, samples, render, check_solver, diagnostic):
 
 def compress(rules, atoms, actions, baseline, render, verify, check,
              check_solver, accepted, progress, diagnostic, budget=lambda: True,
-             feedback=None, deep_search=False, joint_search=False):
+             feedback=None, deep_search=False, joint_search=False, region_search=False,
+             learning=None, contract=None):
     if not certified(baseline):
         raise ValueError("compression requires a full certified baseline")
     best, best_replay = clone(rules), baseline
@@ -671,6 +748,17 @@ def compress(rules, atoms, actions, baseline, render, verify, check,
     branches, branch_seen = [], set()
     repairs, repair_seen, repair_paths = [], set(), {}
     feedback_source = None
+    binding = {k:baseline.get(k) for k in ('version','mount','horizon','target_fingerprint')}
+    binding['acceptance'] = {k:baseline.get('comparison',{}).get(k)
+                            for k in ('acceptance','time_tolerance_seconds')}
+    binding['catalog'] = hashlib.sha256(json.dumps((atoms,actions),sort_keys=True).encode()).hexdigest()
+    if contract is not None:
+        binding['frozen_contract'] = contract
+    contract_id = hashlib.sha256(json.dumps(binding,sort_keys=True).encode()).hexdigest()
+    active_path = None
+    alternatives = []
+    prepared, observations = {}, []
+    learning_module = search_module('exact_macro_learning') if learning is not None else None
     summary = {"status":"running", "initial_chars":initial, "best_chars":initial,
                "saved_chars":0, "trial_count":0, "accepted_count":0,
                "batch_trials":0, "max_batch_rules":0,
@@ -681,10 +769,47 @@ def compress(rules, atoms, actions, baseline, render, verify, check,
                "window_trials":0,
                "timing_trials":0,
                "global_branches":0,
+               "region_trials":0, "certified_alternatives":0,
+               "candidate_ms":0.0, "sample_ms":0.0, "verify_wall_ms":0.0, "feedback_wall_ms":0.0,
+               "contract_id":contract_id, "pipeline_version":"20261002-window-region-v1",
+               "region_search":region_search,
+               "learning_enabled":bool(learning is not None and learning.enabled),
+               "adaptive_enabled":bool(learning is not None and learning.bandit_enabled),
                "deep_search":deep_search,
                "joint_search":joint_search or deep_search,
-               "scope":"single page; adaptive batches, native right-associated AND/OR guards, existential release-window guards, first-divergence clock/priority repairs, same-action subset rebuilds to 2/3 rules, global insertion rebuilds (24 candidates/pass), beam width 4/depth 2, SAT windows 3x3" + ("; experimental competing-action rebuilds with up to 12 separate counterexample branches" if joint_search or deep_search else "") + ("; experimental whole-program beam with up to 12 separate counterexample branches" if deep_search else "")}
+               "scope":"single page; adaptive batches, native right-associated AND/OR guards, observed event first-witness window queries, first-divergence clock/priority repairs, same-action subset rebuilds to 2/3 rules, global insertion rebuilds (24 candidates/pass), beam width 4/depth 2, SAT windows 3x3" + ("; optional joint native-chain regions on separate reached/certified paths" if region_search else "") + ("; experimental competing-action rebuilds with up to 12 separate counterexample branches" if joint_search or deep_search else "") + ("; experimental whole-program beam with up to 12 separate counterexample branches" if deep_search else "")}
     progress(dict(summary))
+
+    def guide_for(replay, program, kind='certified'):
+        started = time.perf_counter()
+        guide = Samples(replay['rows'],atoms,actions,check,dict(contract_id=contract_id,
+            macro_sha256=hashlib.sha256(render(program).encode()).hexdigest(),kind=kind))
+        summary['sample_ms'] += (time.perf_counter()-started)*1000
+        return guide
+
+    def candidates(iterable):
+        iterator = iter(iterable)
+        while True:
+            check()
+            started = time.perf_counter()
+            try:
+                proposal = next(iterator)
+            except StopIteration:
+                summary['candidate_ms'] += (time.perf_counter()-started)*1000
+                return
+            summary['candidate_ms'] += (time.perf_counter()-started)*1000
+            yield proposal
+
+    def prepare(kind,trial,text,cost):
+        if learning is None:
+            return None
+        path_id = getattr(active_path,'path_id',contract_id)
+        key = (text,path_id,summary['best_chars'])
+        if key not in prepared:
+            values = learning_module.features(best,trial,atoms,summary['best_chars'],cost)
+            prepared[key] = learning.prepare(hashlib.sha256(text.encode()).hexdigest(),path_id,
+                                            kind,values,summary['best_chars'],cost)
+        return prepared[key]
 
     def evaluate(kind, trial, allow_equal=False, batch_rules=0, repair_depth=0):
         nonlocal best,best_replay
@@ -706,6 +831,8 @@ def compress(rules, atoms, actions, baseline, render, verify, check,
             summary['repair_trials'] += 1
         if kind.startswith('window_'):
             summary['window_trials'] += 1
+        if kind.startswith('region_'):
+            summary['region_trials'] += 1
         if kind == 'beam_timing_alias':
             summary['timing_trials'] += 1
         summary["method"] = kind
@@ -713,11 +840,18 @@ def compress(rules, atoms, actions, baseline, render, verify, check,
         if batch_rules:
             summary['batch_trials'] += 1
         progress(dict(summary))
+        learning_record = prepare(kind,trial,text,cost)
+        started_verify = time.perf_counter()
         replay = verify(text, summary["trial_count"], kind)
+        summary['verify_wall_ms'] += (time.perf_counter()-started_verify)*1000
         passed = certified(replay)
+        if learning_record is not None:
+            observations.append(learning.feedback(learning_record,replay,binding=learning_record['binding']))
+            summary['learning_labels'] = learning.labels
         records.append({"trial":summary["trial_count"],"kind":kind,"chars":cost,
                         "batch_rules":batch_rules,
                         "accepted":passed and cost < summary["best_chars"],
+                        "source_path":getattr(active_path,'path_id',None),
                         "comparison":replay.get("comparison"),"timings_ms":replay.get("timings_ms",{})})
         # A timing error calls for clock repair; a short, otherwise promising
         # program may need one missing priority context. Bad early structural
@@ -732,7 +866,7 @@ def compress(rules, atoms, actions, baseline, render, verify, check,
                       and repair_depth < 12
                       and cost < summary['best_chars']
                       and (same_skill or prefix >= max(8, comparison.get('target_count', 0)//3)))
-        search_branch = kind.startswith(('global_', 'joint_')) and feedback_source is not None
+        search_branch = kind.startswith(('global_', 'joint_', 'region_')) and feedback_source is not None
         reached = None
         if not passed and (repairable or search_branch):
             # Text deduplication already prevents repeating a full candidate.
@@ -740,10 +874,13 @@ def compress(rules, atoms, actions, baseline, render, verify, check,
             # equal action fingerprints do not authorize sharing its feedback.
             rows = replay.get('rows', [])
             complete = rows and all(len(r.get('truth', ())) == len(atoms) for r in rows)
+            started_feedback = time.perf_counter()
             reached = replay if complete and feedback is None else (
                 feedback(text,replay,summary['trial_count'],kind) if feedback is not None else None)
+            summary['feedback_wall_ms'] += (time.perf_counter()-started_feedback)*1000
             joint = kind.startswith('joint_')
-            proposal = branch_guide(reached,feedback_source,() if joint else branch_seen) if search_branch else None
+            proposal = branch_guide(reached,feedback_source,() if joint else branch_seen,
+                                    candidate_text=text) if search_branch else None
             if proposal is not None:
                 cursor,signature,guide = proposal
                 identity = (signature,text) if joint else signature
@@ -762,16 +899,24 @@ def compress(rules, atoms, actions, baseline, render, verify, check,
             repairs.append((prefix, -repeat, -drift, -cost, text, clone(trial), reached, repair_depth))
             repairs.sort(key=lambda item:item[:5], reverse=True)
             del repairs[12:]
+        if passed and cost == summary['best_chars'] and region_search:
+            alternatives.append((clone(trial),replay))
+            del alternatives[:-4]
+            summary['certified_alternatives'] += 1
         if passed and cost < summary["best_chars"]:
             best,best_replay = clone(trial),replay
             summary.update(best_chars=cost,saved_chars=initial-cost,accepted_count=summary["accepted_count"]+1)
             summary['max_batch_rules'] = max(summary['max_batch_rules'],batch_rules)
             accepted(text,replay,dict(summary))
             progress(dict(summary))
+            alternatives.clear()
+            if learning is not None:
+                learning.best_changed(hashlib.sha256(text.encode()).hexdigest())
         return replay if passed else None
 
-    def repair_pass():
+    def repair_pass_inner():
         """A finite local turn, with every descendant replayed independently."""
+        nonlocal active_path
         initial_cost = summary['best_chars']
         start_trials = summary['repair_trials']
         expanded = 0
@@ -781,6 +926,7 @@ def compress(rules, atoms, actions, baseline, render, verify, check,
             if text in repair_seen:
                 continue
             repair_seen.add(text)
+            active_path = guide_for(replay,seed,'aligned_repair_prefix')
             expanded += 1
             summary['repair_expansions'] += 1
             diagnostic({'kind':'first_divergence_repair', 'depth':depth,
@@ -793,14 +939,76 @@ def compress(rules, atoms, actions, baseline, render, verify, check,
                 if summary['repair_trials']-start_trials >= 96:
                     break
 
-    def ordered(candidates):
+    def repair_pass():
+        nonlocal active_path
+        previous = active_path
+        try:
+            repair_pass_inner()
+        finally:
+            active_path = previous
+
+    def ordered(iterable):
         unique = {}
-        for kind,trial in candidates:
+        for kind,trial in candidates(iterable):
             check()
             text = render(trial)
             if text not in seen and char_count(text) < summary["best_chars"]:
                 unique.setdefault(text,(char_count(text),text,kind,trial))
-        return [(kind,trial) for _,_,kind,trial in sorted(unique.values(),key=lambda p:(p[0],p[1]))]
+        items = sorted(unique.values(),key=lambda p:(p[0],p[1]))
+        if learning is not None:
+            ranked = learning.rank([prepare(kind,trial,text,cost) for cost,text,kind,trial in items])
+            by_text = {hashlib.sha256(text.encode()).hexdigest():(kind,trial) for _,text,kind,trial in items}
+            return [by_text[record['binding']['candidate_hash']] for record in ranked]
+        return [(kind,trial) for _,_,kind,trial in items]
+
+    def strategy_pass(tasks,guide):
+        names = list(tasks)
+        if learning is not None:
+            names = learning.strategy_order(names,dict(
+                duplicate_fraction=1-len({r['action'] for r in best})/max(1,len(best)),
+                complexity_fraction=sum(complex_guard(r) for r in best)/max(1,len(best))))
+        old_cost = summary['best_chars']
+        for name in names:
+            check()
+            started,offset = time.perf_counter(),len(observations)
+            # Family generation deliberately interleaves actions/shapes.
+            # Preserve that fairness unless optional ranking is enabled.
+            stream = (ordered(tasks[name]()) if learning is not None and learning.enabled
+                      else candidates(tasks[name]()))
+            for kind,trial in stream:
+                evaluate(kind,trial)
+                if summary['best_chars'] < old_cost:
+                    break
+            elapsed = (time.perf_counter()-started)*1000
+            summary.setdefault('strategy_ms',{}).setdefault(name,0.0)
+            summary['strategy_ms'][name] += elapsed
+            if learning is not None:
+                diagnostic(learning.strategy_feedback(name,observations[offset:],elapsed),None)
+            if summary['best_chars'] < old_cost:
+                return
+
+    def region_pass(seed, guide):
+        nonlocal feedback_source, active_path
+        previous_source, previous_path = feedback_source, active_path
+        feedback_source, active_path = guide, guide
+        old_cost = summary['best_chars']
+        old_trials = summary['region_trials']
+        try:
+            # Short fair turns rotate regions before increasing expression
+            # size. Equal-cost certified models are bridge paths, not a new
+            # user best. These are per-turn limits, never language bounds.
+            for turn in range(3):
+                for kind,trial in candidates(region_edits(seed,guide,check_solver,diagnostic,
+                        cost_bound=old_cost+2,allow_equal=True,region_offset=2*turn,
+                        timeout_ms=(100,300,500)[turn],max_terms=(3,3,4)[turn],
+                        max_models=2 if turn else 1)):
+                    evaluate(kind,trial,allow_equal=True)
+                    if summary['best_chars'] < old_cost:
+                        return
+            if summary['region_trials'] > old_trials:
+                repair_pass()
+        finally:
+            feedback_source, active_path = previous_source, previous_path
 
     def run_batch(kind, source, samples, patches):
         # Independent static edits are only a plan. Execute the whole plan
@@ -840,7 +1048,8 @@ def compress(rules, atoms, actions, baseline, render, verify, check,
         old_cost = summary["best_chars"]
         # This cheap first-match check routes expensive replays toward plausible
         # edits. Rejected sample shapes are not a language-level UNSAT claim.
-        samples = Samples(best_replay["rows"],atoms,actions,check)
+        samples = guide_for(best_replay,best)
+        active_path = samples
         run_batch('batch_basic',clone(best),samples,basic_batch(best,samples,actions))
         if summary['best_chars'] < old_cost:
             continue
@@ -872,47 +1081,18 @@ def compress(rules, atoms, actions, baseline, render, verify, check,
         # improving a compact program. This chooses ordering, not language size.
         window_first = len(best) <= 2*len({rule['action'] for rule in best})
         summary['route'] = 'compact_windows_first' if window_first else 'dense_families_first'
+        tasks = {
+            'family':lambda:family_edits(best,samples,diagnostic),
+            'native_priority':lambda:priority_edits(best,samples,native=True),
+            'priority':lambda:priority_edits(best,samples),
+        }
         if window_first:
-            for kind, trial in window_edits(best, samples):
-                evaluate(kind, trial)
-                if summary['best_chars'] < old_cost:
-                    break
-            if summary['best_chars'] < old_cost:
-                continue
-        # A repeated action may need several priority regions. Rebuild a
-        # donor subset into multiple guards together; intermediate programs
-        # need not reproduce the target. Keep action/shape diversity instead
-        # of letting one cheapest family consume every replay slot.
-        for kind,trial in family_edits(best,samples,diagnostic):
-            evaluate(kind,trial)
-            if summary['best_chars'] < old_cost:
-                break
+            tasks = {'window':lambda:window_edits(best,samples),**tasks}
+        else:
+            tasks['window'] = lambda:window_edits(best,samples)
+        strategy_pass(tasks,samples)
         if summary['best_chars'] < old_cost:
             continue
-        # Native guard rebuilding includes joint replacement and priority;
-        # try the productive broader neighbourhood before local SAT/beam.
-        for kind,trial in priority_edits(best,samples,native=True):
-            evaluate(kind,trial)
-            if summary['best_chars'] < old_cost:
-                break
-        if summary['best_chars'] < old_cost:
-            continue
-        # Cross-region placement, replacement and deletion form ONE candidate.
-        # Its intermediate programs need not be valid. The static filter is
-        # only guidance; every admitted result still gets native certification.
-        for kind,trial in priority_edits(best,samples):
-            evaluate(kind,trial)
-            if summary['best_chars'] < old_cost:
-                break
-        if summary['best_chars'] < old_cost:
-            continue
-        if not window_first:
-            for kind, trial in window_edits(best, samples):
-                evaluate(kind, trial)
-                if summary['best_chars'] < old_cost:
-                    break
-            if summary['best_chars'] < old_cost:
-                continue
         repair_pass()
         if summary['best_chars'] < old_cost:
             continue
@@ -922,7 +1102,7 @@ def compress(rules, atoms, actions, baseline, render, verify, check,
         if joint_search or deep_search:
             feedback_source = samples
             branches.clear()
-            for kind,trial in joint_edits(best,samples,diagnostic):
+            for kind,trial in candidates(joint_edits(best,samples,diagnostic)):
                 evaluate(kind,trial)
                 if summary['best_chars'] < old_cost:
                     break
@@ -934,6 +1114,7 @@ def compress(rules, atoms, actions, baseline, render, verify, check,
                 if not branches or summary['best_chars'] < old_cost:
                     break
                 cursor,_,guide,seed = branches.pop(0)
+                active_path = guide
                 summary['joint_branches'] += 1
                 diagnostic({'kind':'joint_counterexample_branch','branch':branch+1,
                             'cursor':cursor,'guide_rows':len(guide.rows)},None)
@@ -947,9 +1128,14 @@ def compress(rules, atoms, actions, baseline, render, verify, check,
                         break
                 repair_pass()
             feedback_source = None
+            active_path = samples
         if summary['best_chars'] < old_cost:
             continue
-        for kind,trial in local_rewrites(best,samples,render,check_solver,diagnostic):
+        if region_search:
+            region_pass(best,samples)
+            if summary['best_chars'] < old_cost:
+                continue
+        for kind,trial in candidates(local_rewrites(best,samples,render,check_solver,diagnostic)):
             evaluate(kind,trial)
             if summary["best_chars"] < old_cost:
                 break
@@ -958,14 +1144,15 @@ def compress(rules, atoms, actions, baseline, render, verify, check,
         # An accepted source can still use an incidental early clock. Explore
         # nearby legal clocks independently, then learn from EACH newly
         # certified trajectory. No original or alternative rows are pooled.
-        for kind, trial in timing_edits(best, samples, best_replay):
+        for kind, trial in candidates(timing_edits(best, samples, best_replay)):
             alternate = evaluate(kind, trial, allow_equal=True)
             if summary['best_chars'] < old_cost:
                 break
             if alternate is None:
                 continue
-            guide = Samples(alternate['rows'], atoms, actions, check)
-            for child_kind, child in window_edits(trial, guide):
+            guide = guide_for(alternate,trial,'certified_clock_alternative')
+            active_path = guide
+            for child_kind, child in candidates(window_edits(trial, guide)):
                 evaluate(child_kind, child)
                 if summary['best_chars'] < old_cost:
                     break
@@ -980,7 +1167,8 @@ def compress(rules, atoms, actions, baseline, render, verify, check,
         for depth in range(2):
             next_frontier = []
             for base,base_replay in frontier:
-                guide = Samples(base_replay["rows"],atoms,actions,check)
+                guide = guide_for(base_replay,base,'certified_priority_alternative')
+                active_path = guide
                 for i in range(len(base)-1):
                     check()
                     trial = clone(base)
@@ -994,7 +1182,8 @@ def compress(rules, atoms, actions, baseline, render, verify, check,
                 if len(next_frontier) >= 4:
                     break
             for base,base_replay in next_frontier:
-                guide = Samples(base_replay["rows"],atoms,actions,check)
+                guide = guide_for(base_replay,base,'certified_priority_alternative')
+                active_path = guide
                 proposals = (list(simple_edits(base,actions,check)) + list(or_edits(base,guide))
                              + list(feature_edits(base,guide)))
                 for kind,trial in ordered(proposals):
@@ -1007,12 +1196,43 @@ def compress(rules, atoms, actions, baseline, render, verify, check,
             if summary["best_chars"] < old_cost or not next_frontier:
                 break
             frontier = next_frontier
+        if summary['best_chars'] == old_cost:
+            # Extend the fast search at stagnation rather than replace its
+            # useful action/shape trajectory with an incidental new witness.
+            active_path = samples
+            for kind,trial in candidates(event_window_edits(best,samples)):
+                evaluate(kind,trial)
+                if summary['best_chars'] < old_cost:
+                    break
+        if summary['best_chars'] < old_cost:
+            continue
+        if summary['best_chars'] == old_cost and region_search:
+            # Each certified alternative is independently recertified from
+            # t=0, then revisited by the broader generators on its own path.
+            for seed,replay in list(alternatives):
+                guide = guide_for(replay,seed,'certified_alternative')
+                active_path = guide
+                for kind,trial in candidates(family_edits(seed,guide,diagnostic)):
+                    evaluate('alternate_'+kind,trial)
+                    if summary['best_chars'] < old_cost:
+                        break
+                if summary['best_chars'] == old_cost:
+                    region_pass(seed,guide)
+                if summary['best_chars'] < old_cost:
+                    break
+            # A reached failed path remains a separate speculative branch.
+            for cursor,_,guide,seed in list(branches[:2]):
+                if summary['best_chars'] < old_cost:
+                    break
+                diagnostic({'kind':'region_counterexample_branch','cursor':cursor,
+                            'path_id':guide.path_id},None)
+                region_pass(seed,guide)
         if summary["best_chars"] == old_cost:
             if not deep_search:
                 break
             feedback_source = samples
             branches.clear()
-            for kind,trial in global_edits(best,samples,check_solver,diagnostic):
+            for kind,trial in candidates(global_edits(best,samples,check_solver,diagnostic)):
                 evaluate(kind,trial)
                 if summary['best_chars'] < old_cost:
                     break
@@ -1024,11 +1244,12 @@ def compress(rules, atoms, actions, baseline, render, verify, check,
                 if not branches or summary['best_chars'] < old_cost:
                     break
                 cursor,_,guide,_ = branches.pop(0)
+                active_path = guide
                 summary['global_branches'] += 1
                 diagnostic({'kind':'global_counterexample_branch','branch':branch+1,
                             'cursor':cursor,'guide_rows':len(guide.rows)},None)
                 progress(dict(summary))
-                for kind,trial in global_edits(best,guide,check_solver,diagnostic):
+                for kind,trial in candidates(global_edits(best,guide,check_solver,diagnostic)):
                     evaluate(kind,trial)
                     if summary['best_chars'] < old_cost:
                         break

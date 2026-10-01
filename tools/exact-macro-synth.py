@@ -825,6 +825,9 @@ def main():
     parser.add_argument("--compress", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--compress-deep", action="store_true", help="experimental whole-program CEGIS after ordinary compression stalls")
     parser.add_argument("--compress-joint", action="store_true", help="experimental competing-action compression after ordinary compression stalls")
+    parser.add_argument("--compress-region", action="store_true", help="optional bounded joint region turns after ordinary search stalls")
+    parser.add_argument("--compress-learning", action="store_true", help="optional task-local candidate ranking")
+    parser.add_argument("--compress-adaptive", action="store_true", help="optional task-local strategy ordering")
     parser.add_argument("--strategy", choices=("prototype", "bounded"), default="prototype")
     args = parser.parse_args()
     run_job(args)
@@ -1041,6 +1044,14 @@ def run_job(args):
             if not args.compress:
                 return
             module = compression_module()
+            oracle_id = hashlib.sha256(args.exe.read_bytes()).hexdigest()
+            learning = None
+            if getattr(args,'compress_learning',False) or getattr(args,'compress_adaptive',False):
+                lm = module.search_module('exact_macro_learning')
+                scene_id = hashlib.sha256(json.dumps(scene,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+                learning = lm.LearningSession(scene_id,oracle_id,'local:'+scene_id,
+                    enabled=getattr(args,'compress_learning',False),
+                    bandit_enabled=getattr(args,'compress_adaptive',False))
             compression_started, compression_paused = time.perf_counter(), PAUSED_SECONDS
             frozen = json.loads(json.dumps(scene))
             write(args.out / "compression-contract.json", {"scene":frozen,
@@ -1054,7 +1065,11 @@ def run_job(args):
             def progress(summary):
                 report["compression"] = summary
                 write(args.out / "compression-summary.json", summary)
-                print(json.dumps({"phase":"compressing", "stage":"compression", "compression":summary}), flush=True)
+                # Profiling, source hashes and model statistics are private
+                # evidence. The UI only needs counters for the live preview.
+                public = {k:summary[k] for k in ('status','initial_chars','best_chars','saved_chars',
+                    'trial_count','accepted_count','method','last_batch_rules') if k in summary}
+                print(json.dumps({"phase":"compressing", "stage":"compression", "compression":public}), flush=True)
             def boundary():
                 check_cancelled()
                 if time.perf_counter()-started-PAUSED_SECONDS >= args.seconds:
@@ -1105,7 +1120,9 @@ def run_job(args):
                     local_check, accepted, progress, diagnostic,
                     lambda:time.perf_counter()-started-PAUSED_SECONDS < args.seconds,
                     feedback=counterexample,deep_search=getattr(args,'compress_deep',False),
-                    joint_search=getattr(args,'compress_joint',False))
+                    joint_search=getattr(args,'compress_joint',False),
+                    region_search=getattr(args,'compress_region',False),learning=learning,
+                    contract=dict(scene=frozen,oracle_sha256=oracle_id))
                 report["comparison"] = compact_replay["comparison"]
                 report["compression_stop"] = summary["status"]
                 write(args.out / "compression.json", trials)
@@ -1113,6 +1130,8 @@ def run_job(args):
                 # Stop/error must leave the last certified macro and its full
                 # evidence intact. Partial pending trials never replace it.
                 write(args.out / "compression-summary.json", report["compression"])
+                if learning is not None:
+                    write(args.out / "compression-learning.json",learning.to_dict())
                 report["compression_elapsed_ms"] = max(0, (time.perf_counter()-compression_started
                                                             -PAUSED_SECONDS+compression_paused)*1000)
                 report["compression_solve_ms"] = sum(item.get("solve_ms",0) for item in local_constraints)

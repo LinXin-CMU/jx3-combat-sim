@@ -11,6 +11,9 @@ from pathlib import Path
 import pstats
 import re
 import time
+import hashlib
+import subprocess
+import inspect
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -33,6 +36,10 @@ def main():
     parser.add_argument('--screening', action='store_true')
     parser.add_argument('--deep',action='store_true',help='Experimental whole-program counterexample search')
     parser.add_argument('--joint',action='store_true',help='Experimental competing-action counterexample search')
+    parser.add_argument('--region',action='store_true',help='Joint native-chain region search')
+    parser.add_argument('--learning',action='store_true',help='Optional candidate ranking; heldout contracts stay frozen')
+    parser.add_argument('--adaptive',action='store_true',help='Optional measured strategy allocation')
+    parser.add_argument('--source-group',default='holdout:fixed325')
     parser.add_argument('--macro', type=Path, help='Certified input macro; defaults to exact.txt')
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
@@ -65,9 +72,21 @@ def main():
         return result
     baseline = full_verify(synth.macro_text(rules,atoms,actions))
     assert module.certified(baseline)
+    (args.out/'best.txt').write_text(synth.macro_text(rules,atoms,actions),encoding='utf-8')
+    synth.write(args.out/'best-verified.json',baseline)
     started = time.perf_counter()
     report = {'initial_chars':module.char_count(synth.macro_text(rules,atoms,actions)),
-              'curve':[], 'trials':[], 'solvers':[], 'summary':{}, 'status':'running'}
+              'curve':[], 'trials':[], 'solvers':[], 'summary':{}, 'status':'running',
+              'versions':dict(git=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT).decode().strip(),
+                  oracle_sha256=hashlib.sha256(args.exe.read_bytes()).hexdigest(),
+                  scene_sha256=hashlib.sha256(json.dumps(scene,sort_keys=True,separators=(',',':')).encode()).hexdigest(),
+                  module_sha256=hashlib.sha256(args.module.read_bytes()).hexdigest())}
+    learner = None
+    if args.learning or args.adaptive:
+        lm = load('learning',ROOT/'tools/exact_macro_learning.py')
+        learner = lm.LearningSession(report['versions']['scene_sha256'],
+            report['versions']['oracle_sha256'],args.source_group,enabled=args.learning,
+            bandit_enabled=args.adaptive,split='test' if args.source_group.startswith('holdout:') else 'train')
     profiler = cProfile.Profile() if args.profile else None
     def check():
         if time.perf_counter()-started > args.seconds:
@@ -99,10 +118,13 @@ def main():
     try:
         if profiler:
             profiler.enable()
+        extras = {'region_search':args.region,'learning':learner} if args.region or learner else {}
+        if 'contract' in inspect.signature(module.compress).parameters:
+            extras['contract'] = dict(scene=scene,oracle_sha256=report['versions']['oracle_sha256'])
         module.compress(rules,atoms,actions,baseline,lambda r:synth.macro_text(r,atoms,actions),
                         verify,check,lambda solver:solver.check(),accepted,progress,
                         lambda info,smt:report['solvers'].append(info),feedback=counterexample,deep_search=args.deep,
-                        joint_search=args.joint)
+                        joint_search=args.joint,**extras)
         report['status'] = 'scope_exhausted'
     except TimeoutError:
         report['status'] = 'observation_ended'
@@ -114,6 +136,8 @@ def main():
                 pstats.Stats(profiler,stream=output).sort_stats('tottime').print_stats(25)
         report['elapsed_s'] = time.perf_counter()-started
         report['oracle_s'] = sum(t['timings_ms'].get('verification_total',0) for t in report['trials'])/1000
+        if learner:
+            synth.write(args.out/'learning.json',learner.to_dict())
         oracle.close()
         synth.write(args.out/'benchmark.json',report)
         print(json.dumps({k:report[k] for k in ['status','elapsed_s','oracle_s','summary']},ensure_ascii=False),flush=True)

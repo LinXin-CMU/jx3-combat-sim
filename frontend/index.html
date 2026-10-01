@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>剑网3 苍云PVE循环模拟器</title>
   <link rel="icon" href="favicon.ico" type="image/x-icon">
-  <link rel="stylesheet" href="style.css?v=20261001-stage2windows1">
-  <link rel="stylesheet" href="agent.css?v=20261001-stage2windows1">
-  <link rel="stylesheet" href="macro-assist.css?v=20261001-stage2windows1">
-  <link rel="stylesheet" href="assistant-shell.css?v=20261001-stage2windows1">
-  <link rel="stylesheet" href="macro-exact.css?v=20261001-stage2windows1">
-  <link rel="stylesheet" href="loop-tabs.css?v=20261001-stage2windows1">
+  <link rel="stylesheet" href="style.css?v=20261002-exactworkplan1">
+  <link rel="stylesheet" href="agent.css?v=20261002-exactworkplan1">
+  <link rel="stylesheet" href="macro-assist.css?v=20261002-exactworkplan1">
+  <link rel="stylesheet" href="assistant-shell.css?v=20261002-exactworkplan1">
+  <link rel="stylesheet" href="macro-exact.css?v=20261002-exactworkplan1">
+  <link rel="stylesheet" href="loop-tabs.css?v=20261002-exactworkplan1">
 </head>
 <body>
   <div class="container">
@@ -18,7 +18,7 @@
     <div class="top-bar">
       <div class="tb-brand" title="分山劲伤害计算器 · 苍云 · 外功 · 130级">
         <span class="tb-brand-name tb-brand-shimmer" data-text="苍云器灵">苍云器灵</span>
-        <span class="tb-brand-tag">v2.1.0-20261001.3</span>
+        <span class="tb-brand-tag">v2.1.0-20261002.1</span>
       </div>
       <button class="tb-btn" id="btn_mount_picker" title="切换心法 / 武学版本">
         <span class="tb-label">心法</span>
@@ -2900,7 +2900,7 @@
       s.onload = next; s.onerror = next;
       document.body.appendChild(s);
     }
-    var SCRIPTS = ['state.js?v=20261001-stage2windows1', 'macro-solidify.js?v=20261001-stage2windows1', 'app.js?v=20261001-stage2windows1', 'macro-alignment.js?v=20261001-stage2windows1', 'macro-layout.js?v=20261001-stage2windows1', 'macro-state-diff.js?v=20261001-stage2windows1', 'macro-draft-panes.js?v=20261001-stage2windows1', 'macro-repair.js?v=20261001-stage2windows1', 'macro-repair-group.js?v=20261001-stage2windows1', 'macro-repair-search.js?v=20261001-stage2windows1', 'macro-repair-panel.js?v=20261001-stage2windows1', 'macro-diagnostic.js?v=20261001-stage2windows1', 'macro-editor.js?v=20261001-stage2windows1', 'macro-assist.js?v=20261001-stage2windows1', 'loop-tabs.js?v=20261001-stage2windows1', 'agent.js?v=20261001-stage2windows1', 'assistant-shell.js?v=20261001-stage2windows1', 'harness-workspace.js?v=20261001-stage2windows1', 'macro-exact.js?v=20261001-stage2windows1'];
+    var SCRIPTS = ['state.js?v=20261002-exactworkplan1', 'macro-solidify.js?v=20261002-exactworkplan1', 'app.js?v=20261002-exactworkplan1', 'macro-alignment.js?v=20261002-exactworkplan1', 'macro-layout.js?v=20261002-exactworkplan1', 'macro-state-diff.js?v=20261002-exactworkplan1', 'macro-draft-panes.js?v=20261002-exactworkplan1', 'macro-repair.js?v=20261002-exactworkplan1', 'macro-repair-group.js?v=20261002-exactworkplan1', 'macro-repair-search.js?v=20261002-exactworkplan1', 'macro-repair-panel.js?v=20261002-exactworkplan1', 'macro-diagnostic.js?v=20261002-exactworkplan1', 'macro-editor.js?v=20261002-exactworkplan1', 'macro-assist.js?v=20261002-exactworkplan1', 'loop-tabs.js?v=20261002-exactworkplan1', 'agent.js?v=20261002-exactworkplan1', 'assistant-shell.js?v=20261002-exactworkplan1', 'harness-workspace.js?v=20261002-exactworkplan1', 'macro-exact.js?v=20261002-exactworkplan1'];
     var go = function () { loadSeq(SCRIPTS); };
     try {
       fetch('/api/settings', { cache: 'no-store' })

@@ -76,3 +76,15 @@ cd ..
 后台可用 `JX3_EXACT_PYTHON` 指定依赖齐全的解释器。oracle 在加载真实用户设置之前进入本地协议，不读写真实 userdata。第一阶段与第二阶段都保留本地场景、条件、规则、比较及求解状态证据。
 
 当前结果及失败路线见 [原生条件搜索记录](baselines/2026-10-01-exact-macro-native-search.md)、[同技能多规则重建记录](baselines/2026-10-01-exact-macro-family-search.md) 与 [释放窗口及认证时钟替换记录](baselines/2026-10-01-exact-macro-window-compression.md)。最新固定长例为 397 字、10 行，325/325 技能及时间验收通过，容差仍为 62.5ms。文中的性能是单个固定案例实测，不代表所有循环或多人负载。
+
+## 2026-10-02 窗口、区域与可选学习
+
+保留原来的快速窗口提案顺序；停滞时通过 `GuardQuery` 按动作和插入位置扩展到完整观察窗口。新窗口筛选按同事件首个合法见证检查，不能强迫较早合法施放之后再次在旧尾点命中。单点窗口不重复展开；时间条件仍由完整原生回放认证。
+
+`exact_macro_region.py` 与 `exact_macro_region_sat.py` 联合选择同动作或跨动作区域的条件、动作、行数与插入位置，外部固定规则参与首命中。可选开关 `--compress-region` 使用短时间片轮转，再增大有限表达规模；认证等长候选保留各自轨迹。UNKNOWN 不是无解。该入口支持一页宏，不能据此声称完成多页通用合成。
+
+`exact_macro_learning.py` 提供任务内在线通过概率/成本估计和上下文策略排序。`--compress-learning` 与 `--compress-adaptive` 默认关闭，始终保留探索及全部候选，不替代认证。语料离线入口为 `exact_macro_corpus.py`，原文只留在忽略目录，固定参考家族隔离；运行时不查询模板答案。
+
+新增合同、路径、性能与学习诊断只留后端。worker 的最终报告和实时压缩事件均仅输出必要状态。运行文件清单为 `tools/exact-macro-runtime-files.json`，包含区域/SAT/学习模块，不包含原始语料或模型快照。
+
+本轮 203 项必要回归、原生条件/等待/引导检查和真实 worker 暂停/停止通过。短例三种模式都得到178字且23/23完整认证；区域和学习没有净收益证据，因此不改变网页默认策略。长例维持397字，最新3110起点约206秒达到397字。实现及失败路径见[执行记录](baselines/2026-10-02-exact-macro-workplan-execution.md)；数据边界见[公开宏语料记录](baselines/2026-10-02-exact-macro-corpus.md)。

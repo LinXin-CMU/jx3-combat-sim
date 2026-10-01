@@ -3,9 +3,40 @@
 Sample masks only screen proposals. The caller must replay and certify every
 whole relocate/replace/delete edit against its unchanged original contract.
 """
+from typing import NamedTuple
 
 
-def priority_edits(rules, samples, clone, limit=24, condition_search=None):
+class GuardQuery(NamedTuple):
+    """Observed event windows at one insertion gap of one source path."""
+    action: int
+    reachable: int
+    negatives: int
+    windows: tuple
+    events: tuple
+    path_id: str
+
+
+def event_query(samples, action, positives, reachable, survivors):
+    # Old selections identify the affected events only. They must not restrict
+    # the new witness to the old cast instant within an accepted time window.
+    covered, remaining = 0, samples.all
+    for rule in survivors:
+        selected = remaining & samples.hit(rule)
+        covered |= selected & samples.allowed[rule['action']]
+        remaining &= ~selected
+    windows, events = [], []
+    for event, group in samples.groups.items():
+        if not group & positives or group & covered:
+            continue
+        windows.append(group & reachable & samples.allowed[action] & samples.executable[action])
+        events.append(event)
+    return GuardQuery(action, reachable,
+        reachable & samples.executable[action] & ~samples.allowed[action],
+        tuple(windows), tuple(events), getattr(samples, 'path_id', 'unbound'))
+
+
+def priority_edits(rules, samples, clone, limit=24, condition_search=None, window_search=None,
+                   group_filter=None):
     """Yield the shortest distinct, sample-compatible global-position edits.
 
     Rebuild a single rule, a same-action pair, or a whole action family at any
@@ -64,6 +95,8 @@ def priority_edits(rules, samples, clone, limit=24, condition_search=None):
     candidates = {}
     for group,action in dict.fromkeys(groups):
         samples.check()
+        if group_filter is not None and not group_filter(group,action):
+            continue
         removed = set(group)
         positives = 0
         survivors, survivor_cost = [], 0
@@ -88,7 +121,7 @@ def priority_edits(rules, samples, clone, limit=24, condition_search=None):
         prefix_remaining = samples.all
         for position in range(len(survivors) + 1):
             samples.check()
-            if condition_search is not None or position not in known_gaps:
+            if condition_search is not None or window_search is not None or position not in known_gaps:
                 negatives = (prefix_remaining & samples.executable[action]
                              & ~samples.allowed[action])
                 replacements = [
@@ -98,6 +131,13 @@ def priority_edits(rules, samples, clone, limit=24, condition_search=None):
                 if condition_search is not None:
                     replacements.extend(dict(guard, action=action) for guard in
                                         condition_search(positives & prefix_remaining, negatives, samples))
+                if window_search is not None:
+                    query = event_query(samples, action, positives, prefix_remaining, survivors)
+                    # An empty affected window is a local query failure, not
+                    # proof that the target has no native macro.
+                    if all(query.windows):
+                        replacements.extend(dict(guard, action=action) for guard in
+                                            window_search(query, samples))
                 # Keeping a guard may become sufficient at a different
                 # priority, especially when other donors disappear atomically.
                 replacements.extend(dict(clone([source[index]])[0],action=action) for index in group)
@@ -114,10 +154,13 @@ def priority_edits(rules, samples, clone, limit=24, condition_search=None):
                     if key in seen:
                         continue
                     seen.add(key)
-                    if not samples.compatible(trial):
+                    compatible = (getattr(samples, 'window_compatible', samples.compatible)
+                                  if window_search is not None else samples.compatible)
+                    if not compatible(trial):
                         continue
                     shape = "single" if len(group) == 1 else "pair" if len(group) == 2 else "family"
-                    kind = ("native_guard_rebuild_" if condition_search is not None else "priority_rebuild_") + shape
+                    kind = ("window_guard_rebuild_" if window_search is not None else
+                            "native_guard_rebuild_" if condition_search is not None else "priority_rebuild_") + shape
                     candidates[key] = (cost, key, kind, trial)
             if position < len(survivors):
                 prefix_remaining &= ~samples.hit(survivors[position])

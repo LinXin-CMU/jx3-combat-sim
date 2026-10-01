@@ -1,0 +1,20 @@
+{
+  "schema": "exact-macro-runtime-files-v1",
+  "pipeline_version": "20261002-window-region-v1",
+  "files": [
+    "exact-macro-synth.py",
+    "exact-macro-worker.py",
+    "exact_macro_compress.py",
+    "exact_macro_conditions.py",
+    "exact_macro_reorder.py",
+    "exact_macro_family.py",
+    "exact_macro_joint.py",
+    "exact_macro_global.py",
+    "exact_macro_repair.py",
+    "exact_macro_region.py",
+    "exact_macro_region_sat.py",
+    "exact_macro_learning.py",
+    "requirements-exact-macro.txt"
+  ],
+  "excluded": ["exact_macro_corpus.py", "raw corpus", "training logs", "model snapshots", "userdata"]
+}

@@ -23,6 +23,9 @@ def main():
     parser.add_argument("--exe", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--compress", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--compress-region", action="store_true")
+    parser.add_argument("--compress-learning", action="store_true")
+    parser.add_argument("--compress-adaptive", action="store_true")
     args = parser.parse_args()
     try:
         spec = importlib.util.spec_from_file_location("exact_synth", Path(__file__).with_name("exact-macro-synth.py"))
@@ -86,7 +89,12 @@ def main():
         if not best.exists():
             best = args.out / "target.json"
     # The report/trajectories remain on disk. Only UI fields cross HTTP.
-    result = {"report": {k:report[k] for k in ("status", "reason", "comparison", "total_solve_ms", "compression", "compression_stop") if k in report},
+    public_report = {k:report[k] for k in ("status", "reason", "comparison", "total_solve_ms", "compression_stop") if k in report}
+    if report.get('compression'):
+        public_report['compression'] = {k:report['compression'][k] for k in (
+            'status','initial_chars','best_chars','saved_chars','trial_count','accepted_count',
+            'method','last_batch_rules') if k in report['compression']}
+    result = {"report": public_report,
               "macro": macro.read_text(encoding="utf-8") if macro.exists() else None}
     (args.out / "result.json").write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
     emit({"phase": "finished", "status": report["status"]})

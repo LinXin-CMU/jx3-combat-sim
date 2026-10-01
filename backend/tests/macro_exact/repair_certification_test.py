@@ -77,7 +77,7 @@ class RepairDriverCertification(unittest.TestCase):
         accepted, diagnostics = [], []
         empty = {name: (lambda *args, **kwargs: []) for name in (
             "basic_batch", "feature_batch", "simple_edits", "feature_edits", "or_edits",
-            "family_edits", "joint_edits", "window_edits", "timing_edits", "local_rewrites", "global_edits")}
+            "family_edits", "joint_edits", "window_edits", "event_window_edits", "timing_edits", "local_rewrites", "global_edits")}
         empty["priority_edits"] = lambda *args, **kwargs: (
             ("priority_short_seed", copy.deepcopy(seed)) for seed in seeds)
         empty["repair_edits"] = repair
@@ -272,7 +272,7 @@ class RepairDriverCertification(unittest.TestCase):
                 empty = {name: (lambda *args, **kwargs: []) for name in (
                     "basic_batch", "feature_batch", "simple_edits", "feature_edits", "or_edits",
                     "family_edits", "joint_edits", "priority_edits", "repair_edits",
-                    "local_rewrites", "global_edits")}
+                    "local_rewrites", "global_edits", "event_window_edits")}
 
                 def windows(rules, samples):
                     window_calls.append(copy.deepcopy(rules))
