@@ -16,6 +16,7 @@ _PRIORITY_MODULE = None
 _CONDITION_MODULE = None
 _GLOBAL_MODULE = None
 _FAMILY_MODULE = None
+_JOINT_MODULE = None
 
 
 def condition_module():
@@ -73,6 +74,18 @@ def family_edits(rules, samples, diagnostic):
         p,n,s,max_terms=6,max_candidates=4,branch_limit=12,max_states=192)
     yield from _FAMILY_MODULE.family_edits(rules, samples, clone,
         condition_search=search, diagnostic=diagnostic)
+
+
+def joint_edits(rules, samples, diagnostic, cost_bound=None):
+    global _JOINT_MODULE
+    if _JOINT_MODULE is None:
+        spec = importlib.util.spec_from_file_location("exact_macro_joint", Path(__file__).with_name("exact_macro_joint.py"))
+        _JOINT_MODULE = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_JOINT_MODULE)
+    search = lambda p,n,s:condition_module().short_guards(
+        p,n,s,max_terms=6,max_candidates=4,branch_limit=12,max_states=192)
+    yield from _JOINT_MODULE.joint_edits(rules, samples, clone,
+        condition_search=search, diagnostic=diagnostic, cost_bound=cost_bound)
 
 
 def char_count(text):
@@ -644,7 +657,7 @@ def local_rewrites(rules, samples, render, check_solver, diagnostic):
 
 def compress(rules, atoms, actions, baseline, render, verify, check,
              check_solver, accepted, progress, diagnostic, budget=lambda: True,
-             feedback=None, deep_search=False):
+             feedback=None, deep_search=False, joint_search=False):
     if not certified(baseline):
         raise ValueError("compression requires a full certified baseline")
     best, best_replay = clone(rules), baseline
@@ -656,9 +669,12 @@ def compress(rules, atoms, actions, baseline, render, verify, check,
                "saved_chars":0, "trial_count":0, "accepted_count":0,
                "batch_trials":0, "max_batch_rules":0,
                "family_trials":0,
+               "joint_trials":0,
+               "joint_branches":0,
                "global_branches":0,
                "deep_search":deep_search,
-               "scope":"single page; adaptive batches, native right-associated AND/OR guards, same-action subset rebuilds to 2/3 rules, global insertion rebuilds (24 candidates/pass), beam width 4/depth 2, SAT windows 3x3" + ("; experimental whole-program beam with up to 12 separate counterexample branches" if deep_search else "")}
+               "joint_search":joint_search or deep_search,
+               "scope":"single page; adaptive batches, native right-associated AND/OR guards, same-action subset rebuilds to 2/3 rules, global insertion rebuilds (24 candidates/pass), beam width 4/depth 2, SAT windows 3x3" + ("; experimental competing-action rebuilds with up to 12 separate counterexample branches" if joint_search or deep_search else "") + ("; experimental whole-program beam with up to 12 separate counterexample branches" if deep_search else "")}
     progress(dict(summary))
 
     def evaluate(kind, trial, allow_equal=False, batch_rules=0):
@@ -675,6 +691,8 @@ def compress(rules, atoms, actions, baseline, render, verify, check,
         summary["trial_count"] += 1
         if kind.startswith('family_'):
             summary['family_trials'] += 1
+        if kind.startswith('joint_'):
+            summary['joint_trials'] += 1
         summary["method"] = kind
         summary['last_batch_rules'] = batch_rules
         if batch_rules:
@@ -686,9 +704,9 @@ def compress(rules, atoms, actions, baseline, render, verify, check,
                         "batch_rules":batch_rules,
                         "accepted":passed and cost < summary["best_chars"],
                         "comparison":replay.get("comparison"),"timings_ms":replay.get("timings_ms",{})})
-        if not passed and feedback is not None and kind.startswith('global_') and feedback_source is not None:
+        if not passed and feedback is not None and kind.startswith(('global_', 'joint_')) and feedback_source is not None:
             # Thin failure verdicts stay cheap. Observe full atom columns only
-            # for whole-program candidates that supply a new search branch.
+            # for joint/whole-program candidates that supply a new search branch.
             # Cache only an identical complete aligned observation path,
             # including full exported states, target labels and eligibility.
             # Equal atom signatures alone never justify sharing trajectories.
@@ -709,12 +727,14 @@ def compress(rules, atoms, actions, baseline, render, verify, check,
                     if len(feedback_cache) >= 8:
                         feedback_cache.pop(next(iter(feedback_cache)))
                     feedback_cache[cache_key] = reached
-            proposal = branch_guide(reached,feedback_source,branch_seen)
+            joint = kind.startswith('joint_')
+            proposal = branch_guide(reached,feedback_source,() if joint else branch_seen)
             if proposal is not None:
                 cursor,signature,guide = proposal
-                if signature not in branch_seen:
-                    branch_seen.add(signature)
-                    branches.append((cursor,signature,guide))
+                identity = (signature,text) if joint else signature
+                if identity not in branch_seen:
+                    branch_seen.add(identity)
+                    branches.append((cursor,identity,guide,clone(trial)))
                     branches.sort(key=lambda item:-item[0])
                     del branches[4:]
         if passed and cost < summary["best_chars"]:
@@ -826,6 +846,37 @@ def compress(rules, atoms, actions, baseline, render, verify, check,
                 break
         if summary['best_chars'] < old_cost:
             continue
+        # Rebuild competing actions together, including native OR conditions.
+        # Joint construction may use incomplete intermediate programs, while
+        # only complete proposals reach the common native certificate gate.
+        if joint_search or deep_search:
+            feedback_source = samples
+            branches.clear()
+            for kind,trial in joint_edits(best,samples,diagnostic):
+                evaluate(kind,trial)
+                if summary['best_chars'] < old_cost:
+                    break
+            # Reached WAIT decisions remain private to this one aligned path.
+            # Do not pool failed candidates or label any unvisited suffix. A
+            # finite branch neighbourhood ends without an UNSAT claim.
+            for branch in range(12):
+                if not branches or summary['best_chars'] < old_cost:
+                    break
+                cursor,_,guide,seed = branches.pop(0)
+                summary['joint_branches'] += 1
+                diagnostic({'kind':'joint_counterexample_branch','branch':branch+1,
+                            'cursor':cursor,'guide_rows':len(guide.rows)},None)
+                progress(dict(summary))
+                # Repair this reached candidate, allowing it to grow while it
+                # remains below the independently certified incumbent's cost.
+                for kind,trial in joint_edits(seed,guide,diagnostic,
+                                             cost_bound=summary['best_chars']+1):
+                    evaluate(kind,trial)
+                    if summary['best_chars'] < old_cost:
+                        break
+            feedback_source = None
+        if summary['best_chars'] < old_cost:
+            continue
         for kind,trial in local_rewrites(best,samples,render,check_solver,diagnostic):
             evaluate(kind,trial)
             if summary["best_chars"] < old_cost:
@@ -881,7 +932,7 @@ def compress(rules, atoms, actions, baseline, render, verify, check,
             for branch in range(12):
                 if not branches or summary['best_chars'] < old_cost:
                     break
-                cursor,_,guide = branches.pop(0)
+                cursor,_,guide,_ = branches.pop(0)
                 summary['global_branches'] += 1
                 diagnostic({'kind':'global_counterexample_branch','branch':branch+1,
                             'cursor':cursor,'guide_rows':len(guide.rows)},None)

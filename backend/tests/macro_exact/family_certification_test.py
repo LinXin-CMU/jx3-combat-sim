@@ -28,7 +28,7 @@ def render(rules, atoms, actions):
 
 
 class FamilyCertificationContracts(unittest.TestCase):
-    def run_rejected_family(self, reproduced, completed_full_replay):
+    def run_rejected_family(self, reproduced, completed_full_replay, stage="family"):
         atoms = ["bufftime:Wake<3.0", "buff:A", "buff:B", "buff:C", "buff:AB"]
         actions = [{"name": "盾刀", "fcast": False}]
         rows = [dict(truth=truth, executable=[1], allowed=allowed, cursor=n,
@@ -50,7 +50,7 @@ class FamilyCertificationContracts(unittest.TestCase):
         def family(source, samples, diagnostic):
             self.assertEqual(source, original)
             self.assertTrue(samples.compatible(candidate))
-            yield "family_rebuild_3_to_2", compress.clone(candidate)
+            yield stage + "_rebuild_3_to_2", compress.clone(candidate)
 
         def verify(text, trial, kind):
             calls.append((text, trial, kind))
@@ -60,21 +60,22 @@ class FamilyCertificationContracts(unittest.TestCase):
                     first_difference=None if reproduced else {"index": 1, "kind": "cast_mismatch"}))
 
         with ExitStack() as mocks:
-            mocks.enter_context(patch.object(compress, "family_edits", family))
+            mocks.enter_context(patch.object(compress, stage + "_edits", family))
             for name in ("simple_edits", "feature_edits", "or_edits", "priority_edits",
-                    "local_rewrites", "global_edits", "basic_batch", "feature_batch"):
+                    "local_rewrites", "global_edits", "basic_batch", "feature_batch",
+                    "joint_edits" if stage == "family" else "family_edits"):
                 mocks.enter_context(patch.object(compress, name, return_value=[]))
             best, replay, records, summary = compress.compress(rules, atoms, actions,
                 baseline, lambda value: render(value, atoms, actions), verify,
                 lambda: None, lambda solver: solver.check(),
                 lambda *values: accepted.append(values), lambda summary: None,
-                lambda info, smt: None)
+                lambda info, smt: None, joint_search=(stage == "joint"))
 
-        family_calls = [call for call in calls if call[2].startswith("family_")]
-        family_records = [record for record in records if record["kind"].startswith("family_")]
+        family_calls = [call for call in calls if call[2].startswith(stage + "_")]
+        family_records = [record for record in records if record["kind"].startswith(stage + "_")]
         self.assertEqual(len(family_calls), 1)
         self.assertEqual(family_calls[0][0], render(candidate, atoms, actions))
-        self.assertEqual(summary["family_trials"], 1)
+        self.assertEqual(summary[stage + "_trials"], 1)
         self.assertEqual(len(family_records), 1)
         self.assertFalse(family_records[0]["accepted"])
         self.assertEqual(best, original)
@@ -89,6 +90,12 @@ class FamilyCertificationContracts(unittest.TestCase):
 
     def test_incomplete_terminal_replay_retains_certified_baseline(self):
         self.run_rejected_family(reproduced=True, completed_full_replay=False)
+
+    def test_joint_lost_wake_timing_retains_certified_baseline(self):
+        self.run_rejected_family(False, True, stage="joint")
+
+    def test_joint_incomplete_terminal_replay_retains_certified_baseline(self):
+        self.run_rejected_family(True, False, stage="joint")
 
 
 if __name__ == "__main__":

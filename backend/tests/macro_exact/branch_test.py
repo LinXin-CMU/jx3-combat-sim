@@ -114,7 +114,7 @@ class BranchContracts(unittest.TestCase):
         original.check = should_not_construct
         self.assertIsNone(compress.branch_guide(reached, original, {signature}))
 
-    def run_feedback_fixture(self, attempts, thin_factory, full_factory):
+    def run_feedback_fixture(self, attempts, thin_factory, full_factory, stage='global'):
         atoms = ['buff:LongCondition']
         actions = [dict(name='盾刀', fcast=False)]
         rules = [{'action':0, 'atoms':[0]*30}]
@@ -122,9 +122,9 @@ class BranchContracts(unittest.TestCase):
         baseline = dict(status='ok', rows=baseline_rows, truncated=False,
                         comparison=dict(reproduced=True, completed_full_replay=True))
         calls, feedback_calls, diagnostics = [], [], []
-        def global_candidates(*args):
+        def global_candidates(*args, **kwargs):
             for index in range(attempts):
-                yield 'global_rule_peeling', [{'action':0, 'atoms':[0]*(len(calls)+1)}]
+                yield stage + '_rule_peeling', [{'action':0, 'atoms':[0]*(len(calls)+1)}]
         def verify(text, trial, kind):
             calls.append(trial)
             return thin_factory(trial)
@@ -134,14 +134,16 @@ class BranchContracts(unittest.TestCase):
         empty = dict(basic_batch=lambda *args:[], feature_batch=lambda *args:[],
                      simple_edits=lambda *args:[], feature_edits=lambda *args:[],
                      or_edits=lambda *args:[], priority_edits=lambda *args, **kwargs:[],
-                     local_rewrites=lambda *args:[], global_edits=global_candidates)
+                     local_rewrites=lambda *args:[], family_edits=lambda *args:[],
+                     joint_edits=lambda *args, **kwargs:[], global_edits=lambda *args:[])
+        empty[stage + '_edits'] = global_candidates
         with patch.multiple(compress, **empty):
             best, replay, records, summary = compress.compress(
                 rules, atoms, actions, baseline, lambda value:json.dumps(value), verify,
                 lambda:None, lambda solver:self.fail('no solver in this fixture'),
                 lambda *args:self.fail('a rejected program cannot be accepted'),
                 lambda *args:None, lambda value, smt:diagnostics.append(value),
-                feedback=feedback, deep_search=True)
+                feedback=feedback, deep_search=(stage == 'global'), joint_search=(stage == 'joint'))
         self.assertEqual(best, rules)
         self.assertIs(replay, baseline)
         self.assertTrue(all(not record['accepted'] for record in records))
@@ -172,6 +174,35 @@ class BranchContracts(unittest.TestCase):
         calls, feedback_calls, _, _ = self.run_feedback_fixture(2, thin, full)
         self.assertGreaterEqual(len(calls), 2)
         self.assertEqual(feedback_calls[:2], [1, 2])
+
+    def test_joint_branches_keep_the_failed_seed_and_incumbent_bound(self):
+        atoms = ['buff:LongCondition']
+        actions = [dict(name='盾刀', fcast=False)]
+        rules = [{'action':0, 'atoms':[0]*30}]
+        candidate = [{'action':0, 'atoms':[0]}]
+        baseline = dict(status='ok', rows=[row([1], [0], 0)], truncated=False,
+                        comparison=dict(reproduced=True, completed_full_replay=True))
+        render = json.dumps
+        calls = []
+        def joint(seed, guide, diagnostic, cost_bound=None):
+            calls.append((copy.deepcopy(seed), cost_bound))
+            if cost_bound is None:
+                yield 'joint_region_2_to_1', candidate
+        def verify(text, trial, kind):
+            return failure([row([1], [], 0)])
+        empty = {name:(lambda *args, **kwargs:[]) for name in ('basic_batch', 'feature_batch',
+            'simple_edits', 'feature_edits', 'or_edits', 'priority_edits', 'family_edits',
+            'local_rewrites', 'global_edits')}
+        with patch.multiple(compress, joint_edits=joint, **empty):
+            best, replay, _, summary = compress.compress(rules, atoms, actions, baseline,
+                render, verify, lambda:None, lambda solver:solver.check(),
+                lambda *args:self.fail('a failed candidate cannot replace the incumbent'),
+                lambda *args:None, lambda *args:None,
+                feedback=lambda text, result, trial, kind:result, joint_search=True)
+        self.assertEqual(calls, [(rules,None), (candidate,compress.char_count(render(rules))+1)])
+        self.assertEqual(best, rules)
+        self.assertIs(replay, baseline)
+        self.assertEqual(summary['joint_branches'], 1)
 
     def test_same_predecision_states_with_different_verdicts_are_separate_feedback(self):
         # The observed decision can select a wrong action, or cast correctly

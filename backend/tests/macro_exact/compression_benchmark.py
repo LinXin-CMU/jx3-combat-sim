@@ -32,6 +32,7 @@ def main():
     parser.add_argument('--profile', action='store_true')
     parser.add_argument('--screening', action='store_true')
     parser.add_argument('--deep',action='store_true',help='Experimental whole-program counterexample search')
+    parser.add_argument('--joint',action='store_true',help='Experimental competing-action counterexample search')
     parser.add_argument('--macro', type=Path, help='Certified input macro; defaults to exact.txt')
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
@@ -100,7 +101,8 @@ def main():
             profiler.enable()
         module.compress(rules,atoms,actions,baseline,lambda r:synth.macro_text(r,atoms,actions),
                         verify,check,lambda solver:solver.check(),accepted,progress,
-                        lambda info,smt:report['solvers'].append(info),feedback=counterexample,deep_search=args.deep)
+                        lambda info,smt:report['solvers'].append(info),feedback=counterexample,deep_search=args.deep,
+                        joint_search=args.joint)
         report['status'] = 'scope_exhausted'
     except TimeoutError:
         report['status'] = 'observation_ended'

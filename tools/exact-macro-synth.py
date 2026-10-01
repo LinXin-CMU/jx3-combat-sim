@@ -994,6 +994,7 @@ def main():
     parser.add_argument("--sizes", default="8:2,12:3,20:4,32:5", help="rule slots:AND terms, expanded on UNSAT/UNKNOWN")
     parser.add_argument("--compress", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--compress-deep", action="store_true", help="experimental whole-program CEGIS after ordinary compression stalls")
+    parser.add_argument("--compress-joint", action="store_true", help="experimental competing-action compression after ordinary compression stalls")
     parser.add_argument("--strategy", choices=("prototype", "bounded"), default="prototype")
     args = parser.parse_args()
     run_job(args)
@@ -1095,7 +1096,7 @@ def run_job(args):
         report["scenario_sha256"] = hashlib.sha256(json.dumps(scene, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
         provenance = {"executable_sha256": hashlib.sha256(args.exe.read_bytes()).hexdigest(), "files": {}}
         for name in ("exact-macro-synth.py", "exact-macro-worker.py", "exact_macro_compress.py",
-                     "exact_macro_reorder.py", "exact_macro_conditions.py", "exact_macro_global.py", "exact_macro_family.py", "requirements-exact-macro.txt"):
+                     "exact_macro_reorder.py", "exact_macro_conditions.py", "exact_macro_global.py", "exact_macro_family.py", "exact_macro_joint.py", "requirements-exact-macro.txt"):
             path = ROOT / "tools" / name
             provenance["files"]["tools/" + name] = hashlib.sha256(path.read_bytes()).hexdigest()
         for path in sorted((ROOT / "backend/src").rglob("*.rs")):
@@ -1273,7 +1274,8 @@ def run_job(args):
                     lambda r:macro_text(r,atoms,actions), trial_verify, boundary,
                     local_check, accepted, progress, diagnostic,
                     lambda:time.perf_counter()-started-PAUSED_SECONDS < args.seconds,
-                    feedback=counterexample,deep_search=getattr(args,'compress_deep',False))
+                    feedback=counterexample,deep_search=getattr(args,'compress_deep',False),
+                    joint_search=getattr(args,'compress_joint',False))
                 report["comparison"] = compact_replay["comparison"]
                 report["compression_stop"] = summary["status"]
                 write(args.out / "compression.json", trials)

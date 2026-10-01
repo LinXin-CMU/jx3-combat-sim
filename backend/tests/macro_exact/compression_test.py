@@ -105,7 +105,9 @@ class CompressionContracts(unittest.TestCase):
     def test_failed_batch_splits_with_stable_ids_and_keeps_critical_wake_rule(self):
         best,result,calls,records,summary = self.batch_fixture(critical_clock=True)
         self.assertTrue(compress.certified(result))
-        self.assertEqual(len(best),3)
+        # Broader searches may fold the retained clock into another guard.
+        # The contract is preservation and certified shortening, not 3 rows.
+        self.assertLessEqual(len(best),3)
         self.assertTrue(any(1 in r['atoms'] for r in best))
         self.assertFalse(calls[0][1])
         self.assertTrue(any(passed for _,passed in calls))
