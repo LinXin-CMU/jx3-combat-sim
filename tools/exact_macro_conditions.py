@@ -62,6 +62,62 @@ def condition_text(rule, atomtexts):
     return atomtexts[atoms[0]] + "".join(op + atomtexts[index] for op, index in zip(ops, atoms[1:]))
 
 
+def shorter_leaves(rule, positives, negatives, samples, *, equal_cost=False):
+    """Replace a leaf inside a native chain using its surrounding context.
+
+    A shorter predicate need not equal the old one outside reachable action
+    decisions. Evaluate the surrounding monotone chain with this occurrence
+    set to false/true, then derive the leaf's actual positive/negative masks.
+    No whole-condition rewrite, operator reassociation, or cross-path labels
+    are involved. Every suggestion still requires whole-program native replay.
+    Distinct predicates, including distinct clock leaves, are not deduplicated
+    by their sample truth signature. ``equal_cost`` requests same-length
+    proposals for independently certified alternative paths, not a saving.
+    """
+    condition = normalize(rule)
+    atoms, ops = condition['atoms'], condition['ops']
+    if not atoms or not positives:
+        return
+    all_mask, truth = samples.all, samples.truth
+    suffix = [0] * len(atoms)
+    suffix[-1] = truth[atoms[-1]] & all_mask
+    for position in range(len(atoms)-2, -1, -1):
+        leaf = truth[atoms[position]]
+        suffix[position] = (leaf & suffix[position+1] if ops[position] == '&'
+                            else leaf | suffix[position+1]) & all_mask
+    for position, old in enumerate(atoms):
+        samples.check()
+        zero, one = 0, all_mask
+        if position < len(ops):
+            if ops[position] == '&':
+                one = suffix[position+1]
+            else:
+                zero = suffix[position+1]
+        for earlier in range(position-1, -1, -1):
+            leaf = truth[atoms[earlier]]
+            if ops[earlier] == '&':
+                zero &= leaf
+                one &= leaf
+            else:
+                zero |= leaf
+                one |= leaf
+        if positives & ~one or negatives & zero:
+            continue
+        required = positives & ~zero
+        forbidden = negatives & one
+        for replacement, mask in enumerate(truth):
+            samples.check()
+            cost_ok = (samples.atom_costs[replacement] == samples.atom_costs[old]
+                       if equal_cost else samples.atom_costs[replacement] < samples.atom_costs[old])
+            if (not cost_ok
+                    or replacement in atoms
+                    or required & ~mask or forbidden & mask):
+                continue
+            copied = dict(atoms=list(atoms), ops=list(ops))
+            copied['atoms'][position] = replacement
+            yield copied
+
+
 def short_guards(positives, negatives, samples, max_terms=8, max_candidates=8,
                  branch_limit=24, max_states=384, max_atoms=256):
     """Find short legal chains covering P and avoiding N on current samples.

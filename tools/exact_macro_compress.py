@@ -591,6 +591,60 @@ def feature_edits(rules, samples):
                         yield "group_replace_and_move", trial
 
 
+def chain_leaf_edits(rules, samples, *, equal_cost=False):
+    """Shorten mixed chains in context, including a whole conjunction if valid."""
+    selected, _ = samples.selections(rules)
+    remaining = samples.all
+    for index, rule in enumerate(rules):
+        samples.check()
+        action = rule['action']
+        negatives = remaining & samples.executable[action] & ~samples.allowed[action]
+        if complex_guard(rule):
+            for guard in condition_module().shorter_leaves(rule, selected[index], negatives, samples,
+                                                          equal_cost=equal_cost):
+                trial = clone(rules)
+                trial[index] = dict(guard, action=action)
+                if samples.compatible(trial):
+                    yield 'replace_chain_leaf', trial
+            if not equal_cost and selected[index]:
+                for leaves in samples.covers(selected[index],negatives):
+                    replacement = dict(action=action,atoms=list(leaves))
+                    if samples.rule_cost(replacement) >= samples.rule_cost(rule):
+                        continue
+                    trial = clone(rules)
+                    trial[index] = replacement
+                    if samples.compatible(trial):
+                        yield 'replace_chain_guard', trial
+        remaining &= ~selected[index]
+
+
+def chain_leaf_bridges(rules, samples, limit=8):
+    """Prefer changing clock dependencies over spelling-only alternatives.
+
+    This orders a finite exploration turn, never certifies a clock removal.
+    An equally long rule using a resource predicate can reach a different
+    valid trajectory whose conditions can then be shortened.
+    """
+    candidates = []
+    for _, trial in chain_leaf_edits(rules, samples, equal_cost=True):
+        for index, (old, new) in enumerate(zip(rules, trial)):
+            if old == new:
+                continue
+            before = condition_module().normalize(old)['atoms']
+            after = condition_module().normalize(new)['atoms']
+            changes = [(a, b) for a, b in zip(before, after) if a != b]
+            if not changes:
+                continue
+            a, b = changes[0]
+            old_clock, new_clock = ('bufftime:' in samples.atoms[k] for k in (a, b))
+            rank = 0 if old_clock and not new_clock else 1 if old_clock else 2
+            candidates.append(((rank, index, b, a), trial))
+            break
+    for _, trial in sorted(candidates, key=lambda item: item[0])[:limit]:
+        samples.check()
+        yield 'bridge_chain_leaf', trial
+
+
 def or_edits(rules, samples, pair_limit=128):
     """Exact guard unions in the native right-associative macro language.
 
@@ -808,13 +862,13 @@ def compress(rules, atoms, actions, baseline, render, verify, check,
                "global_branches":0,
                "region_trials":0, "certified_alternatives":0,
                "candidate_ms":0.0, "sample_ms":0.0, "verify_wall_ms":0.0, "feedback_wall_ms":0.0,
-               "contract_id":contract_id, "pipeline_version":"20261003-library-prior-region-guards-v1",
+               "contract_id":contract_id, "pipeline_version":"20261004-context-leaf-bridges-v1",
                "region_search":region_search,
                "learning_enabled":bool(learning is not None and learning.enabled),
                "adaptive_enabled":bool(learning is not None and learning.bandit_enabled),
                "deep_search":deep_search,
                "joint_search":joint_search or deep_search,
-               "scope":"single page; adaptive batches, native right-associated AND/OR guards, observed event first-witness window queries, first-divergence clock/priority repairs, same-action subset rebuilds to 2/3 rules, global insertion rebuilds (24 candidates/pass), beam width 4/depth 2, SAT windows 3x3" + ("; optional joint native-chain regions on separate reached/certified paths" if region_search else "") + ("; experimental competing-action rebuilds with up to 12 separate counterexample branches" if joint_search or deep_search else "") + ("; experimental whole-program beam with up to 12 separate counterexample branches" if deep_search else "")}
+               "scope":"single page; adaptive batches, native right-associated AND/OR guards, observed event first-witness window queries, first-divergence clock/priority repairs, same-action subset rebuilds to 2/3 rules, global insertion rebuilds (24 candidates/pass), beam width 4/depth 2, SAT windows 3x3; contextual leaf replacements and fully certified equal-length bridges" + ("; optional joint native-chain regions on separate reached/certified paths" if region_search else "") + ("; experimental competing-action rebuilds with up to 12 separate counterexample branches" if joint_search or deep_search else "") + ("; experimental whole-program beam with up to 12 separate counterexample branches" if deep_search else "")}
     progress(dict(summary))
 
     def guide_for(replay, program, kind='certified'):
@@ -1303,6 +1357,46 @@ def compress(rules, atoms, actions, baseline, render, verify, check,
                 diagnostic({'kind':'region_counterexample_branch','cursor':cursor,
                             'path_id':guide.path_id},None)
                 region_pass(seed,guide)
+        if summary['best_chars'] == old_cost:
+            # Preserve the productive coarse rewrites before changing an
+            # interior predicate. Even a certified three-character saving can
+            # redirect a greedy search into a worse later local optimum.
+            context_guide = samples
+            while budget():
+                context_cost = summary['best_chars']
+                active_path = context_guide
+                for kind,trial in ordered(chain_leaf_edits(best,context_guide)):
+                    evaluate(kind,trial)
+                    if summary['best_chars'] < context_cost:
+                        break
+                if summary['best_chars'] < context_cost:
+                    context_guide = guide_for(best_replay,best,'certified_context_shortening')
+                    continue
+                # A same-length change is a bridge, not a new user best. Only
+                # its full native replay supplies the descendant's guide.
+                for kind, trial in candidates(chain_leaf_bridges(best,context_guide)):
+                    alternate = evaluate(kind,trial,allow_equal=True)
+                    if alternate is None:
+                        continue
+                    guide = guide_for(alternate,trial,'certified_leaf_alternative')
+                    active_path = guide
+                    children = (list(simple_edits(trial,actions,check))
+                                + list(feature_edits(trial,guide))
+                                + list(chain_leaf_edits(trial,guide))
+                                + list(or_edits(trial,guide)))
+                    for child_kind, child in ordered(children):
+                        if guide.compatible(child):
+                            evaluate('bridge_'+child_kind,child)
+                            if summary['best_chars'] < context_cost:
+                                break
+                    active_path = context_guide
+                    if summary['best_chars'] < context_cost:
+                        break
+                if summary['best_chars'] == context_cost:
+                    break
+                context_guide = guide_for(best_replay,best,'certified_context_shortening')
+        if summary['best_chars'] < old_cost:
+            continue
         if summary["best_chars"] == old_cost:
             if not deep_search:
                 break

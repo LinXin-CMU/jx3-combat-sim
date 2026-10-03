@@ -1,6 +1,6 @@
 {
   "schema": "exact-macro-runtime-files-v1",
-  "pipeline_version": "20261003-library-prior-region-guards-v1",
+  "pipeline_version": "20261004-context-leaf-bridges-v1",
   "files": [
     "exact-macro-synth.py",
     "exact-macro-worker.py",
