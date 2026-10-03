@@ -6,6 +6,7 @@ Evidence stays in the server's per-job records directory. No user downloads.
 import argparse
 import importlib.util
 import json
+import os
 from pathlib import Path
 import sys
 import threading
@@ -26,6 +27,7 @@ def main():
     parser.add_argument("--compress-region", action="store_true")
     parser.add_argument("--compress-learning", action="store_true")
     parser.add_argument("--compress-adaptive", action="store_true")
+    parser.add_argument("--compress-model", type=Path, default=os.environ.get('JX3_EXACT_MACRO_MODEL'))
     args = parser.parse_args()
     try:
         spec = importlib.util.spec_from_file_location("exact_synth", Path(__file__).with_name("exact-macro-synth.py"))

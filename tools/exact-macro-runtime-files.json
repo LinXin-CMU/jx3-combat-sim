@@ -1,6 +1,6 @@
 {
   "schema": "exact-macro-runtime-files-v1",
-  "pipeline_version": "20261002-window-region-v1",
+  "pipeline_version": "20261003-library-prior-region-guards-v1",
   "files": [
     "exact-macro-synth.py",
     "exact-macro-worker.py",
@@ -13,8 +13,9 @@
     "exact_macro_repair.py",
     "exact_macro_region.py",
     "exact_macro_region_sat.py",
+    "exact_macro_region_guards.py",
     "exact_macro_learning.py",
     "requirements-exact-macro.txt"
   ],
-  "excluded": ["exact_macro_corpus.py", "raw corpus", "training logs", "model snapshots", "userdata"]
+  "excluded": ["exact_macro_corpus.py", "exact_macro_training_cases.py", "exact_macro_train.py", "raw corpus", "training logs", "model snapshots", "userdata"]
 }

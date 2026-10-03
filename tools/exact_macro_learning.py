@@ -15,6 +15,9 @@ from copy import deepcopy
 FEATURE_SCHEMA_VERSION = 1
 MODEL_VERSION = "online-linear-v1"
 SERIALIZATION_VERSION = 1
+PRIOR_VERSION = 1
+NATIVE_SEMANTICS = "and_or_equal_precedence_right_associative-v1"
+ATOM_ROLES = ("clock", "resource", "presence", "stack", "target", "skill", "last_skill")
 FEATURE_NAMES = (
     "bias", "saving_fraction", "size_log", "rule_count_log",
     "changed_rule_fraction", "order_inversion_fraction", "duplicate_fraction",
@@ -74,6 +77,85 @@ def _shape(rule):
     if len(ops) != max(0, len(atoms) - 1) or any(op not in ("&", "|") for op in ops):
         raise ValueError("invalid native condition chain")
     return rule["action"], atoms, ops
+
+
+def atom_role(text):
+    """Predicate namespace only; identities and numeric thresholds are ignored."""
+    prefix = text.split(":", 1)[0]
+    if prefix in ("bufftime", "tbufftime"):
+        return "clock"
+    if prefix in ("tbuff", "tnobuff"):
+        return "target"
+    if prefix in ("buff", "nobuff"):
+        return "stack" if any(op in text.split(":", 1)[-1] for op in ("<", ">", "=", "~")) else "presence"
+    if prefix in ("skill_energy", "skill_notin_cd", "skill", "noskill"):
+        return "skill"
+    if text.startswith("last_skill"):
+        return "last_skill"
+    return "resource"
+
+
+def validate_structural_prior(prior):
+    """Validate anonymous, advisory shapes; static counts are never labels."""
+    if not isinstance(prior, dict) or set(prior) != {
+            "schema_version", "native_semantics", "sample_count", "rule_count", "shapes", "role_counts"}:
+        raise ValueError("invalid structural prior schema")
+    if prior["schema_version"] != 1 or prior["native_semantics"] != NATIVE_SEMANTICS:
+        raise ValueError("incompatible native structural prior")
+    for key in ("sample_count", "rule_count"):
+        if type(prior[key]) is not int or prior[key] < 0:
+            raise ValueError("invalid structural count")
+    if not isinstance(prior["role_counts"], dict) or set(prior["role_counts"]) != set(ATOM_ROLES):
+        raise ValueError("invalid predicate roles")
+    if any(type(n) is not int or n < 0 for n in prior["role_counts"].values()):
+        raise ValueError("invalid role count")
+    if not isinstance(prior["shapes"], list) or len(prior["shapes"]) > 256:
+        raise ValueError("invalid structural shape collection")
+    seen = set()
+    for shape in prior["shapes"]:
+        if not isinstance(shape, dict) or set(shape) != {"roles", "ops", "count", "frequency"}:
+            raise ValueError("invalid anonymous shape")
+        roles, ops = shape["roles"], shape["ops"]
+        if (not isinstance(roles, list) or not isinstance(ops, list) or len(roles) > 128
+                or any(role not in ATOM_ROLES for role in roles)
+                or len(ops) != max(0, len(roles)-1) or any(op not in ("&", "|") for op in ops)):
+            raise ValueError("invalid native shape chain")
+        key = tuple(roles), tuple(ops)
+        if key in seen:
+            raise ValueError("duplicate anonymous shape")
+        seen.add(key)
+        if type(shape["count"]) is not int or not 0 < shape["count"] <= prior["rule_count"]:
+            raise ValueError("invalid shape count")
+        frequency = _finite(shape["frequency"])
+        if not 0 <= frequency <= 1 or abs(frequency-shape["count"]/max(1, prior["rule_count"])) > 1e-9:
+            raise ValueError("invalid shape frequency")
+    return deepcopy(prior)
+
+
+def structural_prior(programs):
+    """Count train-split macro syntax only, without asserting replay success.
+
+    Each item is (rules, atom_catalog). No bodies, action identities, names,
+    thresholds, authors or state samples survive this aggregation.
+    """
+    counts, roles, samples, rows = Counter(), Counter(), 0, 0
+    for rules, atoms in programs:
+        samples += 1
+        for rule in rules:
+            _, leaves, ops = _shape(rule)
+            if len(leaves) > 128:
+                raise ValueError("structural source chain exceeds serialization bound")
+            if any(type(k) is not int or not 0 <= k < len(atoms) for k in leaves):
+                raise ValueError("condition leaf outside supplied catalogue")
+            kinds = tuple(atom_role(atoms[k]) for k in leaves)
+            counts[kinds, ops] += 1
+            roles.update(kinds)
+            rows += 1
+    shapes = [{"roles": list(kinds), "ops": list(ops), "count": count, "frequency": count/max(1, rows)}
+              for (kinds, ops), count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:256]]
+    return validate_structural_prior(dict(schema_version=1, native_semantics=NATIVE_SEMANTICS,
+        sample_count=samples, rule_count=rows, shapes=shapes,
+        role_counts={role: roles[role] for role in ATOM_ROLES}))
 
 
 def _inversions(sequence):
@@ -212,7 +294,7 @@ def classify_feedback(replay, *, native=True, cancelled=False, solver_status=Non
         return "static_rejection" if static_rejected else "not_native", None
     if infrastructure_error or replay.get("status") != "ok":
         return "infrastructure_error", None
-    if replay.get("truncated", False):
+    if replay.get("truncated") is not False:
         return "truncated", None
     comparison = replay.get("comparison") or {}
     if comparison.get("reproduced") is True and comparison.get("completed_full_replay") is True:
@@ -269,6 +351,8 @@ class LearningSession:
         self.epoch, self.rank_round, self.strategy_round, self.prepared_count = 0, 0, 0, 0
         self._seals, self._feedback, self._seen, self._arms, self._strategy_contexts = {}, {}, set(), {}, {}
         self._strategy_visits = {}
+        self.structural_prior = None
+        self.prior_metadata = None
 
     def _can_train(self):
         return (self.training and self.split == "train" and bool(self.source_group)
@@ -458,7 +542,74 @@ class LearningSession:
                 "weights": list(self.weights), "cost_weights": list(self.cost_weights), "labels": self.labels,
                 "cost_labels": self.cost_labels, "cost_log_mean": self.cost_log_mean, "epoch": self.epoch,
                 "rank_round": self.rank_round, "strategy_round": self.strategy_round,
-                "arms": json.loads(json.dumps(self._arms)), "strategy_visits": dict(self._strategy_visits)}
+                "arms": json.loads(json.dumps(self._arms)), "strategy_visits": dict(self._strategy_visits),
+                "structural_prior": deepcopy(self.structural_prior), "prior_metadata": deepcopy(self.prior_metadata)}
+
+    @classmethod
+    def from_prior(cls, data, *, contract_hash, oracle_version, source_group, version, mount):
+        """Freeze an anonymous offline model on a NEW task's own provenance.
+
+        Contract/path/candidate identities and any old replay are never loaded.
+        Exact native executable and version/mount applicability are required;
+        changed executors must be independently revalidated before export.
+        """
+        keys = {"schema", "prior_version", "feature_schema_version", "feature_names", "model_version",
+                "native_semantics", "oracle_versions", "applicable_contexts", "weights", "cost_weights",
+                "trained_labels", "cost_labels", "cost_log_mean", "min_labels", "structural_prior",
+                "training_summary"}
+        if (not isinstance(data, dict) or set(data) != keys
+                or data["schema"] != "exact-macro-offline-prior" or data["prior_version"] != PRIOR_VERSION
+                or data["feature_schema_version"] != FEATURE_SCHEMA_VERSION
+                or data["feature_names"] != list(FEATURE_NAMES) or data["model_version"] != MODEL_VERSION
+                or data["native_semantics"] != NATIVE_SEMANTICS):
+            raise ValueError("incompatible offline model/schema/native grammar")
+        versions = data["oracle_versions"]
+        contexts = data["applicable_contexts"]
+        if (not isinstance(versions, list) or not versions or len(versions) > 64
+                or any(not isinstance(v, str) or not v for v in versions)
+                or str(oracle_version) not in versions):
+            raise ValueError("offline model native executable mismatch")
+        if (not isinstance(contexts, list) or not contexts or len(contexts) > 64
+                or any(not isinstance(c, dict) or set(c) != {"version", "mount"}
+                       or not all(isinstance(v, str) and v for v in c.values()) for c in contexts)
+                or {"version": str(version), "mount": str(mount)} not in contexts):
+            raise ValueError("offline model version/mount mismatch")
+        for key in ("trained_labels", "cost_labels", "min_labels"):
+            if type(data[key]) is not int or data[key] < (1 if key == "min_labels" else 0):
+                raise ValueError("invalid offline model count")
+        if data["cost_labels"] > data["trained_labels"]:
+            raise ValueError("cost labels exceed real native labels")
+        summary = data["training_summary"]
+        if (not isinstance(summary, dict) or set(summary) != {"train_family_hashes", "train_examples", "positive_labels", "negative_labels"}
+                or not isinstance(summary["train_family_hashes"], list)
+                or any(not isinstance(v, str) or len(v) != 64 for v in summary["train_family_hashes"])
+                or any(type(summary[k]) is not int or summary[k] < 0 for k in
+                       ("train_examples", "positive_labels", "negative_labels"))
+                or summary["positive_labels"] + summary["negative_labels"] != data["trained_labels"]
+                or summary["train_examples"] != data["trained_labels"]):
+            raise ValueError("invalid offline training provenance counts")
+        if data["trained_labels"] and not (summary["positive_labels"] and summary["negative_labels"]):
+            raise ValueError("trained predictor requires both real native label classes")
+        identities = [str(source_group)]
+        for prefix in ("train:", "validation:", "test:", "holdout:"):
+            if identities[0].startswith(prefix):
+                identities.append(identities[0][len(prefix):])
+        if any(candidate_hash(identity) in summary["train_family_hashes"] for identity in identities):
+            raise ValueError("offline evaluation source family overlaps training")
+        session = cls(contract_hash, oracle_version, source_group, enabled=True, training=False,
+                      split="test", min_labels=data["min_labels"])
+        for key in ("weights", "cost_weights"):
+            if not isinstance(data[key], list) or len(data[key]) != len(FEATURE_NAMES):
+                raise ValueError("offline model weight dimension mismatch")
+            setattr(session, key, [_finite(value) for value in data[key]])
+        session.labels, session.cost_labels = data["trained_labels"], data["cost_labels"]
+        session.cost_log_mean = _finite(data["cost_log_mean"])
+        if session.cost_log_mean < 0:
+            raise ValueError("invalid offline cost mean")
+        session.structural_prior = validate_structural_prior(data["structural_prior"])
+        session.prior_metadata = dict(prior_version=PRIOR_VERSION,
+            train_family_hashes=list(summary["train_family_hashes"]), native_semantics=NATIVE_SEMANTICS)
+        return session
 
     @classmethod
     def from_dict(cls, data, *, contract_hash, oracle_version):
@@ -494,4 +645,7 @@ class LearningSession:
             if count < 0:
                 raise ValueError("strategy visit counts cannot be negative")
             session._strategy_visits[name] = count
+        if data.get("structural_prior") is not None:
+            session.structural_prior = validate_structural_prior(data["structural_prior"])
+        session.prior_metadata = deepcopy(data.get("prior_metadata"))
         return session

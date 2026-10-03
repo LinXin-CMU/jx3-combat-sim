@@ -64,13 +64,14 @@ class RegionProblem:
 
     def __init__(self, source, samples, clone, region, *, max_slots=3,
                  max_terms=4, timeout_ms=150, cost_bound=None,
-                 allow_equal=False, default_action=None):
+                 allow_equal=False, default_action=None, guard_library=None):
         samples.check()
         self.samples, self.clone, self.region = samples, clone, region
         self.pool = tuple(region["atoms"])
         self.actions = tuple(region["actions"])
         self.gaps = tuple(region["gaps"])
         self.donors = tuple(region["donors"])
+        self.guard_library = None if guard_library is None else tuple(guard_library)
         removed = set(self.donors)
         self.survivors = clone([rule for index, rule in enumerate(source)
                                 if index not in removed])
@@ -95,16 +96,32 @@ class RegionProblem:
             action = z3.Int("region_action_%d" % index)
             gap = z3.Int("region_gap_%d" % index)
             length = z3.Int("region_length_%d" % index)
-            atoms = [z3.Int("region_atom_%d_%d" % (index, term))
-                     for term in range(self.max_terms)]
+            atoms = ([] if self.guard_library is not None else
+                [z3.Int("region_atom_%d_%d" % (index, term)) for term in range(self.max_terms)])
             ops = [z3.Bool("region_and_%d_%d" % (index, term))
-                   for term in range(max(0, self.max_terms - 1))]
+                   for term in range(max(0, len(atoms) - 1))]
             slot = dict(on=on, action=action, gap=gap, length=length,
                         atoms=atoms, ops=ops)
             self.slots.append(slot)
             self.variables.extend([on, action, gap, length] + atoms + ops)
-            self.solver.add(_choice(action, self.actions), _choice(gap, self.gaps),
-                            length >= 0, length <= (self.max_terms if self.pool else 0))
+            self.solver.add(_choice(action, self.actions), _choice(gap, self.gaps))
+            if self.guard_library is None:
+                self.solver.add(length >= 0, length <= (self.max_terms if self.pool else 0))
+            else:
+                choices = [z3.Bool("region_guard_%d_%d" % (index, offset))
+                           for offset in range(len(self.guard_library))]
+                self.solver.add(z3.PbEq([(variable, 1) for variable in choices], 1)
+                    if choices else z3.BoolVal(False))
+                guard = z3.Sum([z3.If(variable, offset, 0) for offset, variable in enumerate(choices)])
+                slot["guard"] = guard
+                slot["guard_choices"] = choices
+                self.variables.extend(choices)
+                self.solver.add(length == z3.Sum([z3.If(variable, len(value["atoms"]), 0)
+                    for variable, value in zip(choices, self.guard_library)]))
+                # An inactive slot uses the unconditional library entry.
+                empty = next((offset for offset, value in enumerate(self.guard_library) if not value["atoms"]), None)
+                if empty is not None:
+                    self.solver.add(z3.Implies(z3.Not(on), choices[empty]))
             self.solver.add(z3.Implies(z3.Not(on), z3.And(
                 action == self.actions[0], gap == self.gaps[-1], length == 0)))
             if index:
@@ -125,7 +142,9 @@ class RegionProblem:
                 for offset, value in enumerate(self.pool)]), 0)
                 for term, atom in enumerate(atoms)])
             # [guard] + following space = 3; length - 1 connectors.
-            guard_cost = z3.If(length > 0, leaf_cost + length + 2, 0)
+            guard_cost = (z3.If(length > 0, leaf_cost + length + 2, 0)
+                if self.guard_library is None else z3.Sum([z3.If(variable, value["cost"], 0)
+                    for variable, value in zip(slot["guard_choices"], self.guard_library)]))
             self.costs.append(z3.If(on, action_cost + guard_cost, 0))
         self.total_cost = self.fixed_cost + z3.Sum(self.costs)
         self.solver.add(self.total_cost < self.bound)
@@ -145,18 +164,22 @@ class RegionProblem:
         groups = getattr(samples, "groups", {})
         cursors = _row_cursors(samples)
         active_bits = samples.all
-        leaf_cache = {}
+        leaf_cache, condition_cache, hit_cache, action_cache = {}, {}, {}, {}
         while active_bits:
             samples.check()
             bit = active_bits & -active_bits
             active_bits ^= bit
-            truth = tuple(bool(samples.truth[atom] & bit) for atom in self.pool)
+            truth = (tuple(bool(samples.truth[atom] & bit) for atom in self.pool)
+                if self.guard_library is None else tuple(bool(guard["mask"] & bit) for guard in self.guard_library))
             executable = tuple(bool(samples.executable[action] & bit) for action in self.actions)
             allowed = tuple(action for action in range(len(samples.allowed))
                             if samples.allowed[action] & bit)
             fixed = tuple(bool(hit & bit) for hit in fixed_hits)
+            first_fixed = next((index for index, value in enumerate(fixed) if value), None)
             required = bool(samples.required & bit)
-            key = truth, executable, allowed, fixed, required
+            # A later fixed hit can never win after the first fixed hit or an
+            # intervening new hit. Its identity does not distinguish selection.
+            key = truth, executable, allowed, first_fixed, required
             if key not in encoded:
                 hits = []
                 for index, slot in enumerate(self.slots):
@@ -165,35 +188,42 @@ class RegionProblem:
                     condition = z3.BoolVal(True)
                     # Inactive suffix is true; the last active atom ignores
                     # its unused connector. This directly encodes right fold.
-                    for term in range(self.max_terms - 1, -1, -1):
+                    for term in range(len(slot["atoms"]) - 1, -1, -1):
                         cache_key = index, term, truth
                         if cache_key not in leaf_cache:
                             leaf_cache[cache_key] = _choice(slot["atoms"][term],
                                 [offset for offset, value in enumerate(truth) if value])
                         leaf = leaf_cache[cache_key]
-                        if term == self.max_terms - 1:
+                        if term == len(slot["atoms"]) - 1:
                             tail = leaf
                         else:
                             tail = z3.If(length == term + 1, leaf,
                                 z3.If(slot["ops"][term], z3.And(leaf, condition),
                                       z3.Or(leaf, condition)))
                         condition = z3.If(length > term, tail, z3.BoolVal(True))
-                    executable_action = _choice(slot["action"],
-                        [action for action, value in zip(self.actions, executable) if value])
-                    hits.append(z3.And(slot["on"], condition, executable_action))
+                    if self.guard_library is not None:
+                        cache_key = index, truth
+                        if cache_key not in condition_cache:
+                            condition_cache[cache_key] = _or([variable for variable, value
+                                in zip(slot["guard_choices"], truth) if value])
+                        condition = condition_cache[cache_key]
+                    action_key = index, executable
+                    if action_key not in action_cache:
+                        action_cache[action_key] = _choice(slot["action"],
+                            [action for action, value in zip(self.actions, executable) if value])
+                    hit_key = index, truth, executable
+                    if hit_key not in hit_cache:
+                        hit_cache[hit_key] = z3.And(slot["on"], condition, action_cache[action_key])
+                    hits.append(hit_cache[hit_key])
                 selected_good, invalid = [], []
                 for index, (slot, hit) in enumerate(zip(self.slots, hits)):
-                    prior_fixed = _or([slot["gap"] > fixed_index
-                        for fixed_index, value in enumerate(fixed) if value])
+                    prior_fixed = (z3.BoolVal(False) if first_fixed is None else slot["gap"] > first_fixed)
                     selected = z3.And(hit, z3.Not(_or(hits[:index])), z3.Not(prior_fixed))
                     good = _choice(slot["action"], allowed)
                     invalid.append(z3.And(selected, z3.Not(good)))
                     selected_good.append(z3.And(selected, good))
-                fixed_seen = False
-                for fixed_index, (rule, hit) in enumerate(zip(self.survivors, fixed)):
-                    if not hit or fixed_seen:
-                        continue
-                    fixed_seen = True
+                if first_fixed is not None:
+                    fixed_index, rule = first_fixed, self.survivors[first_fixed]
                     prior_new = _or([z3.And(slot_hit, slot["gap"] <= fixed_index)
                         for slot, slot_hit in zip(self.slots, hits)])
                     selected = z3.Not(prior_new)
@@ -224,10 +254,14 @@ class RegionProblem:
             if not z3.is_true(model.eval(slot["on"], model_completion=True)):
                 continue
             length = model.eval(slot["length"], model_completion=True).as_long()
-            atoms = [self.pool[model.eval(variable, model_completion=True).as_long()]
-                     for variable in slot["atoms"][:length]]
-            ops = ["&" if z3.is_true(model.eval(variable, model_completion=True)) else "|"
-                   for variable in slot["ops"][:max(0, length - 1)]]
+            if self.guard_library is None:
+                atoms = [self.pool[model.eval(variable, model_completion=True).as_long()]
+                         for variable in slot["atoms"][:length]]
+                ops = ["&" if z3.is_true(model.eval(variable, model_completion=True)) else "|"
+                       for variable in slot["ops"][:max(0, length - 1)]]
+            else:
+                guard = self.guard_library[model.eval(slot["guard"], model_completion=True).as_long()]
+                atoms, ops = list(guard["atoms"]), list(guard["ops"])
             rule = {"action": model.eval(slot["action"], model_completion=True).as_long(),
                     "atoms": atoms}
             if "|" in ops:
@@ -276,6 +310,8 @@ def region_models(source, samples, clone, check_solver, diagnostic, region,
                 "construction_ms": construction_ms if index == 0 else 0,
                 "solve_ms": (time.perf_counter() - started) * 1000,
                 "path_id": getattr(samples, "path_id", None),
+                "backend": "chain" if problem.guard_library is None else "whole_guards",
+                "guard_candidates": 0 if problem.guard_library is None else len(problem.guard_library),
                 "scope": "one path; finite local native-chain first-witness projection"}
         if status == z3.unknown:
             info["reason"] = problem.solver.reason_unknown()

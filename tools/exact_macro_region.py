@@ -193,7 +193,9 @@ def region_edits(rules, samples, clone, check_solver, diagnostic=None,
                  max_slots=2, max_terms=3, max_atoms=16, max_actions=4,
                  max_gaps=6, max_models=1, timeout_ms=100,
                  cost_bound=None, allow_equal=False, structural=True,
-                 regions=None, default_branches=False, region_offset=0):
+                 regions=None, default_branches=False, region_offset=0,
+                 structural_prior=None, backend="whole_guards", max_guards=96,
+                 guard_beam=48, guard_expansions=12000):
     """Yield (region_* kind, complete_rules), always for real replay.
 
     cost_bound is EXCLUSIVE sum(rule_cost + 1), i.e. nonempty text chars + 1.
@@ -221,6 +223,18 @@ def region_edits(rules, samples, clone, check_solver, diagnostic=None,
             continue
         options = dict(max_slots=min(max_slots, max(2, len(donors))), max_terms=max_terms,
             timeout_ms=timeout_ms, cost_bound=cost_bound, allow_equal=allow_equal)
+
+        if backend not in ("whole_guards", "chain"):
+            raise ValueError("region backend must be whole_guards or chain")
+        if backend == "whole_guards":
+            guards, guard_stats = _module("exact_macro_region_guards").guard_candidates(
+                source, samples, region, max_terms=max_terms, max_candidates=max_guards,
+                beam_width=guard_beam, max_expansions=guard_expansions,
+                structural_prior=structural_prior)
+            options["guard_library"] = guards
+            if diagnostic is not None:
+                diagnostic(dict(guard_stats, kind="region_guards", donors=list(donors),
+                    status="finite_candidates", path_id=getattr(samples, "path_id", None)), None)
 
         def report(info, smt):
             statuses.append(info["status"])

@@ -8,6 +8,7 @@ import hashlib
 import importlib.util
 import json
 import math
+import os
 import re
 from pathlib import Path
 import queue
@@ -828,6 +829,8 @@ def main():
     parser.add_argument("--compress-region", action="store_true", help="optional bounded joint region turns after ordinary search stalls")
     parser.add_argument("--compress-learning", action="store_true", help="optional task-local candidate ranking")
     parser.add_argument("--compress-adaptive", action="store_true", help="optional task-local strategy ordering")
+    parser.add_argument("--compress-model", type=Path, default=os.environ.get('JX3_EXACT_MACRO_MODEL'),
+                        help="optional frozen offline prior; incompatible files fall back to ordinary search")
     parser.add_argument("--strategy", choices=("prototype", "bounded"), default="prototype")
     args = parser.parse_args()
     run_job(args)
@@ -1046,12 +1049,30 @@ def run_job(args):
             module = compression_module()
             oracle_id = hashlib.sha256(args.exe.read_bytes()).hexdigest()
             learning = None
-            if getattr(args,'compress_learning',False) or getattr(args,'compress_adaptive',False):
+            model_path = getattr(args,'compress_model',None)
+            if model_path or getattr(args,'compress_learning',False) or getattr(args,'compress_adaptive',False):
                 lm = module.search_module('exact_macro_learning')
                 scene_id = hashlib.sha256(json.dumps(scene,sort_keys=True,separators=(',',':')).encode()).hexdigest()
-                learning = lm.LearningSession(scene_id,oracle_id,'local:'+scene_id,
-                    enabled=getattr(args,'compress_learning',False),
-                    bandit_enabled=getattr(args,'compress_adaptive',False))
+                if model_path:
+                    try:
+                        # A model is numbers and anonymous shapes only. It is
+                        # never executable code or a library of macro answers.
+                        if model_path.stat().st_size > 2_000_000:
+                            raise ValueError('offline prior exceeds size limit')
+                        model = json.loads(model_path.read_text(encoding='utf-8'))
+                        learning = lm.LearningSession.from_prior(model,contract_hash=scene_id,
+                            oracle_version=oracle_id,source_group='local:'+scene_id,
+                            version=scene['version'],mount=scene['mount'])
+                        write(args.out / 'compression-model.json',{'status':'loaded',
+                            'sha256':hashlib.sha256(model_path.read_bytes()).hexdigest(),
+                            'training':False,'reference_macro_input':False})
+                    except (OSError,ValueError,TypeError,KeyError) as error:
+                        write(args.out / 'compression-model.json',{'status':'fallback',
+                            'reason':str(error),'training':False})
+                elif getattr(args,'compress_learning',False) or getattr(args,'compress_adaptive',False):
+                    learning = lm.LearningSession(scene_id,oracle_id,'local:'+scene_id,
+                        enabled=getattr(args,'compress_learning',False),
+                        bandit_enabled=getattr(args,'compress_adaptive',False))
             compression_started, compression_paused = time.perf_counter(), PAUSED_SECONDS
             frozen = json.loads(json.dumps(scene))
             write(args.out / "compression-contract.json", {"scene":frozen,

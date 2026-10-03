@@ -234,7 +234,7 @@ class RegionContracts(unittest.TestCase):
             lambda info, _: reports.append(info), regions=[(0, 1)], default_branches=False,
             structural=False, max_models=1))
         self.assertEqual(output, [])
-        self.assertEqual(reports[0]["status"], "unknown")
+        self.assertEqual(next(info for info in reports if info["kind"] == "region_sat")["status"], "unknown")
         self.assertEqual(reports[-1]["unknown_checks"], 1)
         self.assertEqual(reports[-1]["unsat_checks"], 0)
 

@@ -39,6 +39,7 @@ def main():
     parser.add_argument('--region',action='store_true',help='Joint native-chain region search')
     parser.add_argument('--learning',action='store_true',help='Optional candidate ranking; heldout contracts stay frozen')
     parser.add_argument('--adaptive',action='store_true',help='Optional measured strategy allocation')
+    parser.add_argument('--model',type=Path,help='Frozen offline prior; no update from heldout evaluations')
     parser.add_argument('--source-group',default='holdout:fixed325')
     parser.add_argument('--macro', type=Path, help='Certified input macro; defaults to exact.txt')
     args = parser.parse_args()
@@ -82,11 +83,18 @@ def main():
                   scene_sha256=hashlib.sha256(json.dumps(scene,sort_keys=True,separators=(',',':')).encode()).hexdigest(),
                   module_sha256=hashlib.sha256(args.module.read_bytes()).hexdigest())}
     learner = None
-    if args.learning or args.adaptive:
+    if args.model or args.learning or args.adaptive:
         lm = load('learning',ROOT/'tools/exact_macro_learning.py')
-        learner = lm.LearningSession(report['versions']['scene_sha256'],
-            report['versions']['oracle_sha256'],args.source_group,enabled=args.learning,
-            bandit_enabled=args.adaptive,split='test' if args.source_group.startswith('holdout:') else 'train')
+        if args.model:
+            model = json.loads(args.model.read_text(encoding='utf-8'))
+            learner = lm.LearningSession.from_prior(model,contract_hash=report['versions']['scene_sha256'],
+                oracle_version=report['versions']['oracle_sha256'],source_group=args.source_group,
+                version=scene['version'],mount=scene['mount'])
+            report['versions']['model_sha256'] = hashlib.sha256(args.model.read_bytes()).hexdigest()
+        else:
+            learner = lm.LearningSession(report['versions']['scene_sha256'],
+                report['versions']['oracle_sha256'],args.source_group,enabled=args.learning,
+                bandit_enabled=args.adaptive,split='test' if args.source_group.startswith('holdout:') else 'train')
     profiler = cProfile.Profile() if args.profile else None
     def check():
         if time.perf_counter()-started > args.seconds:

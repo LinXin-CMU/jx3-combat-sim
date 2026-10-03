@@ -76,8 +76,9 @@ class LearningTests(unittest.TestCase):
                  (dict(failed(), status="error"), {}, "infrastructure_error"),
                  (dict(failed(), status="unknown"), {}, "solver_unknown"),
                  (dict(failed(), status="budget_exhausted"), {}, "observation_unknown"),
-                 ({"status": "ok", "comparison": {"reproduced": False}}, {}, "uncertified"),
-                 ({"status": "ok", "comparison": {"reproduced": True}}, {}, "uncertified")]
+                 ({"status": "ok", "truncated": False, "comparison": {"reproduced": False}}, {}, "uncertified"),
+                 ({"status": "ok", "truncated": False, "comparison": {"reproduced": True}}, {}, "uncertified"),
+                 ({"status": "ok", "comparison": {"reproduced": True, "completed_full_replay": True}}, {}, "truncated")]
         initial = session.to_dict()
         for n, (replay, flags, category) in enumerate(cases):
             result = self.feedback(session, self.prepare(session, str(n)), replay, **flags)
@@ -218,6 +219,89 @@ class LearningTests(unittest.TestCase):
             LEARNING.LearningSession.from_dict(data, contract_hash="other", oracle_version="oracle-v1")
         with self.assertRaises(ValueError):
             LEARNING.LearningSession.from_dict(data, contract_hash="contract", oracle_version="other")
+
+
+class OfflinePriorTests(unittest.TestCase):
+    def model(self, labels=12):
+        prior = LEARNING.structural_prior([([{"action": 0, "atoms": [0, 1, 2], "ops": ["&", "|"]}],
+            ["buff:甲", "bufftime:乙<5", "rage>3"])])
+        return dict(schema="exact-macro-offline-prior", prior_version=LEARNING.PRIOR_VERSION,
+            feature_schema_version=LEARNING.FEATURE_SCHEMA_VERSION, feature_names=list(LEARNING.FEATURE_NAMES),
+            model_version=LEARNING.MODEL_VERSION, native_semantics=LEARNING.NATIVE_SEMANTICS,
+            oracle_versions=["oracle-v1"], applicable_contexts=[dict(version="version", mount="mount")],
+            weights=[0.1]*len(LEARNING.FEATURE_NAMES), cost_weights=[0.2]*len(LEARNING.FEATURE_NAMES),
+            trained_labels=labels, cost_labels=labels, cost_log_mean=2.0, min_labels=1, structural_prior=prior,
+            training_summary=dict(train_family_hashes=[LEARNING.candidate_hash("train-family")],
+                train_examples=labels, positive_labels=labels//2, negative_labels=labels-labels//2))
+
+    def load(self, model, **kwargs):
+        return LEARNING.LearningSession.from_prior(model, **dict(dict(contract_hash="new-contract",
+            oracle_version="oracle-v1", source_group="unseen-family", version="version", mount="mount"), **kwargs))
+
+    def test_anonymous_static_shapes_preserve_connectors_and_never_claim_native_labels(self):
+        model = self.model()
+        renamed = LEARNING.structural_prior([([{"action": 999, "atoms": [0, 1, 2], "ops": ["&", "|"]}],
+            ["buff:完全不同", "bufftime:另一个<99.9", "sun>8"])])
+        self.assertEqual(model["structural_prior"], renamed)
+        self.assertEqual(renamed["shapes"][0]["roles"], ["presence", "clock", "resource"])
+        self.assertEqual(renamed["shapes"][0]["ops"], ["&", "|"])
+        self.assertNotIn("labels", renamed)
+        self.assertNotIn("甲", json.dumps(model, ensure_ascii=False))
+
+    def test_cross_contract_prior_rebinds_provenance_and_freezes_real_feedback(self):
+        session = self.load(self.model())
+        values = LEARNING.features([], [{"action": 1, "atoms": []}], [], 100, 80)
+        before = session.to_dict()
+        record = session.prepare("own-candidate", "own-path", "region", values, 100, 80)
+        self.assertEqual(record["binding"]["contract_hash"], "new-contract")
+        self.assertTrue(record["learned_prediction"])
+        self.assertFalse(session.training)
+        verdict = session.feedback(record, passed(), binding=record["binding"])
+        self.assertFalse(verdict["trained"])
+        self.assertEqual(session.weights, before["weights"])
+        self.assertEqual(session.labels, before["labels"])
+        self.assertEqual(session.structural_prior, self.model()["structural_prior"])
+        self.assertFalse(session.bandit_enabled)
+
+    def test_schema_executor_grammar_context_and_train_family_overlap_are_rejected(self):
+        model = self.model()
+        for field, value in (("feature_names", list(reversed(LEARNING.FEATURE_NAMES))),
+                             ("native_semantics", "ordinary_boolean_precedence"),
+                             ("weights", [float("nan")]*len(LEARNING.FEATURE_NAMES)),
+                             ("weights", [0]), ("model_version", "unknown")):
+            altered = copy.deepcopy(model)
+            altered[field] = value
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                self.load(altered)
+        for context in ({"oracle_version": "other"}, {"version": "other"}, {"mount": "other"},
+                        {"source_group": "train-family"}, {"source_group": "holdout:train-family"}):
+            with self.subTest(context=context), self.assertRaises(ValueError):
+                self.load(model, **context)
+        altered = copy.deepcopy(model)
+        altered["macro_text"] = "/cast 私有技能"
+        with self.assertRaises(ValueError):
+            self.load(altered)
+
+    def test_static_only_model_is_heuristic_and_single_class_predictor_is_rejected(self):
+        session = self.load(self.model(0))
+        values = LEARNING.features([], [], [], 10, 5)
+        self.assertFalse(session.prepare("own", "path", "kind", values, 10, 5)["learned_prediction"])
+        model = self.model()
+        model["training_summary"].update(positive_labels=12, negative_labels=0)
+        with self.assertRaises(ValueError):
+            self.load(model)
+
+    def test_structural_prior_rejects_named_roles_invalid_native_chain_and_forged_counts(self):
+        prior = self.model()["structural_prior"]
+        for field, value in (("roles", ["buff:甲", "clock", "resource"]),
+                             ("ops", ["&"]), ("count", 99), ("frequency", 0.5)):
+            altered = copy.deepcopy(prior)
+            altered["shapes"][0][field] = value
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                LEARNING.validate_structural_prior(altered)
+        session = self.load(self.model())
+        restored = LEARNING.LearningSession.from_dict(session.to_dict(), contract_hash="new-contract", oracle_version="oracle-v1")
+        self.assertEqual(restored.structural_prior, prior)
 
 
 if __name__ == "__main__":

@@ -266,6 +266,43 @@ class Samples:
                 return False
         return True
 
+    def learning_context(self, rules):
+        """Pre-replay measurements on this guide's first observed witnesses.
+
+        Old snapshots after a legal earlier witness are not failure labels.
+        These measurements guide ranking only; no candidate is certified or
+        removed here, and another candidate's trajectory is never consulted.
+        """
+        selections, remaining = self.selections(rules)
+        selected, wrong, legal_hits = self.all & ~remaining, 0, 0
+        for rule, bits in zip(rules, selections):
+            self.check()
+            action = rule['action']
+            wrong |= bits & ~self.allowed[action]
+            legal_hits |= self.hit(rule) & self.allowed[action]
+        covered = forbidden = wait_conflicts = priority_conflicts = 0
+        compatible = True
+        for cursor, rows in self.event_rows.items():
+            self.check()
+            choices, window = selected & rows, self.groups.get(cursor, 0)
+            if not choices:
+                compatible &= not bool(window)
+                continue
+            first = choices & -choices
+            legal = bool(first & window) and not bool(first & wrong)
+            if legal:
+                covered += 1
+            else:
+                compatible = False
+                forbidden += 1
+                index = first.bit_length() - 1
+                wait_conflicts += bool(self.rows[index].get('wait_allowed', False))
+                priority_conflicts += bool(first & wrong & legal_hits)
+        return dict(window_coverage=covered/max(1, len(self.groups)),
+                    forbidden_hits=forbidden, wait_conflicts=wait_conflicts,
+                    priority_conflicts=priority_conflicts,
+                    observed_rows=len(self.rows), static_compatible=compatible)
+
     def covers(self, positives, negatives):
         """Short alternative conjunctions; masks are guidance, not equivalence."""
         key = positives, negatives
@@ -771,7 +808,7 @@ def compress(rules, atoms, actions, baseline, render, verify, check,
                "global_branches":0,
                "region_trials":0, "certified_alternatives":0,
                "candidate_ms":0.0, "sample_ms":0.0, "verify_wall_ms":0.0, "feedback_wall_ms":0.0,
-               "contract_id":contract_id, "pipeline_version":"20261002-window-region-v1",
+               "contract_id":contract_id, "pipeline_version":"20261003-library-prior-region-guards-v1",
                "region_search":region_search,
                "learning_enabled":bool(learning is not None and learning.enabled),
                "adaptive_enabled":bool(learning is not None and learning.bandit_enabled),
@@ -784,6 +821,7 @@ def compress(rules, atoms, actions, baseline, render, verify, check,
         started = time.perf_counter()
         guide = Samples(replay['rows'],atoms,actions,check,dict(contract_id=contract_id,
             macro_sha256=hashlib.sha256(render(program).encode()).hexdigest(),kind=kind))
+        guide.source_rules = clone(program)
         summary['sample_ms'] += (time.perf_counter()-started)*1000
         return guide
 
@@ -806,7 +844,9 @@ def compress(rules, atoms, actions, baseline, render, verify, check,
         path_id = getattr(active_path,'path_id',contract_id)
         key = (text,path_id,summary['best_chars'])
         if key not in prepared:
-            values = learning_module.features(best,trial,atoms,summary['best_chars'],cost)
+            context = active_path.learning_context(trial) if active_path is not None else None
+            source = getattr(active_path, 'source_rules', best)
+            values = learning_module.features(source,trial,atoms,summary['best_chars'],cost,context)
             prepared[key] = learning.prepare(hashlib.sha256(text.encode()).hexdigest(),path_id,
                                             kind,values,summary['best_chars'],cost)
         return prepared[key]
@@ -846,7 +886,12 @@ def compress(rules, atoms, actions, baseline, render, verify, check,
         summary['verify_wall_ms'] += (time.perf_counter()-started_verify)*1000
         passed = certified(replay)
         if learning_record is not None:
-            observations.append(learning.feedback(learning_record,replay,binding=learning_record['binding']))
+            observation = learning.feedback(learning_record,replay,binding=learning_record['binding'])
+            observations.append(observation)
+            # Local diagnostics can be used for offline training. No macro
+            # body/state is included, and the public summary omits this event.
+            diagnostic({'kind':'learning_observation', 'record':learning_record,
+                        'feedback':observation},None)
             summary['learning_labels'] = learning.labels
         records.append({"trial":summary["trial_count"],"kind":kind,"chars":cost,
                         "batch_rules":batch_rules,
@@ -883,6 +928,7 @@ def compress(rules, atoms, actions, baseline, render, verify, check,
                                     candidate_text=text) if search_branch else None
             if proposal is not None:
                 cursor,signature,guide = proposal
+                guide.source_rules = clone(trial)
                 identity = (signature,text) if joint else signature
                 if identity not in branch_seen:
                     branch_seen.add(identity)
@@ -961,6 +1007,34 @@ def compress(rules, atoms, actions, baseline, render, verify, check,
             return [by_text[record['binding']['candidate_hash']] for record in ranked]
         return [(kind,trial) for _,_,kind,trial in items]
 
+    def ranked_stream(iterable, lookahead=16):
+        """Bound model lookahead without exhausting expensive generators.
+
+        Every generated candidate remains eligible. A new incumbent ends this
+        pass as before; ranking cannot remove a candidate or reuse its verdict.
+        """
+        iterator = iter(candidates(iterable))
+        exhausted = False
+        while not exhausted:
+            batch = {}
+            for _ in range(lookahead):
+                try:
+                    kind, trial = next(iterator)
+                except StopIteration:
+                    exhausted = True
+                    break
+                text = render(trial)
+                cost = char_count(text)
+                if text not in seen and cost < summary['best_chars']:
+                    batch.setdefault(text, (kind,trial,cost))
+            if batch:
+                ranked = learning.rank([prepare(kind,trial,text,cost)
+                    for text,(kind,trial,cost) in batch.items()])
+                lookup = {hashlib.sha256(text.encode()).hexdigest():(kind,trial)
+                          for text,(kind,trial,_) in batch.items()}
+                for record in ranked:
+                    yield lookup[record['binding']['candidate_hash']]
+
     def strategy_pass(tasks,guide):
         names = list(tasks)
         if learning is not None:
@@ -973,7 +1047,7 @@ def compress(rules, atoms, actions, baseline, render, verify, check,
             started,offset = time.perf_counter(),len(observations)
             # Family generation deliberately interleaves actions/shapes.
             # Preserve that fairness unless optional ranking is enabled.
-            stream = (ordered(tasks[name]()) if learning is not None and learning.enabled
+            stream = (ranked_stream(tasks[name]()) if learning is not None and learning.enabled
                       else candidates(tasks[name]()))
             for kind,trial in stream:
                 evaluate(kind,trial)
@@ -1001,7 +1075,9 @@ def compress(rules, atoms, actions, baseline, render, verify, check,
                 for kind,trial in candidates(region_edits(seed,guide,check_solver,diagnostic,
                         cost_bound=old_cost+2,allow_equal=True,region_offset=2*turn,
                         timeout_ms=(100,300,500)[turn],max_terms=(3,3,4)[turn],
-                        max_models=2 if turn else 1)):
+                        max_models=2 if turn else 1,
+                        **({'structural_prior':learning.structural_prior}
+                           if learning is not None and getattr(learning,'structural_prior',None) else {}))):
                     evaluate(kind,trial,allow_equal=True)
                     if summary['best_chars'] < old_cost:
                         return
