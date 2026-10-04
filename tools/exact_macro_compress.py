@@ -13,6 +13,7 @@ from pathlib import Path
 import z3
 
 _MODULES = {}
+_TRUTH_DIGITS = bytes([ord('0')] + [ord('1')] * 255)
 
 
 def search_module(name):
@@ -168,18 +169,18 @@ class Samples:
         self.executable = [0] * len(actions)
         self.allowed = [0] * len(actions)
         self.required, self.groups, self.event_rows = 0, {}, {}
+        truth_rows = []
         for s, row in enumerate(rows):
             check()
-            path_hash.update(bytes(row['truth']))
+            truth_row = bytes(row['truth'])
+            truth_rows.append(truth_row)
+            path_hash.update(truth_row)
             path_hash.update(json.dumps((row.get('cursor',s),row.get('time'),
                 list(row['executable']),row['allowed'],row.get('wait_allowed',False)),
                 separators=(',',':')).encode())
             bit = 1 << s
             cursor = row.get('cursor', s)
             self.event_rows[cursor] = self.event_rows.get(cursor, 0) | bit
-            for k, value in enumerate(row["truth"]):
-                if value:
-                    self.truth[k] |= bit
             for a, value in enumerate(row["executable"]):
                 if value:
                     self.executable[a] |= bit
@@ -189,6 +190,23 @@ class Samples:
                 self.groups[row.get("cursor", s)] = self.groups.get(row.get("cursor", s), 0) | bit
                 if not row.get("wait_allowed", False):
                     self.required |= bit
+        if truth_rows and all(len(row) == len(atoms) for row in truth_rows):
+            # Native observations are a rectangular byte matrix. Transpose
+            # with C byte strides and parse binary digits in C instead of
+            # doing rows * atoms Python big-int updates. Reverse row order
+            # so bit s still denotes exactly row s. No path/candidate reuse.
+            matrix = b''.join(reversed(truth_rows))
+            for k in range(len(atoms)):
+                if k % 32 == 0:
+                    check()
+                self.truth[k] = int(matrix[k::len(atoms)].translate(_TRUTH_DIGITS), 2)
+        else:
+            # Keep sparse/partial fixture behavior, including absent columns.
+            for s, row in enumerate(truth_rows):
+                check()
+                for k, value in enumerate(row):
+                    if value:
+                        self.truth[k] |= 1 << s
         self.guards = {}
         self.hit_cache = {}
         self.atom_costs = [char_count(atom) for atom in atoms]
@@ -862,7 +880,7 @@ def compress(rules, atoms, actions, baseline, render, verify, check,
                "global_branches":0,
                "region_trials":0, "certified_alternatives":0,
                "candidate_ms":0.0, "sample_ms":0.0, "verify_wall_ms":0.0, "feedback_wall_ms":0.0,
-               "contract_id":contract_id, "pipeline_version":"20261004-context-leaf-bridges-v1",
+               "contract_id":contract_id, "pipeline_version":"20261004-python-profile-speed-v1",
                "region_search":region_search,
                "learning_enabled":bool(learning is not None and learning.enabled),
                "adaptive_enabled":bool(learning is not None and learning.bandit_enabled),

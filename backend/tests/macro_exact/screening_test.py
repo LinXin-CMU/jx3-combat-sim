@@ -3,6 +3,7 @@ import argparse
 import importlib.util
 import json
 from pathlib import Path
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[3]
 spec = importlib.util.spec_from_file_location('synth',ROOT/'tools/exact-macro-synth.py')
@@ -24,6 +25,19 @@ def main():
     try:
         prepared = oracle.run(scene)
         assert prepared['status']=='ok'
+        # Equal-length bridges omit only the large raw archive. Independent
+        # full replay, truth guidance and every comparison remain identical.
+        with tempfile.TemporaryDirectory(prefix='exact-archive-') as folder:
+            archive = Path(folder)/'full.json'
+            stored = oracle.run(dict(scene,candidate=passed,atoms=prepared['atoms'],
+                                     archive_path=str(archive)))
+            unstored = oracle.run(dict(scene,candidate=passed,atoms=prepared['atoms']))
+            assert stored['comparison'] == unstored['comparison']
+            assert stored['rows'] == unstored['rows']
+            assert stored['actual_fingerprint'] == unstored['actual_fingerprint']
+            full = json.loads(archive.read_text(encoding='utf-8'))
+            assert full['comparison'] == unstored['comparison']
+            assert len(full['actual']) == len(unstored['actual'])
         for candidate in [passed,timer,'/cast 血怒\n/cast 盾刀']:
             for stop in [False,True]:
                 full = oracle.run(dict(scene,candidate=candidate,atoms=prepared['atoms'],stop_on_divergence=stop))

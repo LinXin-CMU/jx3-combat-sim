@@ -994,7 +994,7 @@ def run_job(args):
         tried_candidates = set()
 
         last_verification = None
-        def verify(text, screening=False):
+        def verify(text, screening=False, archive_full=True):
             nonlocal last_verification
             # Most stage-two edits need only a cheap verdict, so observe one
             # legal predicate. Whole-program CEGIS selectively repeats failures
@@ -1011,12 +1011,15 @@ def run_job(args):
                 # A successful search replay always gets an independent full
                 # replay. Full states never cross the browser or solver pipe.
                 archive = args.out / ("full-" + hashlib.sha256(text.encode()).hexdigest()[:16] + ".json")
-                result = oracle.run(dict(scene, candidate=text, atoms=atoms,
-                    archive_path=str(archive.resolve())))
+                request = dict(scene, candidate=text, atoms=atoms)
+                if archive_full:
+                    request['archive_path'] = str(archive.resolve())
+                result = oracle.run(request)
                 if (result["status"] != "ok" or not result["comparison"]["reproduced"]
                         or result["comparison"].get("completed_full_replay") is not True or result.get("truncated", False)):
                     raise RuntimeError("full certification disagreed with search replay")
-                result["archive_file"] = archive.name
+                if archive_full:
+                    result["archive_file"] = archive.name
                 result.setdefault('timings_ms',{})['verification_total'] = first_ms + result['timings_ms'].get('round_trip',0)
             else:
                 result.setdefault('timings_ms',{})['verification_total'] = first_ms
@@ -1109,7 +1112,13 @@ def run_job(args):
                 (args.out / f"compact-candidate-{trial:04d}.txt").write_text(candidate,encoding="utf-8")
                 check_cancelled()
                 print(json.dumps({"phase":"replaying", "iteration":n}), flush=True)
-                result = verify(candidate,screening=True)
+                # Equal-length bridge candidates still get TWO independent
+                # native runs and the full observation catalog. Only their
+                # large raw-state archive is omitted; compact evidence keeps
+                # the certificate and their own path. Every shorter accepted
+                # macro, including descendants, retains its full archive.
+                result = verify(candidate,screening=True,
+                    archive_full=module.char_count(candidate) < report['compression']['best_chars'])
                 write(args.out / f"compact-replay-{trial:04d}.json", result)
                 print(json.dumps({"phase":"replayed", "iteration":n,
                                   "comparison":result["comparison"]}), flush=True)

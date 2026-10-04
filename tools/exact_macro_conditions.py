@@ -431,13 +431,19 @@ def window_guards(windows, negatives, samples, max_terms=6, max_candidates=8,
     pool = set(cache["pool"]) | preferred_set
     if len(pool) > max_atoms:
         ranked = []
+        coverage_by_mask = {}
         for offset, index in enumerate(pool):
             if offset % 64 == 0:
                 samples.check()
             mask = masks[index]
-            touched = sum(bool(mask & window) for window in residual)
-            excluded = (negative & ~mask).bit_count()
-            ranked.append((-(touched + excluded) / denominators[index],
+            coverage = coverage_by_mask.get(mask)
+            if coverage is None:
+                coverage = (sum(bool(mask & window) for window in residual)
+                            + (negative & ~mask).bit_count())
+                coverage_by_mask[mask] = coverage
+            # Share arithmetic only: every clock alias keeps its own index,
+            # cost, ordering and future native wake-up behavior.
+            ranked.append((-coverage / denominators[index],
                            costs[index], index))
         ranked.sort()
         chosen = sorted(preferred, key=lambda index: (costs[index], index))[:max_atoms]

@@ -34,6 +34,7 @@ def main():
     parser.add_argument('--seconds', type=float, default=90)
     parser.add_argument('--profile', action='store_true')
     parser.add_argument('--screening', action='store_true')
+    parser.add_argument('--archive-equal', action='store_true', help='Legacy A/B mode: also write large raw-state archives for equal-length bridges')
     parser.add_argument('--deep',action='store_true',help='Experimental whole-program counterexample search')
     parser.add_argument('--joint',action='store_true',help='Experimental competing-action counterexample search')
     parser.add_argument('--region',action='store_true',help='Joint native-chain region search')
@@ -61,12 +62,15 @@ def main():
             rule['ops'] = parts[1::2]
         rules.append(rule)
     oracle = synth.Oracle(args.exe.resolve())
-    def full_verify(text, screening=False):
+    def full_verify(text, screening=False, archive_full=True):
         result = oracle.run(dict(scene,candidate=text,atoms=['rage<0'] if screening else atoms,stop_on_divergence=True))
         first_ms = result.get('timings_ms',{}).get('round_trip',0)
         if result['comparison']['reproduced']:
-            result = oracle.run(dict(scene,candidate=text,atoms=atoms,
-                archive_path=str((args.out/'full-last-passed.json').resolve())))
+            request = dict(scene,candidate=text,atoms=atoms)
+            if archive_full:
+                request['archive_path'] = str((args.out/'full-last-passed.json').resolve())
+            result = oracle.run(request)
+            assert module.certified(result), 'full certification disagreed with search replay'
             result.setdefault('timings_ms',{})['verification_total'] = first_ms + result['timings_ms'].get('round_trip',0)
         else:
             result.setdefault('timings_ms',{})['verification_total'] = first_ms
@@ -101,8 +105,10 @@ def main():
             raise TimeoutError('test observation ended')
     def verify(text,n,kind):
         check()
-        result = full_verify(text,args.screening)
+        result = full_verify(text,args.screening,archive_full=args.archive_equal or
+            module.char_count(text) < report['summary']['best_chars'])
         report['trials'].append({'n':n,'kind':kind,'chars':module.char_count(text),
+            'candidate_sha256':hashlib.sha256(text.encode()).hexdigest(),
             'passed':module.certified(result),'elapsed_s':time.perf_counter()-started,
             'timings_ms':result.get('timings_ms',{})})
         return result

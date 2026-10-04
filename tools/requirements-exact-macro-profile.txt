@@ -1,0 +1,2 @@
+# Optional local diagnostic dependency; not needed by production workers.
+viztracer==1.1.1
