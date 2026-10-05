@@ -509,7 +509,7 @@ body.agent-fullheight #page-agent.active {
   z-index: 940;
   display: grid;
   grid-template-rows: auto auto auto auto minmax(0,1fr) auto;
-  width: min(400px, calc(100vw - 36px));
+  width: min(480px, calc(100vw - 36px));
   color: var(--agent-ink);
   background: var(--agent-panel);
   border: 1px solid var(--agent-line);
@@ -876,3 +876,77 @@ body.agent-fullheight #page-agent.active {
 .agent-macro-page-count.is-over-limit { color: var(--red); font-weight: 600; }
 .agent-draft-code.agent-macro-code { margin: 0; border: 0; border-radius: 0; padding: 10px; background: var(--agent-panel); font-size: 13px; line-height: 1.7; white-space: pre; overflow-wrap: normal; overflow-x: auto; }
 .agent-macro-code code { font-family: Consolas, 'SFMono-Regular', monospace; }
+
+/* Article typography is separate from compact diagnostic cards. */
+.agent-freeform-answer.agent-prose {
+  max-width: 78ch;
+  margin-inline: auto;
+  padding: 22px 24px 26px;
+  color: var(--agent-ink);
+  font-size: 14px;
+  line-height: 1.9;
+}
+
+.agent-provider-settings { margin-left: auto; flex: 0 0 auto; white-space: nowrap; }
+.agent-provider-row { flex-wrap: wrap; }
+.agent-provider-row > span { overflow-wrap: anywhere; }
+.agent-provider-dialog {
+  width: min(480px, calc(100vw - 32px)); max-height: calc(100dvh - 32px);
+  margin: auto; padding: 26px; box-sizing: border-box; overflow-y: auto;
+  border: 1px solid var(--border); border-radius: 10px;
+  background: var(--surface); color: var(--text); box-shadow: 0 20px 80px #0005;
+}
+.agent-provider-dialog::backdrop { background: #0007; }
+.agent-provider-dialog header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 22px; }
+.agent-provider-dialog header h2 { font-size: 20px; margin: 5px 0 0; }
+.agent-provider-dialog header button { font-size: 22px; width: 32px; height: 32px; }
+.agent-provider-dialog label { display: block; font-size: 13px; font-weight: 600; margin: 16px 0 7px; }
+.agent-provider-dialog .sim-input { display: block; width: 100%; height: 38px; box-sizing: border-box; font-size: 13px; min-width: 0; }
+.agent-provider-dialog small { display: block; color: var(--text-muted); line-height: 1.6; font-size: 12px; margin-top: 6px; }
+.agent-provider-dialog [role="status"] { min-height: 20px; font-size: 12px; line-height: 1.7; color: var(--text-muted); margin: 18px 0; overflow-wrap: anywhere; }
+.agent-provider-dialog [role="status"].is-error { color: var(--red, #b64c38); }
+.agent-provider-dialog footer { display: flex; justify-content: space-between; gap: 8px; border-top: 1px solid var(--border); padding-top: 18px; }
+.agent-provider-dialog footer div { display: flex; gap: 8px; }
+@media (max-width: 480px) {
+  .agent-provider-dialog { padding: 20px; }
+  .sim-ai-provider-row { flex-wrap: wrap; }
+  .sim-ai-provider-row > span { flex: 1; }
+}
+.agent-freeform-answer :is(h1,h2,h3,h4,h5,h6) {
+  color: var(--emphasis-fg);
+  font-weight: 600;
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+.agent-freeform-answer h1 { margin: 0 0 1.1em; font-size: 1.5em; }
+.agent-freeform-answer h2 { margin: 1.8em 0 .75em; padding-bottom: .45em; border-bottom: 1px solid var(--agent-line); font-size: 1.2em; }
+.agent-freeform-answer h3 { margin: 1.5em 0 .6em; font-size: 1.07em; }
+.agent-freeform-answer :is(h4,h5,h6) { margin: 1.3em 0 .5em; font-size: 1em; }
+.agent-freeform-answer > p,
+.agent-freeform-answer > .agent-prose-line { display: block; margin: 0 0 1em; }
+.agent-freeform-answer :is(ul,ol) { padding-left: 1.6em; margin: .65em 0 1.15em; }
+.agent-freeform-answer li { padding-left: .2em; margin: .55em 0; }
+.agent-freeform-answer li::marker { color: var(--agent-muted); font-weight: 600; }
+.agent-freeform-answer li :is(ul,ol) { margin: .4em 0; }
+.agent-freeform-answer li > .agent-prose-line { margin-top: .35em; }
+.agent-freeform-answer code { padding: .1em .3em; border-radius: 3px; background: var(--gold-tint); font-size: .9em; }
+.agent-freeform-answer pre { padding: 12px 14px; border: 1px solid var(--agent-line); border-radius: 5px; background: var(--agent-panel-2); line-height: 1.65; }
+.agent-freeform-answer .agent-prose-table { margin: 1.1em 0; }
+.agent-freeform-answer table { font-size: 13px; line-height: 1.75; }
+.agent-freeform-answer :is(th,td) { padding: 9px 11px; }
+.agent-freeform-answer hr { margin: 1.6em 0; border: 0; border-top: 1px solid var(--agent-line); }
+.agent-freeform-answer > :first-child { margin-top: 0; }
+.agent-freeform-answer > :last-child { margin-bottom: 0; }
+.sim-ai-result > .agent-freeform-answer { padding: 20px 18px 24px; }
+@media (max-width: 600px) {
+  .agent-freeform-answer.agent-prose { padding: 18px 16px 22px; }
+  .agent-freeform-answer h1 { font-size: 1.35em; }
+}
+/* Analysis uses the same visual language inside the shared assistant shell. */
+.assistant-shell .sim-ai-bubble-body { border-radius: 11px 11px 11px 3px; padding: 11px 13px; line-height: 1.8; }
+.assistant-shell .sim-ai-bubble.user .sim-ai-bubble-body { border-radius: 11px 11px 3px 11px; }
+.assistant-shell .sim-ai-result { border-radius: 12px; border-color: var(--gold-dim); }
+.assistant-shell .sim-ai-progress { border-radius: 10px; }
+.assistant-shell .sim-ai-empty { padding: 25px 15px; }
+.assistant-shell .sim-ai-empty h3 { font-weight: 600; letter-spacing: .03em; }
+.assistant-shell .sim-ai-dock-head select { border-radius: 7px; }

@@ -1525,211 +1525,43 @@ body.sim-fullheight #page-sim .sim-timeline-panel[data-resized="1"] {
   flex-shrink: 0;
 }
 
-/* 格挡值盾牌（双层：外层金属凸边框 + 内层深色凹陷 + 金属填充） */
+/* 银灰盾徽：固定图形由下向上填充，空值仍保留暗色轮廓。 */
 .sim-block-bar {
   position: relative;
   width: 22px;
   height: 30px;
   flex-shrink: 0;
-  /* 金属凸边（从左上入光的斜向高光 → 腰部暗 → 右下再回亮，做出圆凸感） */
-  background: linear-gradient(135deg,
-    #f4f6fa 0%,
-    #c0c6d0 18%,
-    #888c96 38%,
-    var(--border) 55%,
-    #888c96 72%,
-    #c0c6d0 88%,
-    #f4f6fa 100%
-  );
-  /* 外层盾形（22×30）：顶 2.5px 圆角 + 硬斜边 + Q 圆钝收尖 */
-  clip-path: path('M2.5,0 H19.5 A2.5,2.5 0 0 1 22,2.5 V15 L12.2,28.5 Q11,30 9.8,28.5 L0,15 V2.5 A2.5,2.5 0 0 1 2.5,0 Z');
-  overflow: hidden;
-  filter:
-    drop-shadow(0 1px 1px rgba(0,0,0,0.7))
-    drop-shadow(0 0 2px rgba(190,205,230,0.22));
+  filter: drop-shadow(0 1px 1px rgba(0,0,0,.65));
 }
-
-/* 内层：比外层缩 1.5px 的小盾形，深色凹陷底（空时露出来的内里） */
-.sim-block-bar-inner {
+.sim-block-shield {
   position: absolute;
-  inset: 0;
-  background: radial-gradient(ellipse at 30% 28%, #2a2c32 0%, #151619 40%, #05060a 85%);
-  clip-path: path('M2.5,1.5 H19.5 A1,1 0 0 1 20.5,2.5 V14 L11.5,26.8 Q11,28 10.5,26.8 L1.5,14 V2.5 A1,1 0 0 1 2.5,1.5 Z');
-  overflow: hidden;
+  bottom: 0;
+  left: 0;
+  display: block;
+  width: 22px;
+  height: 30px;
 }
-
+.sim-block-shield-empty { filter: brightness(.3); }
 .sim-block-fill {
   position: absolute;
+  bottom: 0;
   left: 0;
   right: 0;
-  bottom: 0;
-  /* height 由 JS 设置 0~100% */
   overflow: hidden;
-  /* 多层渐变叠加：
-     1) 中央棱脊（亮-暗折角，像凸起的刃线）
-     2) 左右内凹暗边（鼓心感）
-     3) 顶部入光高光（光源感）
-     4) 主金属纵向渐变（柱面反射基底） */
-  background:
-    /* 底部尖角渐暗（避免棱脊直通到底变成死白） */
-    linear-gradient(180deg,
-      transparent 55%,
-      rgba(0,0,0,0.18) 78%,
-      rgba(0,0,0,0.55) 100%
-    ),
-    /* 左棱（25%） */
-    linear-gradient(90deg,
-      transparent 12%,
-      rgba(255,255,255,0.10) 22%,
-      rgba(255,255,255,0.24) 25%,
-      rgba(0,0,0,0.10) 28%,
-      transparent 38%
-    ),
-    /* 中央棱（50%，最显眼） */
-    linear-gradient(90deg,
-      transparent 37%,
-      rgba(255,255,255,0.14) 47%,
-      rgba(255,255,255,0.34) 50%,
-      rgba(0,0,0,0.14) 53%,
-      transparent 63%
-    ),
-    /* 右棱（75%） */
-    linear-gradient(90deg,
-      transparent 62%,
-      rgba(255,255,255,0.10) 72%,
-      rgba(255,255,255,0.24) 75%,
-      rgba(0,0,0,0.10) 78%,
-      transparent 88%
-    ),
-    /* 边缘内凹 */
-    linear-gradient(90deg,
-      rgba(0,0,0,0.40) 0%,
-      rgba(0,0,0,0.08) 14%,
-      transparent 30%,
-      transparent 70%,
-      rgba(0,0,0,0.08) 86%,
-      rgba(0,0,0,0.40) 100%
-    ),
-    /* 入光（左上） */
-    radial-gradient(ellipse at 30% 18%,
-      rgba(255,255,255,0.28) 0%,
-      rgba(255,255,255,0.08) 18%,
-      transparent 40%
-    ),
-    /* 主金属纵向 */
-    linear-gradient(
-      180deg,
-      #e8ecf2 0%,
-      #b8bdc8 14%,
-      #787d88 30%,
-      var(--border-soft) 50%,
-      var(--border) 68%,
-      #858a94 86%,
-      #4a4d55 100%
-    );
-  /* 只保留顶部横线（对齐盾形平直的上边）；去掉左/右 inset：
-     它们画在矩形 bounding box 上，到三角区就断，显得不对称 */
-  box-shadow:
-    inset 0 1px 0 rgba(255,255,255,0.55);
-  transition: height 0.35s cubic-bezier(0.25, 0, 0.2, 1);
-  animation: block-sheen-pulse 4s ease-in-out infinite;
+  transition: height .25s ease-out;
 }
-
-/* 光波扫过：窄而亮的镜面反光 */
-.sim-block-glow {
-  position: absolute;
-  inset: 0;
-  border-radius: 2px;
-  background: linear-gradient(
-    105deg,
-    transparent 0%,
-    transparent 42%,
-    rgba(255,255,255,0.15) 46%,
-    rgba(255,255,255,0.75) 50%,
-    rgba(255,255,255,0.15) 54%,
-    transparent 58%,
-    transparent 100%
-  );
-  background-size: 250% 100%;
-  background-repeat: no-repeat;
-  mix-blend-mode: screen;
-  animation: block-sweep 3.2s cubic-bezier(.6,.1,.4,.9) infinite;
+.sim-block-fill.block-high { filter: brightness(1.12); }
+#sim_block_value {
+  font-size: 13px;
+  font-weight: normal;
+  background: none;
+  -webkit-text-fill-color: currentColor;
+  color: var(--block-value-text, #c8cdd5);
+  text-shadow: none;
+  filter: none;
 }
-
-@keyframes block-sheen-pulse {
-  0%, 100% { box-shadow: inset 0 1px 0 rgba(255,255,255,0.5); }
-  50%      { box-shadow: inset 0 1px 0 rgba(255,255,255,0.8); }
-}
-
-@keyframes block-sweep {
-  0%   { background-position: 180% 0; }
-  60%  { background-position: -80% 0; }
-  100% { background-position: -80% 0; }
-}
-
-/* 高格挡值：冷银蓝调更亮；三道棱 */
-.sim-block-fill.block-high {
-  background:
-    linear-gradient(180deg,
-      transparent 55%,
-      rgba(0,0,0,0.20) 78%,
-      rgba(0,0,0,0.55) 100%
-    ),
-    linear-gradient(90deg,
-      transparent 12%,
-      rgba(255,255,255,0.15) 22%,
-      rgba(255,255,255,0.36) 25%,
-      rgba(0,0,0,0.14) 28%,
-      transparent 38%
-    ),
-    linear-gradient(90deg,
-      transparent 37%,
-      rgba(255,255,255,0.22) 47%,
-      rgba(255,255,255,0.5) 50%,
-      rgba(0,0,0,0.18) 53%,
-      transparent 63%
-    ),
-    linear-gradient(90deg,
-      transparent 62%,
-      rgba(255,255,255,0.15) 72%,
-      rgba(255,255,255,0.36) 75%,
-      rgba(0,0,0,0.14) 78%,
-      transparent 88%
-    ),
-    linear-gradient(90deg,
-      rgba(0,0,0,0.40) 0%,
-      rgba(0,0,0,0.10) 14%,
-      transparent 30%,
-      transparent 70%,
-      rgba(0,0,0,0.10) 86%,
-      rgba(0,0,0,0.40) 100%
-    ),
-    radial-gradient(ellipse at 30% 18%,
-      rgba(255,255,255,0.4) 0%,
-      rgba(255,255,255,0.12) 18%,
-      transparent 42%
-    ),
-    linear-gradient(
-      180deg,
-      #ffffff 0%,
-      #c8d0dc 14%,
-      #868e9c 30%,
-      #464c58 50%,
-      #606672 68%,
-      #98a0ae 86%,
-      #545e6c 100%
-    );
-  animation: block-sheen-pulse-high 2.2s ease-in-out infinite;
-}
-
-.sim-block-fill.block-high .sim-block-glow {
-  animation: block-sweep 2.0s cubic-bezier(.6,.1,.4,.9) infinite;
-}
-
-@keyframes block-sheen-pulse-high {
-  0%, 100% { box-shadow: inset 0 1px 0 rgba(255,255,255,0.65); }
-  50%      { box-shadow: inset 0 1px 0 rgba(255,255,255,0.95); }
-}
+body.light-theme { --block-value-text: #555d68; }
+@media (prefers-reduced-motion: reduce) { .sim-block-fill { transition: none; } }
 
 .sim-block-value {
   font-family: "Consolas", monospace;
@@ -11135,3 +10967,10 @@ body.wizard-mode .container {
 
 .seq-floating-toolbar button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .seq-toolbar-body button.seq-zoom-value { border: none; background: transparent; color: inherit; font-family: inherit; padding: 0; cursor: pointer; }
+/* Structured skill damage descriptions */
+.skill-damage-description { margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--border-color, #ffffff28); max-width: 510px; }
+.skill-damage-row { display: grid; gap: 2px; margin: 0 0 7px; line-height: 1.5; }
+.skill-damage-label { font-weight: 600; opacity: .8; }
+.skill-description { width: min(500px, calc(100vw - 64px)); white-space: normal; }
+.skill-active-talents { margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--border-color, #ffffff28); }
+.skill-active-talent + .skill-active-talent { margin-top: 7px; }

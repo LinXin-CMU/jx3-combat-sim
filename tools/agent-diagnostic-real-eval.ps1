@@ -54,7 +54,7 @@ $suite = Get-Content -LiteralPath $casesPath -Raw -Encoding UTF8 | ConvertFrom-J
 $fixture = Get-Content -LiteralPath $scenarioPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $simulation = $fixture.simulation
 $simulation.sequence = @('__macro__') * [int]$fixture.macro_slots
-$allowedTools = @(
+$allowedTools = @('lookup_skill_definitions', 
   'get_current_scenario', 'ask_user_question', 'search_knowledge_base',
   'simulate_scenario', 'analyze_timeline', 'inspect_timeline_events',
   'inspect_rotation_input', 'compare_scenarios', 'list_saved_artifacts',

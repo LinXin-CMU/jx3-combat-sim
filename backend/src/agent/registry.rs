@@ -245,6 +245,11 @@ impl<'a> AgentToolRegistry<'a> {
                 parameters: ask_user_question_schema(),
             },
             ToolDefinition {
+                name: super::skill_catalog::LOOKUP_SKILL_DEFINITIONS.into(),
+                description: "Read simulator skill and talent definitions by name, partial name or ID, including unselected talents and other mounts. Defaults to both mounts in the current version; specify a supported version when needed. Returns versioned descriptions, resource requirements, cooldowns, coefficients and related talents. Use for mechanism identification and design analysis; this lookup does not transplant rules or alter the frozen scenario.".into(),
+                parameters: super::skill_catalog::parameters(),
+            },
+            ToolDefinition {
                 name: INSPECT_ROTATION_INPUT.to_string(),
                 description: "Search a manual rotation by skill name and return exact stable operation occurrences with neighboring operations. These are logical operation numbers, never visual UI rows. Macro mode has no manual-operation rows; its complete parsed statements are provided by get_current_scenario.".to_string(),
                 parameters: inspect_rotation_schema(),
@@ -424,6 +429,16 @@ impl<'a> AgentToolRegistry<'a> {
                         self.scenario_read = true;
                         self.success(tool_name, vec![serialize_evidence(evidence)])
                     }
+                    Err(error) => tool_failure(tool_name, error),
+                }
+            }
+            super::skill_catalog::LOOKUP_SKILL_DEFINITIONS => {
+                let query = match serde_json::from_value(arguments) {
+                    Ok(query) => query,
+                    Err(_) => return invalid_arguments(tool_name),
+                };
+                match super::skill_catalog::lookup(trace_id, query, self.scenario, self.runtime) {
+                    Ok(evidence) => self.success(tool_name, vec![serialize_evidence(evidence)]),
                     Err(error) => tool_failure(tool_name, error),
                 }
             }
@@ -1489,6 +1504,9 @@ fn invalid_arguments(tool_name: &str) -> ToolDispatchOutcome {
 }
 
 fn tool_failure(tool_name: &str, error: ToolError) -> ToolDispatchOutcome {
+    if matches!(&error, ToolError::UnavailableCandidateAction { .. }) {
+        return failure(tool_name, "unavailable_candidate_action", "Candidate introduces an unavailable skill or talent in this version/mount. Read lookup_skill_definitions for its scope and talent requirements. Macro edits cannot transplant skill scripts or resource rules; no simulation ran and there is no measured delta. Continue mechanism analysis under an explicit design assumption when rules cannot be simulated.", false);
+    }
     let (code, message, budget_exhausted) = match error {
         ToolError::BudgetExceeded { .. } => (
             "simulation_budget_exhausted",
@@ -1520,6 +1538,11 @@ fn tool_failure(tool_name: &str, error: ToolError) -> ToolDispatchOutcome {
             "candidate must change the baseline",
             false,
         ),
+        ToolError::ConflictingCandidateTalents => (
+            "conflicting_candidate_talents",
+            "Talent patch is the complete selection. Replace the old choice instead of appending another choice in its tier. Each fixed tier allows one talent; mixed tier 8 allows three. No comparison ran.",
+            false,
+        ),
         ToolError::TimelineDetailsUnavailable => (
             "timeline_unavailable",
             "timeline details are unavailable",
@@ -1535,7 +1558,7 @@ fn tool_failure(tool_name: &str, error: ToolError) -> ToolDispatchOutcome {
             "the local catalog does not contain enough compatible set and qiegao pieces for an automatic four-piece comparison",
             false,
         ),
-        ToolError::Scenario(_) | ToolError::Evidence(_) => (
+        ToolError::Scenario(_) | ToolError::Evidence(_) | ToolError::UnavailableCandidateAction { .. } => (
             "invalid_scenario_or_evidence",
             "tool input is invalid",
             false,
@@ -1870,6 +1893,7 @@ mod tests {
                 "distill_macro",
                 "get_current_scenario",
                 "ask_user_question",
+                "lookup_skill_definitions",
                 "inspect_rotation_input",
                 "simulate_scenario",
                 "compare_scenarios",
@@ -1911,7 +1935,7 @@ mod tests {
         ];
         let categories = vec!["基础".to_string(), "白皮书".to_string()];
         let definitions = AgentToolRegistry::definitions_with_knowledge(&seasons, &categories);
-        assert_eq!(definitions.len(), 17);
+        assert_eq!(definitions.len(), 18);
         let knowledge = definitions.last().unwrap();
         assert_eq!(knowledge.name, "search_knowledge_base");
         assert_eq!(knowledge.parameters["additionalProperties"], false);

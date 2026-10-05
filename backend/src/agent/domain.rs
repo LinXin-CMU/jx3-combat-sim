@@ -258,11 +258,9 @@ pub fn select_model_led_analysis_plan(
     let client = if contains_any(&normalized, &["无界", "分山劲·悟", "分山劲・悟", "wujie"]) { DomainClient::Wujie } else { DomainClient::Flagship };
     let mount = if client == DomainClient::Wujie {
         if normalized.contains("铁骨") { "tieguyi_wu" } else { "fenshanjin_wu" }
-    } else if normalized.contains("铁骨") {
-        "tieguyi"
-    } else if normalized.contains("分山") {
-        "fenshanjin"
     } else {
+        // This is the frozen baseline scope, not an entity extracted from
+        // prose. Mentioning a source mount must not relabel the target.
         scenario.mount.as_str()
     };
     let scope = DomainScopeV1 {
@@ -343,6 +341,7 @@ pub fn build_evidence_pack(plan: &AnalysisPlanV1, evidence: &EvidenceStore) -> E
 fn satisfied_dimensions(tools: &BTreeSet<String>, evidence: &EvidenceStore) -> BTreeSet<String> {
     let mut dimensions = BTreeSet::from(["scope".to_string()]);
     if tools.contains("get_current_scenario") { dimensions.extend(["scenario".to_string(), "rotation_input".to_string()]); }
+    if tools.contains("lookup_skill_definitions") { dimensions.insert("runtime_definitions".to_string()); }
     if tools.contains("search_knowledge_base") && evidence.values().any(fact_eligible_knowledge) { dimensions.insert("versioned_knowledge".to_string()); }
     if tools.contains("simulate_scenario") || tools.contains("analyze_timeline") || has_comparison(tools) { dimensions.insert("baseline_metrics".to_string()); }
     if tools.contains("analyze_timeline") || tools.contains("inspect_timeline_events") { dimensions.insert("timeline".to_string()); }
@@ -371,6 +370,7 @@ pub struct TraceAnnotation { pub stage_id: String, pub label: String, pub overvi
 pub fn trace_annotation(_plan: &AnalysisPlanV1, kind: &str, tool_name: Option<&str>, evidence_count: usize) -> TraceAnnotation {
     let (stage_id, stage_label, purpose) = match tool_name {
         Some("get_current_scenario") => ("scope", "确认分析对象", "读取当前版本、心法、环境与循环。"),
+        Some("lookup_skill_definitions") => ("knowledge", "查阅技能定义", "读取指定版本与心法的技能、奇穴及关联机制。"),
         Some("search_knowledge_base") => ("knowledge", "查阅版本资料", "核对当前赛季机制、术语与打法语境。"),
         Some("inspect_rotation_input") => ("locate", "定位循环操作", "定位同名技能的具体操作与相邻结构。"),
         Some("analyze_timeline") => ("diagnose", "建立循环画像", "检查阶段、资源、增益、技能结构与执行质量。"),
@@ -407,6 +407,7 @@ fn season_for_version(version: &str) -> &'static str {
     match version {
         "2025_10_shanhai_yuanliu" => "山海源流（2025）",
         "2026_04_anying_qianji_test" => "体服（2021-2025）",
+        "2026_10_cangsheng_zhushi_test" => "苍生铸世测试服（2026）",
         _ => "暗影千机（2026）",
     }
 }

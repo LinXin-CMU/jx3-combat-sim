@@ -1,0 +1,143 @@
+{
+  "schema": "exact-macro-v1",
+  "status": "budget_exhausted",
+  "iterations": [
+    {
+      "status": "sat",
+      "solve_ms": 10391.611400002148,
+      "slots": 12,
+      "terms": 2,
+      "sample_count": 136,
+      "distinct_atoms": 407,
+      "comparison": {
+        "actual_count": 463,
+        "exact_prefix": 1,
+        "first_difference": {
+          "actual": {
+            "channel_duration": null,
+            "channel_ticks": null,
+            "is_main": false,
+            "name": "血怒",
+            "sequence_index": null,
+            "skill_id": 13040,
+            "time": 0.0
+          },
+          "expected": {
+            "channel_duration": null,
+            "channel_ticks": null,
+            "is_main": true,
+            "name": "盾压",
+            "sequence_index": 1,
+            "skill_id": 13045,
+            "time": 1.5
+          },
+          "index": 1
+        },
+        "max_time_error_on_order_prefix": 0.0,
+        "order_prefix": 1,
+        "reproduced": false,
+        "state_prefix": 1,
+        "target_count": 335,
+        "time_tolerance_seconds": 1e-07
+      },
+      "added_counterexamples": 1
+    },
+    {
+      "status": "sat",
+      "solve_ms": 8489.53929997515,
+      "slots": 12,
+      "terms": 2,
+      "sample_count": 137,
+      "distinct_atoms": 407,
+      "comparison": {
+        "actual_count": 251,
+        "exact_prefix": 2,
+        "first_difference": {
+          "actual": {
+            "channel_duration": null,
+            "channel_ticks": null,
+            "is_main": false,
+            "name": "盾飞",
+            "sequence_index": null,
+            "skill_id": 13050,
+            "time": 1.5
+          },
+          "expected": {
+            "channel_duration": null,
+            "channel_ticks": null,
+            "is_main": true,
+            "name": "盾刀·一段",
+            "sequence_index": 2,
+            "skill_id": 13044,
+            "time": 3.0
+          },
+          "index": 2
+        },
+        "max_time_error_on_order_prefix": 0.0,
+        "order_prefix": 2,
+        "reproduced": false,
+        "state_prefix": 2,
+        "target_count": 335,
+        "time_tolerance_seconds": 1e-07
+      },
+      "added_counterexamples": 1
+    },
+    {
+      "status": "unknown",
+      "solve_ms": 15027.928999974392,
+      "slots": 12,
+      "terms": 2,
+      "sample_count": 138,
+      "distinct_atoms": 412
+    }
+  ],
+  "language": "one unfiltered page, ordered /cast or /fcast, AND clauses; no character objective",
+  "acceptance": "every returned active cast, skill ID + displayed variant + channel + absolute time <= 1e-7s, aligned post-cast states; no truncation",
+  "solver_version": "5.1.0",
+  "sizes": [
+    [
+      12,
+      2
+    ],
+    [
+      20,
+      3
+    ]
+  ],
+  "endpoint": "runtime starts decisions at t <= horizon; final delayed cast also compared; all waits through horizon checked",
+  "preparation_status": "ok",
+  "scenario_sha256": "73945fd272e12252e19b2a9e283e2e81e5e468fd802b367619ca32f109abc5a3",
+  "comparison": {
+    "actual_count": 251,
+    "exact_prefix": 2,
+    "first_difference": {
+      "actual": {
+        "channel_duration": null,
+        "channel_ticks": null,
+        "is_main": false,
+        "name": "盾飞",
+        "sequence_index": null,
+        "skill_id": 13050,
+        "time": 1.5
+      },
+      "expected": {
+        "channel_duration": null,
+        "channel_ticks": null,
+        "is_main": true,
+        "name": "盾刀·一段",
+        "sequence_index": 2,
+        "skill_id": 13044,
+        "time": 3.0
+      },
+      "index": 2
+    },
+    "max_time_error_on_order_prefix": 0.0,
+    "order_prefix": 2,
+    "reproduced": false,
+    "state_prefix": 2,
+    "target_count": 335,
+    "time_tolerance_seconds": 1e-07
+  },
+  "elapsed_ms": 103050.71630002931,
+  "total_solve_ms": 33909.07969995169
+}

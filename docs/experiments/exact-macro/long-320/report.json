@@ -1,0 +1,54 @@
+{
+  "schema": "exact-macro-v1",
+  "status": "exact",
+  "iterations": [
+    {
+      "status": "sat",
+      "solve_ms": 4.41370002226904,
+      "slots": 1,
+      "terms": 1,
+      "sample_count": 11,
+      "distinct_atoms": 29,
+      "comparison": {
+        "actual_count": 320,
+        "exact_prefix": 320,
+        "first_difference": null,
+        "max_time_error_on_order_prefix": 0.0,
+        "order_prefix": 320,
+        "reproduced": true,
+        "state_prefix": 320,
+        "target_count": 320,
+        "time_tolerance_seconds": 1e-07
+      }
+    }
+  ],
+  "language": "one unfiltered page, ordered /cast or /fcast, AND clauses; no character objective",
+  "acceptance": "every returned active cast, skill ID + displayed variant + channel + absolute time <= 1e-7s, aligned post-cast states; no truncation",
+  "solver_version": "5.1.0",
+  "sizes": [
+    [
+      1,
+      1
+    ],
+    [
+      4,
+      2
+    ]
+  ],
+  "endpoint": "runtime starts decisions at t <= horizon; final delayed cast also compared; all waits through horizon checked",
+  "preparation_status": "ok",
+  "scenario_sha256": "5f707659c93af90b646d79242e9acc5693b8c5ea6e7ed60654b345e9896f3291",
+  "comparison": {
+    "actual_count": 320,
+    "exact_prefix": 320,
+    "first_difference": null,
+    "max_time_error_on_order_prefix": 0.0,
+    "order_prefix": 320,
+    "reproduced": true,
+    "state_prefix": 320,
+    "target_count": 320,
+    "time_tolerance_seconds": 1e-07
+  },
+  "elapsed_ms": 10986.9412999833,
+  "total_solve_ms": 4.41370002226904
+}

@@ -1,0 +1,65 @@
+[
+  {
+    "name": "repeated_cycle_uses_timestamp_tie_break",
+    "window": 10,
+    "reference": [{"name":"盾刀","cast_time":0},{"name":"盾压","cast_time":1},{"name":"盾刀","cast_time":2},{"name":"盾压","cast_time":3},{"name":"盾刀","cast_time":4},{"name":"盾压","cast_time":5}],
+    "actual": [{"name":"盾刀","cast_time":2},{"name":"盾压","cast_time":3},{"name":"盾刀","cast_time":4},{"name":"盾压","cast_time":5}],
+    "expected": {"pairs":[[2,0],[3,1],[4,2],[5,3]],"missing":2,"extra":0,"changed":0,"first_difference":0,"time_error":0}
+  },
+  {
+    "name": "insertions_keep_original_indices",
+    "window": 10,
+    "reference": [{"name":"破·盾刀","cast_time":0,"triggered":true},{"name":"盾刀","cast_time":0},{"name":"盾压","cast_time":1}],
+    "actual": [{"name":"盾刀","cast_time":0},{"name":"血怒","cast_time":0.5},{"name":"盾压","cast_time":1}],
+    "expected": {"pairs":[[1,0],[2,2]],"missing":0,"extra":1,"changed":0,"first_difference":1,"time_error":0}
+  },
+  {
+    "name": "same_counts_different_order_are_not_equivalent",
+    "window": 10,
+    "reference": [{"name":"阵云结晦","cast_time":0},{"name":"月照连营","cast_time":1},{"name":"雁门迢递","cast_time":2}],
+    "actual": [{"name":"雁门迢递","cast_time":0},{"name":"月照连营","cast_time":1},{"name":"阵云结晦","cast_time":2}],
+    "expected": {"pairs":[[1,1]],"missing":2,"extra":2,"changed":0,"first_difference":0,"time_error":0}
+  },
+  {
+    "name": "fog_names_and_ids_preserve_independent_identity",
+    "window": 10,
+    "reference": [{"name":"阵云结晦","cast_time":0},{"name":"月照连营","cast_time":1},{"name":"雁门迢递","cast_time":2}],
+    "actual": [{"name":"阵云结晦·雾海","cast_time":0},{"name":"月照连营","skill_id":90011,"cast_time":1},{"name":"雁门迢递·雾海·2级","cast_time":2}],
+    "expected": {"pairs":[],"missing":3,"extra":3,"changed":0,"first_difference":0,"time_error":0}
+  },
+  {
+    "name": "tier_channel_resources_and_time_are_changes",
+    "window": 10,
+    "reference": [{"name":"绝刀·50怒","cast_time":1,"channel_ticks":2,"state_before":{"rage":85,"berserk_value":120,"max_berserk_value":150,"block_value":10}}],
+    "actual": [{"name":"绝刀·30怒","cast_time":1.5,"channel_ticks":3,"state_before":{"rage":35,"berserk_value":90,"max_berserk_value":180,"block_value":10}}],
+    "expected": {"pairs":[[0,0]],"missing":0,"extra":0,"changed":1,"first_difference":0,"time_error":0.5,"resource_fields":["rage","berserk_value","max_berserk_value"]}
+  },
+  {
+    "name": "one_frame_delta_is_same_and_retained",
+    "window": 20,
+    "reference": [{"name":"盾刀","cast_time":10}],
+    "actual": [{"name":"盾刀","cast_time":10.0625}],
+    "expected": {"pairs":[[0,0]],"missing":0,"extra":0,"changed":0,"first_difference":null,"time_error":0.0625}
+  },
+  {
+    "name": "unknown_resource_is_not_zero",
+    "window": 10,
+    "reference": [{"name":"盾刀","cast_time":0,"state_before":{"rage":0,"berserk_value":20}}],
+    "actual": [{"name":"盾刀","cast_time":0,"state_before":{"rage":0,"block_value":0}}],
+    "expected": {"pairs":[[0,0]],"missing":0,"extra":0,"changed":0,"first_difference":null,"time_error":0,"resource_fields":[]}
+  },
+  {
+    "name": "half_open_window_and_virtual_events_keep_indices",
+    "window": 2,
+    "reference": [{"name":"盾压","cast_time":-1},{"name":"清除冷却","cast_time":0},{"name":"移除气劲·盾挡","cast_time":0},{"name":"盾刀","cast_time":0},{"name":"盾压","cast_time":2},{"name":"__clearCD__:盾刀","cast_time":0}],
+    "actual": [{"name":"盾刀","cast_time":0},{"name":"血怒","cast_time":2},{"name":"虚拟","skill_id":90001,"cast_time":1}],
+    "expected": {"pairs":[[3,0]],"missing":0,"extra":0,"changed":0,"first_difference":null,"time_error":0}
+  },
+  {
+    "name": "lcs_cardinality_wins_over_large_time_distance",
+    "window": 10000010,
+    "reference": [{"name":"盾刀","cast_time":0},{"name":"盾压","cast_time":1}],
+    "actual": [{"name":"盾刀","cast_time":10000000},{"name":"盾压","cast_time":10000001}],
+    "expected": {"pairs":[[0,0],[1,1]],"missing":0,"extra":0,"changed":2,"first_difference":0,"time_error":20000000}
+  }
+]

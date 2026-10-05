@@ -10,5 +10,5 @@ description = "天下宏愿装备特效：盾击额外触发的少量伤害（10
 rank         = 1
 name         = "盾击·神兵"
 base_damage  = 21.0          # (20 + 22) / 2
-attack_coeff = 0.31250
+attack_coeff = 0.03475105014893466
 weapon_coeff = 1.0

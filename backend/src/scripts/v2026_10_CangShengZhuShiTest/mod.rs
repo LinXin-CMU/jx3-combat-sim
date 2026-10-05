@@ -30,7 +30,7 @@ pub fn normalize_talents(talents: Vec<u32>) -> Vec<u32> {
         if !ALLOWED.contains(&id) || normalized.contains(&id) {
             continue;
         }
-        if matches!(id, TALENT_BU_GUI | TALENT_SHEN_WEI) && !has_zhen_yun {
+        if id == TALENT_BU_GUI && !has_zhen_yun {
             continue;
         }
         if matches!(id, 37559 | 37558) && !has_beng_xue {
@@ -49,17 +49,29 @@ pub fn runtime_recipes(skill: &SkillSpec, player: &Player) -> Vec<u32> {
             return vec![99400 + stacks];
         }
     }
+    if player.has_talent(TALENT_SHEN_WEI) {
+        return match skill.skill_id { 13044 => vec![99441], 13045 => vec![99442], _ => Vec::new() };
+    }
     Vec::new()
 }
 
-/// 新版仅提供分山劲；旧版撤出的招式和未选择神威的后续段不可施展。
+/// 新版仅提供分山劲；旧版撤出的招式不可施展，阵云核心自带后续段。
 pub fn skill_allowed(player: &Player, skill: &SkillSpec) -> bool {
     if player.mount != Mount::FenShanJin {
         return false;
     }
     match skill.skill_id {
-        30855 | 30856 => player.has_talent(30769) && player.has_talent(TALENT_SHEN_WEI),
+        30855 | 30856 => player.has_talent(30769),
         34912 | 34674 | 34674901 | 34714 | 36065 | 36482 | 33097 | 90010..=90012 => false,
         _ => true,
+    }
+}
+
+/// 云城盾伤害招式按每次施展贡献一次重置概率；引导/盾飞子事件不重复贡献。
+pub fn on_post_cast(player: &mut Player, skill: &SkillSpec) {
+    if !player.has_talent(TALENT_DUN_SHENG_FENG)
+        && matches!(skill.skill_id, 13044..=13048 | 13050 | 13458 | 25204)
+    {
+        player.try_reset_test_dunya();
     }
 }

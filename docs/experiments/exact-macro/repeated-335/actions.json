@@ -1,0 +1,90 @@
+[
+  {
+    "fcast": false,
+    "name": "斩刀"
+  },
+  {
+    "fcast": true,
+    "name": "斩刀"
+  },
+  {
+    "fcast": false,
+    "name": "月照连营"
+  },
+  {
+    "fcast": true,
+    "name": "月照连营"
+  },
+  {
+    "fcast": false,
+    "name": "盾刀"
+  },
+  {
+    "fcast": true,
+    "name": "盾刀"
+  },
+  {
+    "fcast": false,
+    "name": "盾压"
+  },
+  {
+    "fcast": true,
+    "name": "盾压"
+  },
+  {
+    "fcast": false,
+    "name": "盾回"
+  },
+  {
+    "fcast": true,
+    "name": "盾回"
+  },
+  {
+    "fcast": false,
+    "name": "盾猛"
+  },
+  {
+    "fcast": true,
+    "name": "盾猛"
+  },
+  {
+    "fcast": false,
+    "name": "盾飞"
+  },
+  {
+    "fcast": true,
+    "name": "盾飞"
+  },
+  {
+    "fcast": false,
+    "name": "绝刀"
+  },
+  {
+    "fcast": true,
+    "name": "绝刀"
+  },
+  {
+    "fcast": false,
+    "name": "血怒"
+  },
+  {
+    "fcast": true,
+    "name": "血怒"
+  },
+  {
+    "fcast": false,
+    "name": "阵云结晦"
+  },
+  {
+    "fcast": true,
+    "name": "阵云结晦"
+  },
+  {
+    "fcast": false,
+    "name": "雁门迢递"
+  },
+  {
+    "fcast": true,
+    "name": "雁门迢递"
+  }
+]

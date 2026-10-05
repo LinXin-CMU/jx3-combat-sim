@@ -1,7 +1,7 @@
 id   = 13055
 name = "绝刀"
 icon = "https://icon.jx3box.com/icon/6317.png"
-description = "擎刀 / 消耗 25~65 怒气 / 附带武器伤害"
+description = "最少消耗25点怒气，对目标造成{{damage:绝刀}}外功伤害，并附带100%的武器伤害。最多消耗65点怒气，每多消耗10点怒气，伤害提高20%，无视目标100%外功防御等级。"
 
 # 姿态: 擎刀 / 距离: 6尺 / GCD: 1.5秒
 # 怒气段、秘籍3005 减费、橙武免耗、秘籍激活 全部由 jue_dao.rs 脚本处理
@@ -32,7 +32,7 @@ haste    = true
 rank         = 1
 name         = "绝刀"
 icon = "https://icon.jx3box.com/icon/6317.png"
-base_damage     = 186.0
-attack_coeff    = 4.17500
+base_damage_range = [18.0, 19.25]
+attack_coeff = 0.464274029989767
 weapon_coeff    = 1.0
 defense_ignore  = 1.0

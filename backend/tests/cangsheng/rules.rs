@@ -46,9 +46,11 @@ fn official_talent_grid_and_shield_data_are_version_isolated() {
             .find(|s| s.skill_id == old.skill_id && s.name == old.name)
             .unwrap();
         assert_eq!(new.rage_gain, if old.skill_id == 13044 { 10 } else { 20 });
-        assert_eq!(new.base_damage, old.base_damage * 2.0);
-        assert_eq!(new.attack_coeff, if old.skill_id == 13045 { 7.19375 } else { old.attack_coeff * 2.0 });
-        assert_eq!(new.weapon_coeff, old.weapon_coeff * 2.0);
+        assert_eq!(new.base_damage, if old.skill_id == 13045 { 20.75 } else { 13.5 });
+        assert!(new.attack_coeff < old.attack_coeff);
+        assert!(old.base_damage > 100.0);
+        assert!(old.base_damage_range.is_none());
+        assert_eq!(new.weapon_coeff, old.weapon_coeff);
     }
     assert!(new_skills
         .iter()
@@ -58,8 +60,8 @@ fn official_talent_grid_and_shield_data_are_version_isolated() {
 
 #[test]
 fn removed_talents_and_missing_core_requirements_cannot_activate() {
-    assert!(
-        normalize_talents(vec![34912, 36058, 32618, 39664, 91001, 91002, 37559, 37558]).is_empty()
+    assert_eq!(
+        normalize_talents(vec![34912, 36058, 32618, 39664, 91001, 91002, 37559, 37558]), vec![91002]
     );
     assert_eq!(
         normalize_talents(vec![30769, 91001, 91002, 91001]),
@@ -276,6 +278,7 @@ fn bugui_and_canlie_change_actual_cooldowns_and_clamp_resource_gains() {
 #[test]
 fn zhenyun_tiers_and_static_preview_use_exact_shared_damage_chain() {
     let mut attack = skill(30769);
+    attack.high_berserk_damage = None;
     attack.base_damage = 10000.0;
     attack.attack_coeff = 0.0;
     attack.weapon_coeff = 0.0;
@@ -288,10 +291,10 @@ fn zhenyun_tiers_and_static_preview_use_exact_shared_damage_chain() {
         damage_cof: 0.0,
     };
     for (value, recipe, expected) in [
-        (50, 99421, 17600.0),
-        (99, 99421, 17600.0),
-        (100, 99422, 29500.0),
-        (120, 99422, 29500.0),
+        (50, 99421, 17597.0),
+        (99, 99421, 17597.0),
+        (100, 99422, 29501.0),
+        (120, 99422, 29501.0),
     ] {
         let mut p = player(vec![30769]);
         p.constants.non_player_bonus = 0.0;
@@ -328,7 +331,7 @@ fn zhenyun_tiers_and_static_preview_use_exact_shared_damage_chain() {
         &table,
         1,
     );
-    assert_eq!(damage.normal_damage, 29500.0);
+    assert_eq!(damage.normal_damage, 29501.0);
 }
 
 #[test]
@@ -341,8 +344,8 @@ fn zhenyun_new_coefficients_follow_initial_spend_without_double_scaling() {
         let high = initial >= 100;
         let mut p = player(vec![30769, TALENT_SHEN_WEI]);
         p.set_berserk_value(initial);
-        for (id, low, high_coefficient) in [(30769, 5.33125, 9.33125),
-            (30855, 6.7125, 11.725), (30856, 8.0875, 14.1625)] {
+        for (id, low, high_coefficient) in [(30769, 0.5928529155408253, 1.037666357447189),
+            (30855, 0.7464525571991165, 1.3038594015880285), (30856, 0.8993571778544289, 1.5749175927497188)] {
             let attack = skill(id);
             assert_eq!(attack.attack_coeff, low);
             let cast = p.cast_skill(&attack, None, None, 0.0, 0.0).unwrap();
@@ -353,7 +356,7 @@ fn zhenyun_new_coefficients_follow_initial_spend_without_double_scaling() {
             let applied = collect_recipes(&p, id, &attack.name, &runtime, &table);
             assert_eq!(applied.iter().map(|r| r.damage_pct).sum::<f64>(), 0.0);
             assert_eq!(applied.iter().map(|r| r.pve_addition).sum::<f64>(),
-                if id == 30769 { if high { 1.95 } else { 0.76 } } else { 0.0 });
+                if high { 1997.0 / 1024.0 } else { 778.0 / 1024.0 });
             let (damage, _, stats) = calc_event_damage(&attack, &attr, &target, &p, &runtime, &table, 1);
             assert_eq!(damage.coefficient_damage, (expected * stats.panel_attack).floor());
             // 后续资源反转不能改变这轮连段已经选定的档位。
@@ -361,20 +364,20 @@ fn zhenyun_new_coefficients_follow_initial_spend_without_double_scaling() {
         }
     }
     let preview = player(vec![30769, TALENT_SHEN_WEI]);
-    for (id, expected) in [(30769, 9.33125), (30855, 11.725), (30856, 14.1625)] {
+    for (id, expected) in [(30769, 1.037666357447189), (30855, 1.3038594015880285), (30856, 1.5749175927497188)] {
         assert_eq!(crate::scripts::override_attack_coeff(&preview, &skill(id)), Some(expected));
     }
 }
 
 #[test]
-fn zhenyun_followup_damage_drops_old_pve_bonus_only_in_test_version() {
-    let target = TargetConfig {
+fn zhenyun_followup_damage_uses_versioned_pve_bonus() {
+    let mut target = TargetConfig {
         level: PLAYER_LEVEL,
         defense_bonus: 0.0,
         damage_cof: 0.0,
     };
     for (version, expected_damage, expected_old_recipe_count) in [
-        (GameVersion::CangShengZhuShiTest, 10000.0, 0),
+        (GameVersion::CangShengZhuShiTest, 29501.0, 0),
         (GameVersion::AnYingQianJi, 30000.0, 1),
         (GameVersion::ShanHaiYuanLiu, 30000.0, 1),
     ] {
@@ -384,6 +387,7 @@ fn zhenyun_followup_damage_drops_old_pve_bonus_only_in_test_version() {
         ensure_recipe_index(&table);
         let (mut constants, _, _, _, _) = load_school_toml(version, Mount::FenShanJin).unwrap();
         constants.non_player_bonus = 0.0;
+        target.level = constants.level;
         let mut p = Player::with_mount(
             Mount::FenShanJin,
             version,
@@ -399,6 +403,7 @@ fn zhenyun_followup_damage_drops_old_pve_bonus_only_in_test_version() {
                 .unwrap()
                 .clone();
             attack.base_damage = 10000.0;
+            attack.high_berserk_damage = None;
             attack.attack_coeff = 0.0;
             attack.weapon_coeff = 0.0;
             attack.defense_ignore = 1.0;
@@ -414,7 +419,7 @@ fn zhenyun_followup_damage_drops_old_pve_bonus_only_in_test_version() {
                 expected_old_recipe_count,
                 "{version:?}, skill={skill_id}"
             );
-            assert!(!applied.iter().any(|r| matches!(r.id, 99421 | 99422)));
+            assert_eq!(applied.iter().any(|r| r.id == 99422), version == GameVersion::CangShengZhuShiTest);
             let (damage, _, _) = calc_event_damage(
                 &attack,
                 &Attributes::default(),
@@ -465,3 +470,9 @@ fn arena_triples_actual_snapshot_bleed_and_removal_restores_damage() {
     let after = calc_damage_with_snapshot(&bleed, &attr, &target, &snapshot, &p, &table);
     assert_eq!(after.normal_damage, before.normal_damage);
 }
+
+#[path = "september_11.rs"]
+mod september_11;
+
+#[path = "coefficients.rs"]
+mod coefficients;

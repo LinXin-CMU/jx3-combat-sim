@@ -104,6 +104,8 @@ impl Default for AgentRunLimits {
 
 #[derive(Debug, Clone)]
 pub struct AgentRunInput {
+    /// Explicit, per-run acceptance checks. Never inferred from question keywords.
+    pub acceptance: Option<super::completion::TaskAcceptanceV1>,
     /// Trusted same-session read-only queries; re-executed against this frozen scenario.
     pub resume_tools: Vec<(String, Value)>,
     pub run_id: String,
@@ -270,6 +272,8 @@ impl AgentDiagnosticStateV1 {
             "inspect_exact_events_if_location_matters_else_answer"
         } else if explanation_evidence_stack_complete(&self.evidence_capabilities) {
             "answer_or_run_one_explicit_falsification"
+        } else if self.evidence_capabilities.iter().any(|capability| capability == "runtime_definitions") {
+            "answer_mechanism_question_if_supported_else_choose_relevant_evidence"
         } else {
             "choose_high_information_action"
         }
@@ -296,6 +300,7 @@ fn diagnostic_evidence_capabilities(evidence: &EvidenceStore) -> Vec<String> {
     for envelope in evidence.values() {
         match envelope.get("tool_name").and_then(Value::as_str) {
             Some("get_current_scenario") => { capabilities.insert("scenario_scope"); }
+            Some("lookup_skill_definitions") => { capabilities.insert("runtime_definitions"); }
             Some("search_knowledge_base") => {
                 let result = envelope.get("result").unwrap_or(&Value::Null);
                 if result
@@ -397,6 +402,9 @@ pub struct AgentRunResultV1 {
     pub model: String,
     pub status: AgentRunStatus,
     pub accounting: AgentRunAccountingV1,
+    /// Independent outcome checks; a completed run is not a semantic approval.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_completion: Option<super::completion::TaskCompletionV1>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub report: Option<AgentReportV1>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -787,6 +795,15 @@ fn diagnostic_fact_summary(envelope: &Value) -> Option<String> {
                 .map(Value::to_string)
                 .unwrap_or_else(|| "—".to_string())
         ),
+        "lookup_skill_definitions" => format!("定义查询：{}，匹配 {} 项；{}",
+            result["query"].as_str().unwrap_or_default(), result["total_matches"],
+            result["matches"].as_array().into_iter().flatten().take(3).map(|item|
+                format!("{}/{} {}：{}", item["scope"]["game_version"].as_str().unwrap_or_default(),
+                    item["scope"]["mount"].as_str().unwrap_or_default(),
+                    item["definition"]["name"].as_str().unwrap_or_default(),
+                    bounded_public_text(item["definition"]["description"].as_str()
+                        .or_else(||item["definition"]["desc"].as_str()).unwrap_or_default(), 240)))
+                .collect::<Vec<_>>().join("；")),
         "analyze_timeline" => format!(
             "时间轴：主动释放 {}，GCD 空档 {} 次，冷却等待 {} 次，实测溢出怒气 {}{}",
             result
@@ -864,7 +881,8 @@ fn diagnostic_fact_summary(envelope: &Value) -> Option<String> {
                 .filter_map(|item| {
                     let title = item.get("title")?.as_str()?;
                     let heading = item.get("heading").and_then(Value::as_str).unwrap_or_default();
-                    Some(if heading.is_empty() { title.to_string() } else { format!("{title} / {heading}") })
+                    let scope = if item.get("fact_eligible").and_then(Value::as_bool) == Some(true) { "适用资料" } else { "仅供参考" };
+                    Some(if heading.is_empty() { format!("{scope}：{title}") } else { format!("{scope}：{title} / {heading}") })
                 })
                 .take(2)
                 .collect::<Vec<_>>();
@@ -876,7 +894,7 @@ fn diagnostic_fact_summary(envelope: &Value) -> Option<String> {
                 format!("知识检索：本次查询未取得可引用的当前版本资料（置信度 {confidence}）")
             } else {
                 format!(
-                    "知识检索：已取得当前版本资料 {}{}（置信度 {confidence}）",
+                    "知识检索：已取得资料 {}{}（置信度 {confidence}）",
                     sources.join("、"),
                     if terms.is_empty() { String::new() } else { format!("；已解析术语 {}", terms.join("、")) }
                 )
@@ -983,8 +1001,9 @@ pub async fn run_agent_recorded(
     let started = Instant::now();
     let mut time_budget = super::time_budget::AdaptiveTimeBudget::new(limits.wall_time_ms, provider.model());
     let prompt = agent_prompt();
+    let conversation_intent = user_intent_context(&input);
     let analysis_plan = select_model_led_analysis_plan(
-        &input.question,
+        &conversation_intent,
         input.analysis_surface,
         &input.scenario,
     );
@@ -993,13 +1012,14 @@ pub async fn run_agent_recorded(
         event_sink,
         analysis_plan.clone(),
         limits.clone(),
-        &input.question,
+        &conversation_intent,
     );
     record_replay(
         &replay_sink,
         "run_input",
         serde_json::json!({
             "question": &input.question,
+            "acceptance": &input.acceptance,
             "scenario": &input.scenario,
             "session_context": &input.session_context,
             "session_playbook_id": &input.session_playbook_id,
@@ -1044,7 +1064,7 @@ pub async fn run_agent_recorded(
         runtime.knowledge(),
         input.equipment_workspace.clone(),
     );
-    registry.set_knowledge_question(&input.question);
+    registry.set_knowledge_question(&conversation_intent);
     let definitions = if let Some(knowledge) = runtime.knowledge() {
         let seasons = knowledge.seasons().map(str::to_string).collect::<Vec<_>>();
         let categories = knowledge
@@ -1091,7 +1111,7 @@ pub async fn run_agent_recorded(
         });
     }
     messages.push(ModelMessage::User {
-        content: input.question.clone(),
+        content: super::session::clarification_answer(&input.question).to_string(),
     });
     if let Some(knowledge) = runtime.knowledge() {
         let knowledge_mount = match runtime.mount() {
@@ -1272,13 +1292,13 @@ pub async fn run_agent_recorded(
     });
     messages.push(ModelMessage::ToolResult {
         call_id: PREFETCH_CALL_ID.to_string(),
-        output: model_tool_output(&prefetched.output),
+        output: initial_scenario_context(&prefetched.output),
     });
 
     let mut restored = 0;
     for (name, arguments) in input.resume_tools.iter().take(24) {
         if !matches!(name.as_str(), "simulate_scenario" | "analyze_timeline" |
-            "inspect_timeline_events" | "inspect_rotation_input") { continue; }
+            "inspect_timeline_events" | "inspect_rotation_input" | "lookup_skill_definitions") { continue; }
         let outcome = registry.dispatch(&input.run_id, name, arguments.clone());
         if outcome.output.get("ok").and_then(Value::as_bool) != Some(true) { continue; }
         if let Some(key) = tool_result_cache_key(name, arguments) {
@@ -1491,7 +1511,7 @@ pub async fn run_agent_recorded(
         if (accounting.model_turns + 1 == limits.max_model_turns || finishing_window) && !final_report_only {
             final_report_only = true;
             messages.push(ModelMessage::User {
-                content: format!("本轮进入收尾阶段，回答用户问题：{}。依据现有资料和观察给出当前判断，保留已定位对象和待执行实验，说明仍待确认的部分。", input.question),
+                content: format!("本轮进入收尾阶段，继续完成用户任务：{}。依据现有资料和观察给出当前判断，保留与任务相关的依据和待定设计。", conversation_intent),
             });
             trace.push("final_response_reserved", None, Vec::new(), Some("last_model_turn".to_string()));
         }
@@ -1519,6 +1539,7 @@ pub async fn run_agent_recorded(
                 ),
             });
         }
+        append_current_task(&mut request_messages, &input);
         let compacted_message_bytes = serde_json::to_vec(&request_messages)
             .map(|encoded| encoded.len())
             .unwrap_or(usize::MAX);
@@ -1570,6 +1591,7 @@ pub async fn run_agent_recorded(
                             .unwrap_or_else(|_| "{}".to_string())
                     ),
                 });
+                append_current_task(&mut request_messages, &input);
                 request.messages = request_messages.clone();
                 // The soft threshold triggers compaction; it is not a second
                 // context limit. Keep the useful evidence when the compacted
@@ -2121,7 +2143,7 @@ pub async fn run_agent_recorded(
                 reasoning_content: None,
             });
             messages.push(ModelMessage::User {
-                content: "已保留当前候选。选择能改变判断的下一步；完整宏可用 compare_scenarios 的 candidates[].patch.macro_text 在冻结场景验证，随后交付完整候选与实际差异。信息足够时可直接完成回答。".to_string(),
+                content: "已保留当前方案。继续用户的原任务，自主选择工具实际支持且能改变判断的下一步；信息足够时直接交付。未实现的设计规则可以作为明确假设展开分析，不把它改成其它类型的实验。".to_string(),
             });
             trace.push_checkpoint(
                 "model_plan_continued",
@@ -2549,8 +2571,8 @@ pub async fn run_agent_recorded(
             Ok(validated) => {
                 trace.push_checkpoint(
                     "report_validation_passed",
-                    "证据校验通过",
-                    "报告中的可验证事实均已绑定本轮证据。".to_string(),
+                    "报告校验通过",
+                    "报告已通过结构、引用及数值检查；任务验收与机制解释另行评价。".to_string(),
                     Some("evidence_contract_satisfied".to_string()),
                     cited_evidence_ids(&validated.content),
                 );
@@ -2585,7 +2607,7 @@ pub async fn run_agent_recorded(
                 );
             }
             Err(error) => match parse_and_salvage_report(raw, registry.evidence()) {
-                Ok(salvaged) => {
+                Ok(salvaged) if !salvaged.prose_was_cut || repairs > 0 => {
                     trace.push_checkpoint(
                         "report_validation_salvaged",
                         "保留已验证内容",
@@ -2625,7 +2647,7 @@ pub async fn run_agent_recorded(
                         &registry,
                     );
                 }
-                Err(_) if repairs < MAX_REPORT_REPAIRS => {
+                Ok(_) | Err(_) if repairs < MAX_REPORT_REPAIRS => {
                     record_replay(
                         &replay_sink,
                         "report_validation",
@@ -2647,12 +2669,12 @@ pub async fn run_agent_recorded(
                     repair_message = Some(
                         if matches!(response.finish_reason, FinishReason::Length) {
                             format!(
-                            "The previous report was cut off by the output limit. Recreate one complete AgentReportContentV1 JSON object from the evidence below. Keep the direct answer, at most 4 findings, at most 1 metric per finding, and no more than 3000 Chinese characters total. Omit optional rotation_changes instead of expanding them. `limitations` is an array of strings and `refusal_reason` is a string or null.\n\nREPAIR_EVIDENCE_BEGIN\n{}\nREPAIR_EVIDENCE_END",
+                            "The previous report was cut off by the output limit. Recreate one complete AgentReportContentV1 JSON object from the evidence below. Preserve body_markdown paragraphs when present. Keep the direct answer, at most 4 findings, at most 1 metric per finding, and no more than 3000 Chinese characters total. Omit optional rotation_changes instead of expanding them. `limitations` is an array of strings and `refusal_reason` is a string or null.\n\nREPAIR_EVIDENCE_BEGIN\n{}\nREPAIR_EVIDENCE_END",
                             repair_evidence
                         )
                         } else {
                             format!(
-                            "Correct the rejected output into one AgentReportContentV1 JSON object. Validation code: {}. Detail: {}. Use the registered evidence ids, metric values, units and JSON Pointers. Preserve supported analysis and repair the invalid fields. `limitations` is an array of strings; `refusal_reason` is a string or null; findings include `metrics`; rotation changes include `edit_operation` and `evidence_ids`. Use at most 4 findings, at most 1 metric per finding, and no more than 3000 Chinese characters total. Write concise, natural Chinese.\n\nREPAIR_EVIDENCE_BEGIN\n{}\nREPAIR_EVIDENCE_END\n\nREJECTED_OUTPUT_BEGIN\n{}\nREJECTED_OUTPUT_END",
+                            "Correct the rejected output into one AgentReportContentV1 JSON object. Validation code: {}. Detail: {}. Use the registered evidence ids, metric values, units and JSON Pointers. Preserve supported analysis and repair the invalid fields. For unsupported prose numbers, cite a matching definition or verified metric when available; otherwise rewrite the sentence qualitatively. Keep complete subjects and referents, coherent paragraphs and internally consistent resource budgets. Do not leave orphan clauses by deleting a numbered definition or calculation. `limitations` is an array of strings; `refusal_reason` is a string or null; findings include `metrics`; rotation changes include `edit_operation` and `evidence_ids`. Use at most 4 findings, at most 1 metric per finding, and no more than 3000 Chinese characters total. Write concise, natural Chinese.\n\nREPAIR_EVIDENCE_BEGIN\n{}\nREPAIR_EVIDENCE_END\n\nREJECTED_OUTPUT_BEGIN\n{}\nREJECTED_OUTPUT_END",
                             error.code, error.message, repair_evidence, rejected_output
                         )
                         },
@@ -2664,7 +2686,7 @@ pub async fn run_agent_recorded(
                         Some(error.code.to_string()),
                     );
                 }
-                Err(_) => {
+                _ => {
                     record_replay(
                         &replay_sink,
                         "report_validation",
@@ -2797,6 +2819,21 @@ fn recover_report_from_messages(
             .or_else(|_| parse_and_salvage_report(raw, evidence).map(|salvaged| salvaged.content))
             .ok()
     })
+}
+
+/// Start from context, not a preselected diagnostic workflow. Exact rotation
+/// input and mechanic internals remain available by explicitly reading the
+/// scenario; the registered evidence and deterministic cache stay complete.
+fn initial_scenario_context(output: &Value) -> Value {
+    let mut projected = output.clone();
+    for envelope in projected.get_mut("evidence").and_then(Value::as_array_mut).into_iter().flatten() {
+        if let Some(result) = envelope.get_mut("result").and_then(Value::as_object_mut) {
+            result.remove("rotation_input");
+            result.remove("mechanics_context");
+            result.insert("context_purpose".into(), Value::from("用户当前页面的背景场景。用户提出的规则假设可能尚未配置在这里，不以已选技能限制设计命题。需要分析实际操作时调用 get_current_scenario 读取完整宏、技能轴及执行规则。"));
+        }
+    }
+    model_tool_output(&projected)
 }
 
 fn model_tool_output(output: &Value) -> Value {
@@ -3354,7 +3391,11 @@ fn bound_json_value(value: &mut Value, array_limit: usize, string_limit: usize, 
                 // removes complete rows together with their source indices.
                 return;
             }
-            for item in object.values_mut() {
+            for (key, item) in object.iter_mut() {
+                // Citation identities and pointers are atomic. Clipping a
+                // hash creates an identifier the validator can never resolve.
+                if item.is_string() && (key.ends_with("_hash") || key.ends_with("_sha256")
+                    || matches!(key.as_str(), "evidence_id" | "source_pointer" | "json_pointer")) { continue; }
                 bound_json_value(item, array_limit, string_limit, depth + 1);
             }
         }
@@ -3409,6 +3450,7 @@ fn compact_result_facts(result: Option<&Value>) -> Value {
         "page_start_index",
         "has_more",
         "matches",
+        "searched_scopes", "applies_rules_to_scenario", "usage", "truncated",
         "window",
         "windows",
         "match_index",
@@ -3443,6 +3485,7 @@ fn compact_result_facts(result: Option<&Value>) -> Value {
 fn restore_compact_rotation_matches(source: &Value, target: &mut Value) {
     let Some(matches) = source.get("matches").and_then(Value::as_array) else { return };
     if matches.is_empty() { return }
+    if !matches.iter().any(|item| item.pointer("/matched/operation_number").is_some()) { return }
     let entry = |value: &Value| {
         let mut fields = serde_json::Map::new();
         for key in ["operation_number", "sequence_index", "anchor_id", "skill_name", "timing_mode", "delay_seconds", "raw_timing_offset", "timing_offset_seconds", "cooldown_semantics", "is_main_gcd"] {
@@ -3686,6 +3729,7 @@ fn evidence_priority(envelope: &Value) -> u8 {
         Some("compare_scenarios" | "compare_saved_macros" | "compare_saved_scenarios") => 1,
         Some("compare_focused_equipment" | "compare_equipment_strategies") => 1,
         Some("search_knowledge_base") => 2,
+        Some("lookup_skill_definitions") => 0,
         // Exact event reads answer the model's latest concrete question and
         // must survive transcript compaction. A rotation lookup that produced
         // no matches (common when a macro was mistakenly queried as a manual
@@ -3710,6 +3754,7 @@ fn model_evidence_group(item: &Value) -> &str {
     match item.get("tool_name").and_then(Value::as_str) {
         Some("get_current_scenario") => "scenario",
         Some("search_knowledge_base") => "knowledge",
+        Some("lookup_skill_definitions") => "definitions",
         Some("simulate_scenario") => "simulation",
         Some("analyze_timeline") => "timeline",
         Some("inspect_timeline_events") => "events",
@@ -4202,6 +4247,18 @@ fn prepend_mechanics_context(
         messages.retain(|message| !matches!(message, ModelMessage::User { content } if content.starts_with("<active_agent_skill")));
         messages.insert(0, ModelMessage::User { content: format!("<active_agent_skill id=\"macro-distillation/v2\">\n{}\n</active_agent_skill>", super::distillation::INSTRUCTIONS) });
     }
+    // Detailed execution rules are useful after the model elects to inspect
+    // actual combat. Do not silently reinsert the macro reference we omitted
+    // from the initial context for progressive disclosure.
+    let requested = evidence.values().any(|item| matches!(item["tool_name"].as_str(),
+        Some("analyze_timeline" | "inspect_timeline_events" | "inspect_rotation_input" | "compare_scenarios" | "distill_macro")))
+        || messages.iter().any(|message| match message {
+        ModelMessage::ToolResult { call_id, output } if call_id != "server-prefetch-scenario" =>
+            output.get("evidence").and_then(Value::as_array).is_some_and(|items| items.iter().any(|item|
+                matches!(item["tool_name"].as_str(), Some("get_current_scenario" | "analyze_timeline" | "inspect_timeline_events" | "inspect_rotation_input" | "compare_scenarios" | "distill_macro")))),
+        _ => false,
+    });
+    if !requested { return; }
     let Some(envelope) = evidence.values().find(|envelope| {
         envelope.get("tool_name").and_then(Value::as_str) == Some("get_current_scenario")
             && envelope.get("scenario_hash").and_then(Value::as_str)
@@ -4361,12 +4418,41 @@ fn report_repair_messages(
 }
 
 fn wrap_session_context(context: &str) -> String {
-    format!("<session_context untrusted_data=\"true\" purpose=\"conversation_continuity\" fact_status=\"historical_assistant_interpretation\">\n{context}\n</session_context>")
+    format!("<session_context untrusted_data=\"true\" purpose=\"conversation_continuity\">\nuser_messages 是用户实际提出的目标和补充，turns 是历史助手解释与提问，不能把助手建议当作用户已经接受的前提。结合最新回答延续任务；旧结论须核对。\n{context}\n</session_context>")
+}
+
+fn user_intent_context(input: &AgentRunInput) -> String {
+    let mut requests = input.session_context.as_deref()
+        .and_then(|context| serde_json::from_str::<Value>(context).ok())
+        .and_then(|context| context.get("user_messages").and_then(Value::as_array).cloned())
+        .unwrap_or_default().iter().filter_map(Value::as_str)
+        .map(str::to_string).collect::<Vec<_>>();
+    requests.push(super::session::clarification_answer(&input.question).to_string());
+    requests.join("\n用户补充：")
+}
+
+/// Re-anchor after tool/state context, including bounded handoff and report repair.
+/// The model still chooses its actions and prose; prior judgments cannot redefine
+/// the user's task merely by occupying the most recent context position.
+fn append_current_task(messages: &mut Vec<ModelMessage>, input: &AgentRunInput) {
+    let mut task = serde_json::json!({
+        "user_requests": clip_model_text(&user_intent_context(input), 1800),
+        "latest_user_message": clip_model_text(super::session::clarification_answer(&input.question), 1200),
+        "current_page_scope": {"game_version": input.scenario.game_version, "mount": input.scenario.mount},
+    });
+    if let Some(acceptance) = input.acceptance.as_ref().filter(|value| !value.is_empty()) {
+        task["explicit_acceptance"] = serde_json::to_value(acceptance).unwrap_or(Value::Null);
+        task["acceptance_scope"] = Value::String("调用方为本轮明确指定的客观验收条件；须由工具结果支持，不以计划或口头声明代替。最终宏应与已测试完整文本一致。条件不足时保留完整分析并说明待验证项，不编造通过结果；语义正确性仍须独立审读。".into());
+    }
+    messages.push(ModelMessage::User { content: format!(
+        "<current_user_task>\n{task}\n</current_user_task>\n继续完成这项任务，正文结构由你决定。前面的诊断状态与旧报告是工作记录，不能覆盖用户前提。讨论候选规则时，当前页面与候选不是同一方案：未启用的技能、未实现的规则或空调用不能证明替换无损、零收益或循环不变。按用户指定的替换范围推演；自行提出的附加改动另作备选，不冒充用户已经指定。给出设计参数和资源预算时检查前提一致、阈值可达、支出与恢复自洽。"
+    ) });
 }
 
 fn bounded_session_message(message: &str, max_chars: usize) -> String {
     let Some((_, body)) = message.split_once('>') else { return message.to_string(); };
     let context = body.trim().strip_suffix("</session_context>").unwrap_or(body).trim();
+    let context = context.find('{').map(|start| &context[start..]).unwrap_or(context);
     wrap_session_context(&compact_session_context(context, max_chars))
 }
 
@@ -4376,6 +4462,12 @@ fn bounded_session_message(message: &str, max_chars: usize) -> String {
 fn compact_session_context(context: &str, max_chars: usize) -> String {
     if context.chars().count() <= max_chars { return context.to_string(); }
     if let Ok(parsed) = serde_json::from_str::<Value>(context) {
+        let user_messages = parsed.get("user_messages").and_then(Value::as_array)
+            .map(|messages| messages.iter().enumerate()
+                .filter(|(index, _)| *index == 0 || *index >= messages.len().saturating_sub(3))
+                .filter_map(|(_, message)| message.as_str())
+                .map(|message| clip_model_text(message, (max_chars / 10).min(400)))
+                .collect::<Vec<_>>()).unwrap_or_default();
         if let Some(turns) = parsed.get("turns").and_then(Value::as_array) {
             for count in [2usize, 1] {
                 for field_chars in [240usize, 120, 60] {
@@ -4393,12 +4485,12 @@ fn compact_session_context(context: &str, max_chars: usize) -> String {
                         }
                         if let Some(goal) = goal { turn["continuation_goal"] = goal; }
                     }
-                    let compact = serde_json::json!({"schema_version": parsed.get("schema_version"), "purpose": "conversation_continuity", "fact_status": "historical_assistant_interpretation", "turns": recent, "compacted": true}).to_string();
+                    let compact = serde_json::json!({"schema_version": parsed.get("schema_version"), "purpose": "conversation_continuity", "fact_status": "historical_assistant_interpretation", "user_messages":user_messages, "turns": recent, "compacted": true}).to_string();
                     if compact.chars().count() <= max_chars { return compact; }
                 }
             }
             if let Some(last) = turns.last() {
-                return serde_json::json!({"purpose": "conversation_continuity", "fact_status": "historical_assistant_interpretation", "turns": [{
+                return serde_json::json!({"purpose": "conversation_continuity", "fact_status": "historical_assistant_interpretation", "user_messages":user_messages, "turns": [{
                     "scenario_hash": last.get("scenario_hash"),
                     "prompt_version": last.get("prompt_version"),
                     "question": last.get("question").and_then(Value::as_str).map(|text| clip_model_text(text, 240)),
@@ -4513,7 +4605,9 @@ fn unexecuted_plan_marker(
     .find(|tool| recommendations.contains(**tool) && !reflected_actions.contains(**tool)
         && !evidence.values().any(|item| item.get("tool_name").and_then(Value::as_str) == Some(**tool)))
     .map(|tool| (*tool).to_string());
-    if named_tool.is_some() {
+    // A declared read action can proceed; a comparison additionally needs an
+    // executable candidate. A future rule-validation paragraph is not one.
+    if named_tool.as_deref().is_some_and(|tool| !tool.starts_with("compare_")) {
         return named_tool;
     }
 
@@ -4534,10 +4628,11 @@ fn unexecuted_plan_marker(
         .get("rotation_changes")
         .and_then(Value::as_array)
         .is_some_and(|changes| !changes.is_empty())
-        || object.get("artifacts").and_then(Value::as_array).is_some_and(|items| !items.is_empty())
+        || object.get("artifacts").and_then(Value::as_array).is_some_and(|items| items.iter().any(|item| item["language"] == "jx3_macro"))
         || ["macro_replacements", "sequence_edits", "sequence_splices", "/cast ["]
             .iter()
             .any(|marker| recommendations.contains(marker));
+    if has_executable_candidate && named_tool.is_some() { return named_tool; }
     let marker = "proposed_comparison".to_string();
     (proposes_experiment
         && has_executable_candidate
@@ -4550,6 +4645,7 @@ fn is_reusable_deterministic_tool(tool_name: &str) -> bool {
     matches!(
         tool_name,
         "get_current_scenario"
+            | "lookup_skill_definitions"
             | "distill_macro"
             | "inspect_rotation_input"
             | "simulate_scenario"
@@ -4652,6 +4748,7 @@ fn requires_knowledge_only_client_scope(question: &str) -> bool {
 
 fn validate_input(input: &AgentRunInput, limits: &AgentRunLimits) -> Result<(), ()> {
     validate_trace_id(&input.run_id).map_err(|_| ())?;
+    if let Some(acceptance) = &input.acceptance { acceptance.validate().map_err(|_| ())?; }
     if input.question.trim().is_empty()
         || input.question.len() > MAX_QUESTION_BYTES
         || input
@@ -4738,6 +4835,12 @@ fn terminal_with_report(
     // candidate deliverables, independently of verified numeric claims.
     if content.artifacts.is_empty() { content.artifacts = trace.draft_artifacts.items(); }
     super::artifacts::normalize_artifacts(&mut content.artifacts);
+    let task_completion = super::completion::assess(
+        &user_intent_context(input), &input.scenario, &content,
+        registry.evidence(), input.acceptance.as_ref(),
+    );
+    // Run lifecycle and task acceptance are separate contracts. Missing task
+    // evidence does not censor prose, consume turns or interrupt exploration.
     trace.refresh_evidence_pack(registry.evidence());
     accounting.simulations = registry.used_simulations();
     accounting.knowledge_searches = registry.used_knowledge_searches();
@@ -4766,7 +4869,7 @@ fn terminal_with_report(
         report.evidence_ids.clone(),
         error.as_ref().map(|value| value.code.clone()),
     );
-    result(
+    let mut output = result(
         provider,
         input,
         prompt,
@@ -4775,7 +4878,9 @@ fn terminal_with_report(
         Some(report),
         error,
         trace,
-    )
+    );
+    output.task_completion = Some(task_completion);
+    output
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -4857,6 +4962,7 @@ fn result(
         model: provider.model().to_string(),
         status,
         accounting,
+        task_completion: None,
         report,
         clarification: None,
         error,
@@ -4867,6 +4973,7 @@ fn result(
 
 fn refusal_content(summary: &str, limitation: &str) -> AgentReportContentV1 {
     AgentReportContentV1 {
+        body_markdown: String::new(),
         schema_version: AGENT_REPORT_CONTENT_SCHEMA_V1.to_string(),
         summary: summary.to_string(),
         findings: Vec::new(),
@@ -4895,6 +5002,7 @@ fn task_preserving_provider_fallback(
         metrics: Vec::new(),
     }).into_iter().collect();
     Some(AgentReportContentV1 {
+        body_markdown: String::new(),
         schema_version: AGENT_REPORT_CONTENT_SCHEMA_V1.to_string(),
         summary: format!("关于“{}”，本轮还未完成判断。已取得的工具记录保留在调试信息中。", question),
         findings,
@@ -5347,6 +5455,7 @@ fn evidence_preserving_provider_fallback(
         }]
     };
     Some(AgentReportContentV1 {
+        body_markdown: String::new(),
         schema_version: AGENT_REPORT_CONTENT_SCHEMA_V1.to_string(),
         summary: if has_saved_catalog {
             format!(
@@ -5394,6 +5503,7 @@ fn model_judgment_with_evidence_fallback(
         return None;
     }
     let mut verified = AgentReportContentV1 {
+        body_markdown: String::new(),
         schema_version: AGENT_REPORT_CONTENT_SCHEMA_V1.to_string(),
         summary: String::new(),
         findings: Vec::new(),
@@ -5626,6 +5736,8 @@ fn elapsed_ms(started: Instant) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    include!("../../tests/agent/free_prose_runtime.rs");
+    include!("../../tests/agent/task_completion_runtime.rs");
     use super::*;
     use crate::agent::provider::{FakeProvider, ModelResponse, ProviderError, ProviderToolCall};
     use crate::{Attributes, TargetConfig};
@@ -5641,6 +5753,8 @@ mod tests {
         responses: Mutex<VecDeque<Result<ModelResponse, ProviderError>>>,
         requests: Mutex<Vec<ModelRequest>>,
     }
+
+    include!("../../tests/agent/prose_repair.rs");
 
     #[tokio::test]
     async fn distillation_skill_loads_on_demand_and_publishes_only_selected_macro() {
@@ -7107,6 +7221,7 @@ mod tests {
                 pauses: Vec::new(),
                 boss_attack_interval: None,
                 hanjia_expectation: None,
+            dunya_reset_seed: Default::default(),
                 tiegu_mode: 2,
                 experimental: false,
                 lite: false,
@@ -7122,6 +7237,7 @@ mod tests {
 
     fn input(runtime: &AgentRuntime, run_id: &str) -> AgentRunInput {
         AgentRunInput {
+            acceptance: None,
             run_id: run_id.to_string(),
             question: "分析当前循环的确定性输出。".to_string(),
             scenario: scenario(runtime),
@@ -7827,7 +7943,7 @@ mod tests {
         let transport_messages = requests[0].messages.iter().filter(|message|
             !matches!(message, ModelMessage::User { content } if content.starts_with("<mechanics_context"))
         ).collect::<Vec<_>>();
-        assert_eq!(transport_messages.len(), 4);
+        assert_eq!(transport_messages.len(), 5);
         assert!(matches!(
             transport_messages[0],
             ModelMessage::User { content }
@@ -7848,6 +7964,9 @@ mod tests {
             ModelMessage::ToolResult { call_id, .. }
                 if call_id == "server-prefetch-scenario"
         ));
+        assert!(matches!(transport_messages[4], ModelMessage::User { content }
+            if content.starts_with("<current_user_task>") && content.contains("概括上一轮结论。")
+                && !content.contains("上一轮可见结论")));
         assert!(requests[0]
             .tools
             .iter()
@@ -8991,3 +9110,7 @@ mod tests {
 #[cfg(test)]
 #[path = "../../tests/cangsheng/agent_berserk_projection.rs"]
 mod berserk_projection_tests;
+
+#[cfg(test)]
+#[path = "../../tests/agent/intent_compaction.rs"]
+mod intent_compaction_tests;

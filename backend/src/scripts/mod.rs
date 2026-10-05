@@ -1,18 +1,19 @@
 //! 技能效果脚本系统 - 顶级路由
 //!
 //! 按 `player.version` 分发到对应版本的脚本模块。
-//! 同版本内，脚本跨心法共享，内部用 `player.mount` 分支心法差异。
+//! 正式服脚本跨心法共享；苍生铸世的分山劲与铁骨衣使用独立脚本副本。
 //! Buff 脚本同样按版本分发。
 //!
 //! 2025.10 山海源流和 2026.04 暗影千机均保留独立脚本。
 //! AnYingQianJiTest 仅用于旧存档兼容，回退 2026.04 正式服；
-//! CangShengZhuShiTest 使用 2026.10 独立副本。
+//! CangShengZhuShiTest 按心法使用 2026.10 独立副本。
 
 pub mod v2025_10_ShanHaiYuanLiu;
 pub mod v2026_04_AnYingQianJi;
 pub mod v2026_10_CangShengZhuShiTest;
+pub mod v2026_10_CangShengZhuShiTest_TieGuYi;
 
-use crate::{BuffDef, GameVersion, Player, ScriptEmitter, SkillSpec};
+use crate::{BuffDef, GameVersion, Mount, Player, ScriptEmitter, SkillSpec};
 
 /// 技能脚本函数签名
 pub type SkillScriptFn = fn(&mut Player, &mut ScriptEmitter, f64);
@@ -21,6 +22,9 @@ pub type SkillScriptFn = fn(&mut Player, &mut ScriptEmitter, f64);
 
 /// 按版本查找 BuffDef 静态实例
 pub fn get_buff_def(player: &Player, buff_id: u32) -> Option<&'static BuffDef> {
+    if player.version == GameVersion::CangShengZhuShiTest && player.mount == Mount::TieGuYi {
+        return v2026_10_CangShengZhuShiTest_TieGuYi::buffs::defs::get_buff_def(buff_id);
+    }
     match player.version {
         GameVersion::ShanHaiYuanLiu => v2025_10_ShanHaiYuanLiu::buffs::defs::get_buff_def(buff_id),
         GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest => {
@@ -33,7 +37,10 @@ pub fn get_buff_def(player: &Player, buff_id: u32) -> Option<&'static BuffDef> {
 }
 
 /// 仅按版本枚举查（供不便传 Player 的地方用，如 aggregate/序列化）
-pub fn get_buff_def_by_version(version: GameVersion, buff_id: u32) -> Option<&'static BuffDef> {
+pub fn get_buff_def_by_version(version: GameVersion, mount: Mount, buff_id: u32) -> Option<&'static BuffDef> {
+    if version == GameVersion::CangShengZhuShiTest && mount == Mount::TieGuYi {
+        return v2026_10_CangShengZhuShiTest_TieGuYi::buffs::defs::get_buff_def(buff_id);
+    }
     match version {
         GameVersion::ShanHaiYuanLiu => v2025_10_ShanHaiYuanLiu::buffs::defs::get_buff_def(buff_id),
         GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest => {
@@ -47,7 +54,10 @@ pub fn get_buff_def_by_version(version: GameVersion, buff_id: u32) -> Option<&'s
 
 /// 列出指定版本的所有 BuffDef（与对应 get_buff_def match arms 配套维护）
 /// 启动时扫描用，避免对每个 buff_id 单独 match
-pub fn all_buff_defs_by_version(version: GameVersion) -> Vec<&'static BuffDef> {
+pub fn all_buff_defs_by_version(version: GameVersion, mount: Mount) -> Vec<&'static BuffDef> {
+    if version == GameVersion::CangShengZhuShiTest && mount == Mount::TieGuYi {
+        return v2026_10_CangShengZhuShiTest_TieGuYi::buffs::defs::all_buff_defs();
+    }
     match version {
         GameVersion::ShanHaiYuanLiu => v2025_10_ShanHaiYuanLiu::buffs::defs::all_buff_defs(),
         GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest => {
@@ -61,9 +71,9 @@ pub fn all_buff_defs_by_version(version: GameVersion) -> Vec<&'static BuffDef> {
 
 /// 收集指定版本所有 effects 含 AllDamageAddPercent 字段的 buff_id 集合
 /// 用于前端 log 战斗记录 hover 显示"伤害增益"（只统计 Step 8 全局增伤型 buff）
-pub fn collect_damage_add_buff_ids(version: GameVersion) -> Vec<u32> {
+pub fn collect_damage_add_buff_ids(version: GameVersion, mount: Mount) -> Vec<u32> {
     use crate::AttribField;
-    all_buff_defs_by_version(version)
+    all_buff_defs_by_version(version, mount)
         .into_iter()
         .filter(|def| {
             def.effects
@@ -106,9 +116,10 @@ pub fn affected_attr_keys(field: crate::AttribField) -> &'static [&'static str] 
 /// 仅记录至少影响一个面板属性的 buff
 pub fn collect_buff_attr_keys(
     version: GameVersion,
+    mount: Mount,
 ) -> std::collections::HashMap<u32, Vec<&'static str>> {
     let mut out = std::collections::HashMap::new();
-    for def in all_buff_defs_by_version(version) {
+    for def in all_buff_defs_by_version(version, mount) {
         let mut keys: Vec<&'static str> = Vec::new();
         for e in def.effects {
             for k in affected_attr_keys(e.field) {
@@ -143,7 +154,8 @@ pub fn format_effect_value(field: crate::AttribField, value: f64) -> String {
         | UnlimitedAdditionalHastePercent
         | VitalityBasePercentAdd
         | TargetPhysicsShieldPercent
-        | TargetDamageBonusPercent => format!("{:+.1}%", value / 1024.0 * 100.0),
+        | TargetDamageBonusPercent
+        | ThreatPercent => format!("{:+.1}%", value / 1024.0 * 100.0),
         // 招架率 N/10000
         ParryValuePercent => format!("{:+.2}%", value / 10000.0 * 100.0),
         // 主属性 → 副属性转化系数：N/1024 倍
@@ -167,10 +179,11 @@ pub fn format_effect_value(field: crate::AttribField, value: f64) -> String {
 /// 给前端 hover 展示"嗜血 ×3  +10%"这种带数值的小字注解用
 pub fn collect_buff_attr_desc(
     version: GameVersion,
+    mount: Mount,
 ) -> std::collections::HashMap<u32, std::collections::HashMap<String, String>> {
     let mut out: std::collections::HashMap<u32, std::collections::HashMap<String, String>> =
         std::collections::HashMap::new();
-    for def in all_buff_defs_by_version(version) {
+    for def in all_buff_defs_by_version(version, mount) {
         let mut m: std::collections::HashMap<String, String> = std::collections::HashMap::new();
         for e in def.effects {
             let desc = format_effect_value(e.field, e.value);
@@ -194,6 +207,9 @@ pub fn collect_buff_attr_desc(
 // ─── 技能脚本路由 ───────────────────────────────────────────
 
 fn get_skill_script(player: &Player, skill_id: u32) -> Option<SkillScriptFn> {
+    if player.version == GameVersion::CangShengZhuShiTest && player.mount == Mount::TieGuYi {
+        return v2026_10_CangShengZhuShiTest_TieGuYi::skills::get_skill_script(skill_id);
+    }
     match player.version {
         GameVersion::ShanHaiYuanLiu => v2025_10_ShanHaiYuanLiu::skills::get_skill_script(skill_id),
         GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest => {
@@ -211,6 +227,9 @@ pub fn run_scripts(player: &mut Player, skill: &SkillSpec, cast_time: f64) -> Sc
     if let Some(script) = get_skill_script(player, skill.skill_id) {
         script(player, &mut em, cast_time);
     }
+    if player.version == GameVersion::CangShengZhuShiTest && player.mount == crate::Mount::FenShanJin {
+        v2026_10_CangShengZhuShiTest::on_post_cast(player, skill);
+    }
     // 大附魔触发后处理（腰/腕/鞋；帽走 aggregate_buff_fields 不在这里）
     crate::equip_effects::on_post_cast(player, &mut em, skill, cast_time);
     let _ns = _t0.elapsed().as_nanos() as u64;
@@ -224,6 +243,9 @@ pub fn run_scripts(player: &mut Player, skill: &SkillSpec, cast_time: f64) -> Sc
 // ─── Buff 脚本路由（签名新增 &Player）─────────────────────
 
 pub fn get_buff_on_tick(player: &Player, buff_id: u32) -> Option<SkillScriptFn> {
+    if player.version == GameVersion::CangShengZhuShiTest && player.mount == Mount::TieGuYi {
+        return v2026_10_CangShengZhuShiTest_TieGuYi::buffs::get_buff_on_tick(buff_id);
+    }
     match player.version {
         GameVersion::ShanHaiYuanLiu => v2025_10_ShanHaiYuanLiu::buffs::get_buff_on_tick(buff_id),
         GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest => {
@@ -236,6 +258,9 @@ pub fn get_buff_on_tick(player: &Player, buff_id: u32) -> Option<SkillScriptFn> 
 }
 
 pub fn get_buff_on_expire(player: &Player, buff_id: u32) -> Option<SkillScriptFn> {
+    if player.version == GameVersion::CangShengZhuShiTest && player.mount == Mount::TieGuYi {
+        return v2026_10_CangShengZhuShiTest_TieGuYi::buffs::get_buff_on_expire(buff_id);
+    }
     match player.version {
         GameVersion::ShanHaiYuanLiu => v2025_10_ShanHaiYuanLiu::buffs::get_buff_on_expire(buff_id),
         GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest => {
@@ -248,6 +273,9 @@ pub fn get_buff_on_expire(player: &Player, buff_id: u32) -> Option<SkillScriptFn
 }
 
 pub fn get_buff_on_remove(player: &Player, buff_id: u32) -> Option<SkillScriptFn> {
+    if player.version == GameVersion::CangShengZhuShiTest && player.mount == Mount::TieGuYi {
+        return v2026_10_CangShengZhuShiTest_TieGuYi::buffs::get_buff_on_remove(buff_id);
+    }
     match player.version {
         GameVersion::ShanHaiYuanLiu => v2025_10_ShanHaiYuanLiu::buffs::get_buff_on_remove(buff_id),
         GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest => {
@@ -267,9 +295,8 @@ pub fn override_attack_coeff(player: &Player, spec: &SkillSpec) -> Option<f64> {
     if player.uses_berserk() {
         use v2026_10_CangShengZhuShiTest::skills;
         match spec.skill_id {
-            30769 => return skills::zhen_yun::override_attack_coeff(player),
-            30855 => return skills::yue_zhao::override_attack_coeff(player),
-            30856 => return skills::yan_men::override_attack_coeff(player),
+            30769 | 30855 | 30856 => return skills::zhen_yun::damage_variant(player, spec)
+                .map(|damage| damage.attack_coeff),
             _ => {}
         }
     }
@@ -277,19 +304,39 @@ pub fn override_attack_coeff(player: &Player, spec: &SkillSpec) -> Option<f64> {
         // 卷雪刀（平砍）：按当前加速实时算
         13039 => Some(juan_xue_attack_coeff(player)),
         // 盾刀：卷云奇穴覆盖三段系数
-        13044 if player.has_talent(13321) => match spec.name.as_str() {
+        13044 if player.has_talent(13321) => (match spec.name.as_str() {
             "盾刀·一段" => Some(1.47500),
             "盾刀·二段" => Some(1.69375),
             "盾刀·三段" => Some(1.93125),
             _ => None,
-        },
+        }).map(|c| if player.version == GameVersion::CangShengZhuShiTest { c * 10.0 / 89.92534 } else { c }),
         _ => None,
     }
+}
+
+/// 预览和事件共用动态伤害参数；正式服未配置的范围保持原值。
+pub fn effective_damage_spec<'a>(player: &Player, spec: &'a SkillSpec) -> std::borrow::Cow<'a, SkillSpec> {
+    let mut result = std::borrow::Cow::Borrowed(spec);
+    if let Some(coeff) = override_attack_coeff(player, spec) {
+        result.to_mut().attack_coeff = coeff;
+    }
+    if player.uses_berserk() {
+        if let Some(damage) = v2026_10_CangShengZhuShiTest::skills::zhen_yun::damage_variant(player, spec) {
+            let updated = result.to_mut();
+            let [min, max] = damage.base_damage_range;
+            updated.base_damage = (min + max) / 2.0;
+            updated.base_damage_range = Some([min, max]);
+        }
+    }
+    result
 }
 
 /// 卷雪刀（平砍）attack_coeff：按心法+版本决定
 pub fn juan_xue_attack_coeff(player: &Player) -> f64 {
     let haste = player.effective_haste_level();
+    if player.version == GameVersion::CangShengZhuShiTest && player.mount == Mount::TieGuYi {
+        return v2026_10_CangShengZhuShiTest_TieGuYi::skills::juan_xue_attack_coeff(haste);
+    }
     match player.version {
         GameVersion::ShanHaiYuanLiu => {
             v2025_10_ShanHaiYuanLiu::skills::juan_xue_attack_coeff(haste)
@@ -305,6 +352,9 @@ pub fn juan_xue_attack_coeff(player: &Player) -> f64 {
 
 /// 卷雪刀（平砍）产卡
 pub fn juan_xue_process_swings(player: &mut Player, to_time: f64) -> Vec<crate::CastEvent> {
+    if player.version == GameVersion::CangShengZhuShiTest && player.mount == Mount::TieGuYi {
+        return v2026_10_CangShengZhuShiTest_TieGuYi::skills::juan_xue_process_swings(player, to_time);
+    }
     match player.version {
         GameVersion::ShanHaiYuanLiu => {
             v2025_10_ShanHaiYuanLiu::skills::juan_xue_process_swings(player, to_time)
@@ -320,6 +370,9 @@ pub fn juan_xue_process_swings(player: &mut Player, to_time: f64) -> Vec<crate::
 
 /// 绝刀运行时附加秘籍
 pub fn jue_dao_runtime_recipes(player: &Player) -> Vec<u32> {
+    if player.version == GameVersion::CangShengZhuShiTest && player.mount == Mount::TieGuYi {
+        return v2026_10_CangShengZhuShiTest_TieGuYi::skills::jue_dao_runtime_recipes(player);
+    }
     match player.version {
         GameVersion::ShanHaiYuanLiu => {
             v2025_10_ShanHaiYuanLiu::skills::jue_dao_runtime_recipes(player)
@@ -335,6 +388,9 @@ pub fn jue_dao_runtime_recipes(player: &Player) -> Vec<u32> {
 
 /// 绝刀按怒气段 effective_rage_cost
 pub fn jue_dao_effective_rage_cost(player: &Player, skill: &SkillSpec) -> u32 {
+    if player.version == GameVersion::CangShengZhuShiTest && player.mount == Mount::TieGuYi {
+        return v2026_10_CangShengZhuShiTest_TieGuYi::skills::jue_dao_effective_rage_cost(player, skill);
+    }
     match player.version {
         GameVersion::ShanHaiYuanLiu => {
             v2025_10_ShanHaiYuanLiu::skills::jue_dao_effective_rage_cost(player, skill)
@@ -350,6 +406,9 @@ pub fn jue_dao_effective_rage_cost(player: &Player, skill: &SkillSpec) -> u32 {
 
 /// 盾挡按怒气分摊 10~100
 pub fn dun_dang_effective_rage_cost(player: &Player) -> u32 {
+    if player.version == GameVersion::CangShengZhuShiTest && player.mount == Mount::TieGuYi {
+        return v2026_10_CangShengZhuShiTest_TieGuYi::skills::dun_dang::effective_rage_cost(player);
+    }
     match player.version {
         GameVersion::ShanHaiYuanLiu => {
             v2025_10_ShanHaiYuanLiu::skills::dun_dang::effective_rage_cost(player)
@@ -365,6 +424,9 @@ pub fn dun_dang_effective_rage_cost(player: &Player) -> u32 {
 
 /// 战斗开始钩子（simulate 入口调用）：按奇穴激活心法/版本特有的常驻 buff
 pub fn on_battle_start(player: &mut Player) {
+    if player.version == GameVersion::CangShengZhuShiTest && player.mount == Mount::TieGuYi {
+        return v2026_10_CangShengZhuShiTest_TieGuYi::buffs::on_battle_start(player);
+    }
     match player.version {
         GameVersion::ShanHaiYuanLiu => v2025_10_ShanHaiYuanLiu::buffs::on_battle_start(player),
         GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest => {
@@ -379,6 +441,9 @@ pub fn on_battle_start(player: &mut Player) {
 /// 自身受击事件（Boss 周期攻击触发）
 /// 处理坚铁叠层、招架判定、寒甲刷新等受击效果
 pub fn on_player_hit(player: &mut Player, t: f64) -> Vec<crate::CastEvent> {
+    if player.version == GameVersion::CangShengZhuShiTest && player.mount == Mount::TieGuYi {
+        return v2026_10_CangShengZhuShiTest_TieGuYi::on_hit::on_player_hit(player, t);
+    }
     match player.version {
         GameVersion::ShanHaiYuanLiu => v2025_10_ShanHaiYuanLiu::on_hit::on_player_hit(player, t),
         GameVersion::AnYingQianJi | GameVersion::AnYingQianJiTest => {

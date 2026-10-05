@@ -1,16 +1,14 @@
 id   = 30856
 name = "雁门迢递"
 icon = "https://icon.jx3box.com/icon/17159.png"
-description = "神威：阵云结晦三段 / 90秒内可施展 / 按首段50或100暴怒采用8.0875或14.1625攻击系数"
+description = "二段“月照连营”招式施展后方可施展，冲刺并对目标造成{{damage:雁门迢递}}无质外功伤害。"
 
 # 阵云结晦三段 / 距离20尺冲刺（120°） / GCD: 1.5秒
-# 测试服公告未包含回复普通怒气。
-# 无视100%外功防御；不沿用旧版非侠士+200%。
 # 冲刺结束后才生效，切换目标/目标无敌可能丢失伤害
 
 stance          = "not_wall"
 rage_gain       = 0
-requires_talent = 91002
+requires_talent = 30769
 
 [[cooldowns]]
 cd_id    = "gcd_1.5"
@@ -35,7 +33,11 @@ rank           = 1
 name           = "雁门迢递"
 icon = "https://icon.jx3box.com/icon/17159.png"
 requires_combo = "阵云_3"
-base_damage    = 124.5     # (120 + 129) / 2
-attack_coeff   = 8.0875 # 首段50暴怒；首段100暴怒为14.1625。
+base_damage_range = [12.0, 12.9]
+attack_coeff = 0.8993571778544289
 weapon_coeff   = 1.0
 defense_ignore = 1.0
+
+[ranks.high_berserk_damage]
+base_damage_range = [13.8, 14.7]
+attack_coeff = 1.5749175927497188

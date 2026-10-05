@@ -1,0 +1,55 @@
+{
+  "schema": "exact-macro-v1",
+  "status": "exact",
+  "iterations": [
+    {
+      "status": "sat",
+      "solve_ms": 10.882600035984069,
+      "slots": null,
+      "terms": null,
+      "sample_count": 86,
+      "distinct_atoms": 324,
+      "method": "unbounded_ordered_cover",
+      "rule_count": 13,
+      "max_terms_used": 1,
+      "variant": 0,
+      "comparison": {
+        "actual_count": 23,
+        "exact_prefix": 23,
+        "first_difference": null,
+        "max_time_error_on_order_prefix": 0.0,
+        "order_prefix": 23,
+        "reproduced": true,
+        "state_prefix": 23,
+        "target_count": 23,
+        "time_tolerance_seconds": 1e-07
+      }
+    }
+  ],
+  "language": "one unfiltered page, ordered /cast or /fcast, AND clauses; no character objective",
+  "acceptance": "every returned active cast, skill ID + displayed variant + channel + absolute time <= 1e-7s, aligned post-cast states; no truncation",
+  "solver_version": "5.1.0",
+  "sizes": [],
+  "strategy": "unbounded_ordered_cover",
+  "rule_limit": null,
+  "terms_per_rule_limit": null,
+  "threshold_decimal_places": 1,
+  "wall_time_limit_seconds": 180.0,
+  "solver_check_limit_ms": 20000,
+  "endpoint": "runtime starts decisions at t <= horizon; final delayed cast also compared; all waits through horizon checked",
+  "preparation_status": "ok",
+  "comparison": {
+    "actual_count": 23,
+    "exact_prefix": 23,
+    "first_difference": null,
+    "max_time_error_on_order_prefix": 0.0,
+    "order_prefix": 23,
+    "reproduced": true,
+    "state_prefix": 23,
+    "target_count": 23,
+    "time_tolerance_seconds": 1e-07
+  },
+  "scenario_sha256": "beaddc042c1ada9d0f757d1b2263339eb23c1eda1d175aee0e98d38d2e1e4b38",
+  "elapsed_ms": 418.75850001815706,
+  "total_solve_ms": 10.882600035984069
+}

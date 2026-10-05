@@ -1,5 +1,6 @@
-﻿id   = 13180
+id   = 13180
 name = "收盾"
+description = "解除自身盾墙状态。"
 
 icon = "https://icon.jx3box.com/icon/6304.png"
 # 解除盾墙状态

@@ -19,9 +19,6 @@ use crate::{
     BUFF_YE_SHOES_CRIT, BUFF_YE_SHOES_OVERCOME, BUFF_YUAN_GE_ID, BUFF_ZHAN_JUE, BUFF_ZHEN_FEN,
 };
 
-/// 嗜血绝刀加成秘籍 ID（由奇穴 21281 常驻激活，不依赖 buff）
-pub const RECIPE_SHI_XUE_JUE_DAO: u32 = 99240;
-
 /// 嗜血 buff 的字段加成（只有 +5% 全局增伤依赖 buff）
 static EFFECTS_SHI_XUE: &[EffectEntry] = &[
     EffectEntry {
@@ -369,7 +366,7 @@ pub static BUFF_CHENG_WU_DEF: BuffDef = BuffDef {
 pub static BUFF_SHI_XUE_DEF: BuffDef = BuffDef {
     buff_id: BUFF_SHI_XUE,
     name: "嗜血",
-    description: "造成伤害提高5%（双会+绝刀+40% 由奇穴 21281 常驻，不依赖本 buff）",
+    description: "造成伤害提高5%，持续12秒（绝刀双会与每额外10怒的30%增幅由奇穴提供，不依赖本buff）",
     duration_frames: 192,
     tick_interval: 0,
     max_stacks: 1,
@@ -426,7 +423,7 @@ pub static BUFF_BU_CAN_DEF: BuffDef = BuffDef {
     buff_id: BUFF_BU_CAN,
     name: "步残",
     description: "无法施展轻功",
-    duration_frames: 64,
+    duration_frames: 80,
     tick_interval: 0,
     max_stacks: 1,
     is_debuff: true,
@@ -495,15 +492,15 @@ pub static BUFF_HUAN_SHEN_DEF: BuffDef = BuffDef {
 // ── 寒啸千军（铁骨衣）──
 static EFFECTS_HAN_XIAO: &[EffectEntry] = &[EffectEntry {
     field: AttribField::StrainBase,
-    value: 67.0,
+    value: 3.0,
 }];
 pub static BUFF_HAN_XIAO_DEF: BuffDef = BuffDef {
     buff_id: BUFF_HAN_XIAO,
     name: "寒啸千军",
-    description: "每3310基础体质+67无双等级",
+    description: "每95点基础体质提高3点无双等级，持续15秒",
     duration_frames: 240,
     tick_interval: 0,
-    max_stacks: 100,
+    max_stacks: u32::MAX,
     is_debuff: false,
     show_on_timeline: true,
     timeline_order: 25,
@@ -1050,15 +1047,15 @@ pub static BUFF_YE_RING_SURPLUS_DEF: BuffDef = BuffDef {
 // 振奋（奇穴 13422）：盾挡后 30s；每层 +111 StrainBase，max_stacks=100
 static EFFECTS_ZHEN_FEN: &[EffectEntry] = &[EffectEntry {
     field: AttribField::StrainBase,
-    value: 111.0,
+    value: 5.0,
 }];
 pub static BUFF_ZHEN_FEN_DEF: BuffDef = BuffDef {
     buff_id: BUFF_ZHEN_FEN,
     name: "振奋",
-    description: "每 3310 基础体质 +111 无双等级（每层 +111 StrainBase，上限 100 层），持续 30 秒",
+    description: "每95点基础体质提高5点无双等级，持续30秒",
     duration_frames: 480,
     tick_interval: 0,
-    max_stacks: 100,
+    max_stacks: u32::MAX,
     is_debuff: false,
     show_on_timeline: true,
     timeline_order: 24,

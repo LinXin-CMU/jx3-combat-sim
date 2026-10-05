@@ -64,6 +64,8 @@ pub enum AttribField {
     // ── 最终百分比加成（直接加到最终比例，不走等级换算）──
     PhysicsCriticalStrikePercent, // 外功会心率 +N/1024（直接加到最终会心率）
     PhysicsCriticalDamagePowerPercent, // 外功会心效果 +N/1024（直接加到最终会心效果比例）
+
+    ThreatPercent, // 威胁值加成 +N/1024；不参与伤害链
 }
 
 /// Buff 字段加成项

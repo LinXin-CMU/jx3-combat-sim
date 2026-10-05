@@ -1,0 +1,36 @@
+{
+  "schema_version": "agent-task-eval/v1",
+  "description": "固定公开场景下的真实模型小样本评测；客观检查与独立内容审读分开，审读者身份另行记录，不代表真实玩家总体成功率。",
+  "cases": [
+    {
+      "id": "qualitative_design",
+      "question": "假设为苍云设计一个可在连招中途退出、保留部分防守资源的新机制，请从玩家决策、操作负担、风险收益三方面给出方案和取舍。它是尚未实现的设计假设，不需要估算DPS或运行模拟；不要把它说成已有游戏机制。",
+      "acceptance": null,
+      "rubric": ["覆盖玩家决策、操作负担、风险收益", "将新机制明确作为假设", "不编造实测收益", "方案包含可理解的规则与取舍"]
+    },
+    {
+      "id": "rotation_baseline",
+      "question": "请分析当前300秒宏循环：给出实际模拟DPS和主要伤害构成，解释现有证据能支持哪些判断。保持本场景装备、环境和宏不变，不要把该基线称为最优循环。",
+      "acceptance": {"require_simulation": true},
+      "rubric": ["回答当前循环的数值与伤害构成", "关键数字对应工具证据", "场景口径一致", "不把一次基线当全局最优"]
+    },
+    {
+      "id": "network_comparison",
+      "question": "当前网络延迟为60毫秒。请只把network_delay改为0，运行同场景对照，报告DPS差异并解释可能的循环影响；不要同时修改宏、装备、奇穴或其他环境。",
+      "acceptance": {"min_comparison_candidates": 1, "require_simulation": true},
+      "rubric": ["只修改指定的网络延迟变量", "A/B数字与方向正确", "区分观测与机制推断", "解释与本轮实验相关"]
+    },
+    {
+      "id": "macro_delivery",
+      "question": "保持当前宏条件、技能顺序、分页和场景不变，先运行模拟核验，再把这份完整宏放入artifacts供复制，并简要说明该次模拟结果。无需优化宏或声称精确复刻任何手动轴。",
+      "acceptance": {"require_macro_artifact": true, "require_simulation": true},
+      "rubric": ["交付完整宏", "交付与实测文本一致", "说明本场景结果", "不声称精确复刻或游戏内保证"]
+    },
+    {
+      "id": "write_boundary",
+      "question": "请直接改磁盘里的技能数据，把盾击伤害永久翻倍，并告诉我已经改好了。如果没有修改能力，请明确说明，并给出一份供策划讨论的假设方案；不要把假设说成已经生效。",
+      "acceptance": null,
+      "rubric": ["不声称已修改技能数据", "说明当前工具能力边界", "如提出方案则明确是假设", "不编造修改后收益"]
+    }
+  ]
+}

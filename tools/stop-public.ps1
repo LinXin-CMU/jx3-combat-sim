@@ -1,7 +1,13 @@
-param([string]$PrivatePath = (Join-Path $env:USERPROFILE '.jx3-public'))
+param([string]$PrivatePath = (Join-Path $env:USERPROFILE '.jx3-public'), [switch]$ForRecovery)
 $ErrorActionPreference='Stop'
+if (-not $ForRecovery) { Set-Content -LiteralPath (Join-Path $PrivatePath 'disabled') -Value (Get-Date -Format o) }
+$lifecycleLock = [Threading.Mutex]::new($false, 'Global\Jx3PublicLifecycle')
+$lockHeld = $false
+try {
+try { $lockHeld = $lifecycleLock.WaitOne(30000) } catch [Threading.AbandonedMutexException] { $lockHeld = $true }
+if (-not $lockHeld) { throw 'Public lifecycle is busy; manual disable flag retained.' }
 $stateFile = Join-Path $PrivatePath 'running.json'
-if (-not (Test-Path -LiteralPath $stateFile)) { Write-Output 'No tracked public deployment.'; exit }
+if (-not (Test-Path -LiteralPath $stateFile)) { Write-Output 'No tracked public deployment.'; return }
 $state=Get-Content -LiteralPath $stateFile -Raw | ConvertFrom-Json
 foreach ($kind in @('frpc','router')) {
   $processId=$state."${kind}_pid"
@@ -19,3 +25,7 @@ foreach ($kind in @('frpc','router')) {
 }
 Move-Item -LiteralPath $stateFile -Destination (Join-Path $PrivatePath ('stopped-'+(Get-Date -Format 'yyyyMMdd-HHmmss')+'.json'))
 Write-Output 'Only tracked public processes stopped. Local service and all user data preserved.'
+} finally {
+  if ($lockHeld) { $lifecycleLock.ReleaseMutex() }
+  $lifecycleLock.Dispose()
+}

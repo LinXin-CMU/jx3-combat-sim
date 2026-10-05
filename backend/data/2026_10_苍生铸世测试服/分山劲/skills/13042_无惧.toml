@@ -1,5 +1,6 @@
-﻿id   = 13042
+id   = 13042
 name = "无惧"
+description = "解除自身所有控制效果，并使自身免疫控制及恐惧效果，持续6秒。在“分山劲”心法下，将额外获得受到伤害降低30%的效果，持续6秒。"
 
 icon = "https://icon.jx3box.com/icon/6299.png"
 # 生存技 / CD: 60秒
@@ -25,6 +26,6 @@ weapon_coeff = 0
 rank         = 2
 name         = "无惧·鸿烈"
 icon = "https://icon.jx3box.com/icon/6299.png"
-base_damage  = 1525.0     # (1500 + 1550) / 2
-attack_coeff = 1.5625
+base_damage_range = [150.0, 155.0]
+attack_coeff = 0.1737552507446733
 weapon_coeff = 0

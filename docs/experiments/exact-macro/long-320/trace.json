@@ -1,0 +1,4497 @@
+{
+  "comparison": {
+    "actual_count": 320,
+    "exact_prefix": 320,
+    "first_difference": null,
+    "max_time_error_on_order_prefix": 0.0,
+    "order_prefix": 320,
+    "reproduced": true,
+    "state_prefix": 320,
+    "target_count": 320,
+    "time_tolerance_seconds": 1e-07
+  },
+  "target": [
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 0.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 1.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 2.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 3.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 4.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 5.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 6.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 7.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 8.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 9.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 10.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 11.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 12.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 13.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 14.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 15.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 16.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 17.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 18.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 19.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 20.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 21.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 22.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 23.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 24.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 25.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 26.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 27.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 28.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 29.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 30.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 31.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 32.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 33.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 34.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 35.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 36.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 37.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 38.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 39.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 40.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 41.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 42.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 43.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 44.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 45.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 46.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 47.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 48.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 49.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 50.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 51.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 52.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 53.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 54.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 55.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 56.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 57.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 58.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 59.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 60.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 61.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 62.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 63.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 64.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 65.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 66.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 67.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 68.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 69.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 70.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 71.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 72.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 73.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 74.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 75.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 76.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 77.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 78.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 79.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 80.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 81.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 82.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 83.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 84.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 85.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 86.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 87.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 88.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 89.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 90.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 91.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 92.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 93.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 94.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 95.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 96.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 97.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 98.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 99.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 100.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 101.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 102.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 103.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 104.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 105.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 106.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 107.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 108.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 109.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 110.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 111.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 112.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 113.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 114.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 115.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 116.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 117.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 118.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 119.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 120.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 121.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 122.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 123.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 124.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 125.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 126.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 127.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 128.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 129.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 130.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 131.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 132.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 133.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 134.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 135.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 136.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 137.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 138.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 139.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 140.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 141.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 142.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 143.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 144.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 145.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 146.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 147.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 148.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 149.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 150.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 151.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 152.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 153.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 154.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 155.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 156.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 157.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 158.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 159.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 160.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 161.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 162.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 163.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 164.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 165.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 166.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 167.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 168.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 169.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 170.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 171.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 172.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 173.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 174.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 175.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 176.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 177.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 178.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 179.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 180.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 181.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 182.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 183.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 184.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 185.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 186.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 187.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 188.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 189.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 190.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 191.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 192.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 193.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 194.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 195.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 196.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 197.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 198.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 199.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 200.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 201.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 202.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 203.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 204.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 205.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 206.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 207.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 208.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 209.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 210.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 211.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 212.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 213.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 214.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 215.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 216.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 217.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 218.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 219.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 220.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 221.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 222.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 223.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 224.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 225.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 226.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 227.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 228.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 229.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 230.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 231.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 232.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 233.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 234.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 235.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 236.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 237.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 238.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 239.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 240.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 241.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 242.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 243.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 244.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 245.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 246.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 247.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 248.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 249.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 250.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 251.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 252.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 253.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 254.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 255.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 256.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 257.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 258.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 259.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 260.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 261.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 262.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 263.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 264.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 265.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 266.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 267.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 268.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 269.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 270.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 271.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 272.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 273.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 274.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 275.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 276.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 277.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 278.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 279.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 280.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 281.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 282.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 283.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 284.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 285.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 286.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 287.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 288.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 289.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 290.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 291.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 292.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 293.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 294.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 295.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 296.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 297.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 298.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 299.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 300.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 301.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 302.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 303.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 304.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 305.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 306.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 307.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 308.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 309.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 310.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 311.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 312.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 313.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 314.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 315.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 316.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 317.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 318.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 319.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    }
+  ],
+  "actual": [
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 0.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 1.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 2.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 3.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 4.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 5.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 6.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 7.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 8.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 9.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 10.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 11.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 12.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 13.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 14.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 15.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 16.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 17.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 18.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 19.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 20.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 21.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 22.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 23.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 24.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 25.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 26.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 27.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 28.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 29.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 30.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 31.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 32.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 33.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 34.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 35.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 36.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 37.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 38.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 39.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 40.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 41.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 42.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 43.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 44.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 45.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 46.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 47.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 48.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 49.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 50.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 51.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 52.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 53.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 54.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 55.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 56.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 57.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 58.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 59.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 60.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 61.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 62.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 63.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 64.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 65.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 66.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 67.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 68.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 69.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 70.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 71.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 72.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 73.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 74.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 75.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 76.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 77.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 78.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 79.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 80.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 81.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 82.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 83.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 84.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 85.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 86.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 87.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 88.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 89.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 90.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 91.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 92.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 93.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 94.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 95.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 96.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 97.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 98.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 99.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 100.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 101.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 102.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 103.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 104.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 105.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 106.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 107.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 108.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 109.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 110.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 111.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 112.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 113.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 114.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 115.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 116.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 117.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 118.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 119.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 120.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 121.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 122.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 123.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 124.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 125.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 126.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 127.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 128.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 129.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 130.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 131.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 132.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 133.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 134.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 135.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 136.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 137.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 138.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 139.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 140.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 141.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 142.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 143.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 144.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 145.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 146.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 147.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 148.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 149.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 150.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 151.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 152.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 153.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 154.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 155.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 156.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 157.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 158.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 159.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 160.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 161.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 162.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 163.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 164.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 165.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 166.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 167.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 168.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 169.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 170.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 171.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 172.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 173.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 174.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 175.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 176.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 177.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 178.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 179.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 180.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 181.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 182.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 183.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 184.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 185.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 186.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 187.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 188.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 189.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 190.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 191.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 192.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 193.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 194.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 195.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 196.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 197.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 198.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 199.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 200.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 201.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 202.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 203.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 204.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 205.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 206.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 207.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 208.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 209.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 210.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 211.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 212.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 213.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 214.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 215.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 216.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 217.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 218.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 219.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 220.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 221.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 222.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 223.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 224.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 225.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 226.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 227.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 228.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 229.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 230.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 231.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 232.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 233.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 234.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 235.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 236.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 237.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 238.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 239.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 240.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 241.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 242.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 243.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 244.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 245.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 246.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 247.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 248.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 249.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 250.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 251.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 252.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 253.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 254.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 255.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 256.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 257.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 258.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 259.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 260.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 261.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 262.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 263.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 264.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 265.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 266.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 267.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 268.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 269.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 270.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 271.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 272.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 273.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 274.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 275.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 276.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 277.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 278.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 279.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 280.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 281.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 282.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 283.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 284.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 285.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 286.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 287.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 288.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 289.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 290.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 291.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 292.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 293.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 294.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 295.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 296.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 297.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 298.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 299.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 300.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 301.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 302.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 303.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 304.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 305.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 306.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 307.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 308.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 309.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 310.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 311.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 312.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 313.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 314.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 315.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 316.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 317.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 318.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 319.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    }
+  ]
+}

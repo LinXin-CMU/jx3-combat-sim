@@ -81,6 +81,10 @@ pub enum ToolError {
     NoScenarioChanges {
         label: String,
     },
+    UnavailableCandidateAction {
+        name: String,
+    },
+    ConflictingCandidateTalents,
     TimelineDetailsUnavailable,
     EquipmentFocusUnavailable,
     EquipmentStrategyUnavailable,
@@ -115,6 +119,10 @@ impl std::fmt::Display for ToolError {
             Self::NoScenarioChanges { label } => {
                 write!(f, "candidate '{label}' does not change the baseline scenario")
             }
+            Self::UnavailableCandidateAction { name } => {
+                write!(f, "candidate introduces unavailable skill or talent '{name}'; use lookup_skill_definitions to identify its version, mount and talent requirement. Macro edits do not transplant skill scripts or resource rules; no comparison was run")
+            }
+            Self::ConflictingCandidateTalents => write!(f, "candidate exceeds talent tier capacity: replace the existing choice in a fixed tier; mixed tier 8 allows at most three choices"),
             Self::TimelineDetailsUnavailable => {
                 write!(f, "full timeline details are required for deterministic analysis")
             }
@@ -1048,6 +1056,7 @@ mod tests {
             pauses: Vec::new(),
             boss_attack_interval: None,
             hanjia_expectation: None,
+            dunya_reset_seed: Default::default(),
             tiegu_mode: 2,
             experimental: false,
             lite: false,

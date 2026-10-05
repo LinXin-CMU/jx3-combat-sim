@@ -1888,6 +1888,7 @@ mod tests {
             pauses: Vec::new(),
             boss_attack_interval: None,
             hanjia_expectation: None,
+            dunya_reset_seed: Default::default(),
             tiegu_mode: 2,
             experimental: false,
             lite: false,

@@ -1,0 +1,44 @@
+{
+  "executable_sha256": "2e3ae9677685520c7327e263a482efa11ee75a9b3afbd8cab7c757cf2736c6d8",
+  "verification": [
+    {
+      "case": "short",
+      "status": "ok",
+      "comparison": {
+        "actual_count": 23,
+        "exact_prefix": 23,
+        "first_difference": null,
+        "max_time_error_on_order_prefix": 0.0,
+        "order_prefix": 23,
+        "reproduced": true,
+        "state_prefix": 23,
+        "target_count": 23,
+        "time_tolerance_seconds": 1e-07
+      },
+      "macro_sha256": "bdda205e1dfcc80a8f6fa0bdb01e27b2f86b9f34bd8804aa3bad9ad8ae37847b"
+    },
+    {
+      "case": "long-320",
+      "status": "ok",
+      "comparison": {
+        "actual_count": 320,
+        "exact_prefix": 320,
+        "first_difference": null,
+        "max_time_error_on_order_prefix": 0.0,
+        "order_prefix": 320,
+        "reproduced": true,
+        "state_prefix": 320,
+        "target_count": 320,
+        "time_tolerance_seconds": 1e-07
+      },
+      "macro_sha256": "9355a2dbcf2a6edd72a4910d64bfde17cbe92b8d2400bd5d51c39d3263e7023d"
+    }
+  ],
+  "source_sha256": {
+    "backend/src/macro_exact.rs": "2e6e3a264378a27fc905cbfed174bee31e8c3306982a389e214eea8425e0e451",
+    "backend/src/macro_eval.rs": "48898bb8f525b1d640f3030adf2b822589a2cd3cb399a79ce1d1197307590a26",
+    "backend/src/main.rs": "f787827f9269380a0baec19447a520308168688972173d613315b0e9ff125020",
+    "backend/src/macro_diagnostic.rs": "0123d3fc83048c22974dd107a34224e62f22fa58cb7ed0af960d3aa823c02a30",
+    "tools/exact-macro-synth.py": "de928ad90d6405a0f1b35473973f0d0d1d494bee295de7454f3c944ee48b7666"
+  }
+}

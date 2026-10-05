@@ -1,3 +1,7 @@
+mod prose;
+#[cfg(test)]
+#[path = "../../tests/agent/report_schema.rs"]
+mod schema_contract_tests;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -14,6 +18,8 @@ const MAX_METRICS_PER_FINDING: usize = 12;
 pub struct AgentReportContentV1 {
     pub schema_version: String,
     pub summary: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub body_markdown: String,
     pub findings: Vec<AgentFindingV1>,
     pub recommendations: Vec<AgentRecommendationV1>,
     #[serde(default)]
@@ -133,6 +139,7 @@ pub struct ValidatedReportContentV1 {
     pub content: AgentReportContentV1,
     pub normalized_metric_citations: usize,
     pub sanitized_claims: usize,
+    pub prose_was_cut: bool,
 }
 
 impl std::fmt::Display for ReportValidationError {
@@ -146,11 +153,15 @@ impl std::error::Error for ReportValidationError {}
 pub type EvidenceStore = BTreeMap<String, Value>;
 
 pub fn report_content_json_schema() -> Value {
+    // The provider's strict wire format requires every property to be present.
+    // Empty body/artifact values represent absence; serde defaults still accept
+    // older stored reports. Evidence semantics remain enforced by validate_report.
     serde_json::json!({
         "type": "object",
         "properties": {
             "schema_version": {"type": "string", "const": AGENT_REPORT_CONTENT_SCHEMA_V1},
             "summary": {"type": "string", "minLength": 1, "maxLength": 1024},
+            "body_markdown": {"type": "string", "maxLength": 16000, "description": "自由组织的答复正文；支持段落、标题、列表和表格。不需要正文时填写空字符串。引用的数值仍须通过证据校验。"},
             "findings": {
                 "type": "array",
                 "maxItems": MAX_FINDINGS,
@@ -159,7 +170,7 @@ pub fn report_content_json_schema() -> Value {
                     "properties": {
                         "title": {"type": "string", "minLength": 1, "maxLength": 1024},
                         "explanation": {"type": "string", "minLength": 1, "maxLength": 1024},
-                        "evidence_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+                        "evidence_ids": {"type": "array", "items": {"type": "string"}, "description": "本轮证据引用。有正文且不含数值指标的定性讨论可以为空；数值指标及无正文的 finding 仍须引用证据，由本地校验。"},
                         "metrics": {
                             "type": "array",
                             "maxItems": MAX_METRICS_PER_FINDING,
@@ -189,7 +200,7 @@ pub fn report_content_json_schema() -> Value {
                     "properties": {
                         "title": {"type": "string", "minLength": 1, "maxLength": 1024},
                         "rationale": {"type": "string", "minLength": 1, "maxLength": 1024},
-                        "evidence_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}}
+                        "evidence_ids": {"type": "array", "items": {"type": "string"}, "description": "本轮证据引用。定性建议可以为空；数值结论仍须通过本地证据校验。"}
                     },
                     "required": ["title", "rationale", "evidence_ids"],
                     "additionalProperties": false
@@ -217,7 +228,7 @@ pub fn report_content_json_schema() -> Value {
             "limitations": {"type": "array", "maxItems": MAX_RECOMMENDATIONS, "items": {"type": "string"}},
             "refusal_reason": {"type": ["string", "null"]}
         },
-        "required": ["schema_version", "summary", "findings", "recommendations", "rotation_changes", "limitations", "refusal_reason"],
+        "required": ["schema_version", "summary", "body_markdown", "findings", "recommendations", "rotation_changes", "artifacts", "limitations", "refusal_reason"],
         "additionalProperties": false
     })
 }
@@ -238,6 +249,7 @@ pub fn parse_and_validate_report(
         content: report,
         normalized_metric_citations,
         sanitized_claims: 0,
+        prose_was_cut: false,
     })
 }
 
@@ -267,8 +279,10 @@ pub fn parse_and_salvage_report(
         + normalize_metric_citations(&mut report, evidence)
         + normalize_rotation_anchor_markers(&mut report);
 
+    let has_free_prose = !report.body_markdown.trim().is_empty();
     let mut retained_findings = Vec::with_capacity(report.findings.len());
     for mut finding in report.findings.drain(..) {
+        let qualitative = has_free_prose && finding.evidence_ids.is_empty() && finding.metrics.is_empty();
         sanitized_claims += sanitize_evidence_ids(&mut finding.evidence_ids, evidence);
         sanitized_claims += truncate_vec(&mut finding.metrics, MAX_METRICS_PER_FINDING);
         let mut retained_metrics = Vec::with_capacity(finding.metrics.len());
@@ -286,7 +300,7 @@ pub fn parse_and_salvage_report(
             }
         }
         finding.metrics = retained_metrics;
-        if finding.evidence_ids.is_empty() {
+        if finding.evidence_ids.is_empty() && !qualitative {
             sanitized_claims += 1;
             continue;
         }
@@ -318,6 +332,10 @@ pub fn parse_and_salvage_report(
         .cloned()
         .collect::<Vec<_>>();
     let report_evidence_ids = cited_evidence_ids(&report);
+    prose::normalize(&mut report.body_markdown);
+    let original_body = report.body_markdown.clone();
+    sanitized_claims += prose::salvage(&mut report.body_markdown, &report_metrics, &report_evidence_ids, evidence);
+    let prose_was_cut = original_body != report.body_markdown;
     sanitized_claims +=
         sanitize_text_field(&mut report.summary, "本轮仅保留通过本次证据校验的内容。");
     sanitized_claims += sanitize_unsupported_numeric_prose(
@@ -330,8 +348,9 @@ pub fn parse_and_salvage_report(
 
     let mut retained_recommendations = Vec::with_capacity(report.recommendations.len());
     for mut recommendation in report.recommendations.drain(..) {
+        let had_citations = !recommendation.evidence_ids.is_empty();
         sanitized_claims += sanitize_evidence_ids(&mut recommendation.evidence_ids, evidence);
-        if recommendation.evidence_ids.is_empty() {
+        if recommendation.evidence_ids.is_empty() && had_citations {
             sanitized_claims += 1;
             continue;
         }
@@ -419,7 +438,7 @@ pub fn parse_and_salvage_report(
         );
     }
 
-    if report.findings.is_empty() && report.refusal_reason.is_none() {
+    if report.findings.is_empty() && report.body_markdown.trim().is_empty() && report.refusal_reason.is_none() {
         return Err(error(
             "empty_salvaged_report",
             "no cited finding remains for the original question; repair the answer using the original question and its evidence",
@@ -444,6 +463,7 @@ pub fn parse_and_salvage_report(
         content: report,
         normalized_metric_citations,
         sanitized_claims: sanitized_claims.max(1),
+        prose_was_cut,
     })
 }
 
@@ -463,9 +483,10 @@ fn parse_report_json(raw: &str) -> Result<AgentReportContentV1, serde_json::Erro
     // directly into the deny_unknown_fields report type prevents a nested or
     // unrelated JSON object from being accepted accidentally.
     for (index, _) in trimmed.match_indices('{').take(64) {
-        let mut deserializer = serde_json::Deserializer::from_str(&trimmed[index..]);
-        if let Ok(value) = Value::deserialize(&mut deserializer) {
-            if let Ok(report) = deserialize_compatible_report(value) {
+        let mut stream = serde_json::Deserializer::from_str(&trimmed[index..]).into_iter::<Value>();
+        if let Some(Ok(value)) = stream.next() {
+            if let Ok(mut report) = deserialize_compatible_report(value) {
+                prose::adopt_surrounding_text(&trimmed[..index], &trimmed[index + stream.byte_offset()..], &mut report);
                 return Ok(report);
             }
         }
@@ -480,9 +501,10 @@ fn parse_report_json(raw: &str) -> Result<AgentReportContentV1, serde_json::Erro
             }
         }
         for (index, _) in decoded.match_indices('{').take(64) {
-            let mut deserializer = serde_json::Deserializer::from_str(&decoded[index..]);
-            if let Ok(value) = Value::deserialize(&mut deserializer) {
-                if let Ok(report) = deserialize_compatible_report(value) {
+            let mut stream = serde_json::Deserializer::from_str(&decoded[index..]).into_iter::<Value>();
+            if let Some(Ok(value)) = stream.next() {
+                if let Ok(mut report) = deserialize_compatible_report(value) {
+                    prose::adopt_surrounding_text(&decoded[..index], &decoded[index + stream.byte_offset()..], &mut report);
                     return Ok(report);
                 }
             }
@@ -819,7 +841,8 @@ fn sanitize_text_field(value: &mut String, fallback: &str) -> usize {
 
 fn normalize_report_text_fields(report: &mut AgentReportContentV1) -> usize {
     super::artifacts::normalize_artifacts(&mut report.artifacts);
-    let mut changed = sanitize_text_field(&mut report.summary, "本轮分析见下方。");
+    let body_changed = prose::normalize(&mut report.body_markdown);
+    let mut changed = body_changed + sanitize_text_field(&mut report.summary, "本轮分析见下方。");
     for finding in &mut report.findings {
         changed += sanitize_text_field(&mut finding.title, "分析结论");
         changed += sanitize_text_field(&mut finding.explanation, "本轮证据支持这项判断。");
@@ -1211,7 +1234,7 @@ fn normalize_rotation_anchor_markers(report: &mut AgentReportContentV1) -> usize
         changed
     }
 
-    let mut changed = normalize(&mut report.summary);
+    let mut changed = normalize(&mut report.summary) + normalize(&mut report.body_markdown);
     for finding in &mut report.findings {
         changed += normalize(&mut finding.title);
         changed += normalize(&mut finding.explanation);
@@ -1250,7 +1273,7 @@ pub fn validate_report(
             "report collection limit exceeded",
         ));
     }
-    if report.findings.is_empty() && report.artifacts.is_empty() && report.refusal_reason.is_none() {
+    if report.findings.is_empty() && report.body_markdown.trim().is_empty() && report.artifacts.is_empty() && report.refusal_reason.is_none() {
         return Err(error(
             "empty_report",
             "report requires a verified finding or a refusal reason",
@@ -1266,7 +1289,7 @@ pub fn validate_report(
     for finding in &report.findings {
         validate_short_text(&finding.title)?;
         validate_short_text(&finding.explanation)?;
-        if finding.evidence_ids.is_empty() {
+        if finding.evidence_ids.is_empty() && (report.body_markdown.trim().is_empty() || !finding.metrics.is_empty()) {
             return Err(error(
                 "finding_without_evidence",
                 "every finding must cite evidence",
@@ -1287,6 +1310,7 @@ pub fn validate_report(
         .flat_map(|finding| finding.metrics.iter())
         .collect::<Vec<_>>();
     let report_evidence_ids = cited_evidence_ids(report);
+    prose::validate(&report.body_markdown, &report_metrics, &report_evidence_ids, evidence)?;
     validate_grounded_prose(
         &report.summary,
         report_metrics.iter().copied(),
@@ -1327,12 +1351,6 @@ pub fn validate_report(
     for recommendation in &report.recommendations {
         validate_short_text(&recommendation.title)?;
         validate_short_text(&recommendation.rationale)?;
-        if recommendation.evidence_ids.is_empty() {
-            return Err(error(
-                "recommendation_without_evidence",
-                "every recommendation must cite evidence",
-            ));
-        }
         validate_evidence_ids(&recommendation.evidence_ids, evidence)?;
         let recommendation_metrics = report_metrics
             .iter()
@@ -1764,6 +1782,7 @@ fn metric_tool_allowed(envelope: &Value) -> bool {
         envelope.get("tool_name").and_then(Value::as_str),
         Some(
             "simulate_scenario"
+                | "lookup_skill_definitions"
                 | "compare_scenarios"
                 | "analyze_timeline"
                 | "inspect_timeline_events"
@@ -1799,6 +1818,15 @@ fn validate_grounded_prose<'a>(
     evidence: &EvidenceStore,
 ) -> Result<(), ReportValidationError> {
     validate_short_text(value)?;
+    validate_numeric_prose(value, metrics, evidence_ids, evidence)
+}
+
+fn validate_numeric_prose<'a>(
+    value: &str,
+    metrics: impl IntoIterator<Item = &'a GroundedMetricV1>,
+    evidence_ids: &[String],
+    evidence: &EvidenceStore,
+) -> Result<(), ReportValidationError> {
     let metrics = metrics.into_iter().collect::<Vec<_>>();
     let metric_values = metrics
         .iter()
@@ -2042,6 +2070,20 @@ fn cited_knowledge_numeric_literals(
         let Some(envelope) = evidence.get(evidence_id) else {
             continue;
         };
+        if envelope.get("tool_name").and_then(Value::as_str) == Some("lookup_skill_definitions") {
+            // Descriptions contain legitimate resource amounts and percentage
+            // rules which are not simulated DPS measurements.
+            if let Some(matches) = envelope.pointer("/result/matches").and_then(Value::as_array) {
+                for item in matches {
+                    for field in ["description", "desc"] {
+                        if let Some(text) = item["definition"][field].as_str() {
+                            literals.extend(numeric_literals(text));
+                        }
+                    }
+                }
+            }
+            continue;
+        }
         if envelope.get("tool_name").and_then(Value::as_str) != Some("search_knowledge_base") {
             continue;
         }
@@ -2103,7 +2145,7 @@ fn prose_numeric_tool_allowed(envelope: &Value) -> bool {
     metric_tool_allowed(envelope)
         || matches!(
             envelope.get("tool_name").and_then(Value::as_str),
-            Some("get_current_scenario" | "inspect_rotation_input")
+            Some("get_current_scenario" | "inspect_rotation_input" | "lookup_skill_definitions")
         )
 }
 
@@ -2168,6 +2210,25 @@ fn matches_tool_value(literal: NumericLiteral, sources: &[f64]) -> bool {
             (literal.scaled_value() - candidate).abs() <= display_tolerance.max(floating_tolerance)
         })
     })
+}
+
+/// Shared presentation guard: an independent experiment runtime may use the
+/// numeric parser without adopting this module's Agent report/workflow schema.
+pub(crate) fn experiment_prose_is_grounded(text: &str, facts: &[Value]) -> bool {
+    let mut values=Vec::new();
+    for fact in facts {
+        collect_tool_numeric_values(fact,None,&mut values);
+        if fact["comparison_verified"]==true {
+            let dps=|key:&str|fact.pointer(&format!("/{key}/metrics/dps")).or_else(||fact.pointer(&format!("/{key}/dps"))).and_then(Value::as_f64);
+            if let Some((before,after))=dps("baseline").zip(dps("best")).filter(|(a,b)|a.is_finite() && *a>0.0 && b.is_finite()) {
+                values.push((after/before-1.0)*100.0);
+            }
+        }
+    }
+    values.sort_by(f64::total_cmp);
+    values.dedup_by(|a,b|(*a-*b).abs()<1e-12);
+    numeric_literals(text).into_iter().all(|literal|literal.ordinary_count || literal.identifier
+        || matches_tool_value(literal,&values) || matches_derived_tool_value(literal,&values))
 }
 
 fn matches_derived_tool_value(literal: NumericLiteral, sources: &[f64]) -> bool {
@@ -2458,6 +2519,7 @@ mod tests {
     fn report() -> AgentReportContentV1 {
         AgentReportContentV1 {
             schema_version: AGENT_REPORT_CONTENT_SCHEMA_V1.to_string(),
+            body_markdown: String::new(),
             summary: "基线模拟已完成。".to_string(),
             findings: vec![AgentFindingV1 {
                 title: "输出基线".to_string(),

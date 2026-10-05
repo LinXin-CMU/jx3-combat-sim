@@ -1,0 +1,50 @@
+[
+  {
+    "version": "ShanHaiYuanLiu",
+    "scenario": "jueyun_300s",
+    "values_equal": true,
+    "differences": {}
+  },
+  {
+    "version": "ShanHaiYuanLiu",
+    "scenario": "simple_loop",
+    "values_equal": true,
+    "differences": {}
+  },
+  {
+    "version": "ShanHaiYuanLiu",
+    "scenario": "blade_only",
+    "values_equal": true,
+    "differences": {}
+  },
+  {
+    "version": "ShanHaiYuanLiu",
+    "scenario": "jueyun_jiantie_hanjia",
+    "values_equal": true,
+    "differences": {}
+  },
+  {
+    "version": "AnYingQianJi",
+    "scenario": "jueyun_300s",
+    "values_equal": true,
+    "differences": {}
+  },
+  {
+    "version": "AnYingQianJi",
+    "scenario": "simple_loop",
+    "values_equal": true,
+    "differences": {}
+  },
+  {
+    "version": "AnYingQianJi",
+    "scenario": "blade_only",
+    "values_equal": true,
+    "differences": {}
+  },
+  {
+    "version": "AnYingQianJi",
+    "scenario": "jueyun_jiantie_hanjia",
+    "values_equal": true,
+    "differences": {}
+  }
+]

@@ -1,6 +1,6 @@
 // Included inside the existing test module to reuse its fixtures.
 #[test]
-fn cangsheng_test_snapshot_has_an_independent_identity_and_only_fenshan() {
+fn cangsheng_test_snapshot_has_an_independent_identity_for_both_mounts() {
     let snapshot = ScenarioSnapshotV1::capture(
         GameVersion::CangShengZhuShiTest,
         Mount::FenShanJin,
@@ -17,9 +17,7 @@ fn cangsheng_test_snapshot_has_an_independent_identity_and_only_fenshan() {
         let other = ScenarioSnapshotV1::capture(version, Mount::FenShanJin, request()).unwrap();
         assert_ne!(snapshot.scenario_hash, other.scenario_hash);
     }
-    assert_eq!(
-        ScenarioSnapshotV1::capture(GameVersion::CangShengZhuShiTest, Mount::TieGuYi, request())
-            .unwrap_err(),
-        ScenarioError::InvalidField("mount")
-    );
+    let tank = ScenarioSnapshotV1::capture(GameVersion::CangShengZhuShiTest, Mount::TieGuYi, request()).unwrap();
+    tank.verify_hash().unwrap();
+    assert_ne!(tank.scenario_hash, snapshot.scenario_hash);
 }

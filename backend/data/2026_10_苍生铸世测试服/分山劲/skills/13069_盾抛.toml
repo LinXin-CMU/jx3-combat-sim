@@ -1,5 +1,6 @@
-﻿id   = 13069
+id   = 13069
 name = "盾抛"
+description = "将目标抛至自己身后15尺的位置，并使其眩晕2秒。"
 
 icon = "https://icon.jx3box.com/icon/6296.png"
 # 盾墙下盾压后可施展
@@ -23,6 +24,6 @@ haste    = true
 rank         = 1
 name         = "盾抛"
 icon = "https://icon.jx3box.com/icon/6296.png"
-base_damage  = 0
-attack_coeff = 0
+base_damage_range = [2.0, 3.0]
+attack_coeff = 0.01112033604765909
 weapon_coeff = 0

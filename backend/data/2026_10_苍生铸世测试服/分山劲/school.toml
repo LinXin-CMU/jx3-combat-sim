@@ -5,26 +5,26 @@ class = "苍云"
 
 # ── 主属性 → 副属性转化系数 ──────────────────────────────
 [constants]
-shenfa_to_attack  = 1.88    # 身法 → 外功攻击
-shenfa_to_crit    = 0.9     # 身法 → 外功会心等级
-lidao_to_attack   = 0.163   # 力道 → 外功攻击
-lidao_to_overcome = 0.3     # 力道 → 外功破防
-yuanqi_to_attack  = 0.181   # 元气 → 内功攻击（保留供内功线 buff）
+shenfa_to_attack = 0.75
+shenfa_to_crit = 0.25
+lidao_to_attack = 0.195
+lidao_to_overcome = 0.061
+yuanqi_to_attack = 0.195
 vitality_to_attack = 0.0    # 体质 → 外功攻击（铁骨衣特化，分山劲为 0）
 parry_base_rate = 0.03      # 心法自带基础招架率（+3%）
 non_player_bonus = 61.0     # 非侠士增伤（1024制）
 
 # ── 心法固定增益（仅心法本身的额外加成；全角色基础由后端 PLAYER_BASE_* 注入）──
 [base_stats]
-physics_attack_power = 6513.0  # 外功攻击
-physics_overcome     = 4696.0  # 外功破防
-parry                = 3756.0  # 招架等级
+physics_attack_power = 2535.0
+physics_overcome = 164.0
+parry = 131.0
 
 # ── 心法转化（郭氏值 /1024；每项单独 / 1024 再 floor；结果不进攻击百分比增益）──
 [mount_conversions]
-agility_to_attack       = 1925   # 身法 → 外功攻击（1925/1024 ≈ 1.88）
-agility_to_parry        = 113    # 身法 → 招架等级（113/1024 ≈ 0.11）
-agility_to_parry_value  = 1024   # 身法 → 拆招值（1024/1024 = 1.0）
+agility_to_attack = 768.0
+agility_to_parry = 10.24
+agility_to_parry_value = 102.4
 
 # ── UI 配置 ───────────────────────────────────────────────
 [ui]

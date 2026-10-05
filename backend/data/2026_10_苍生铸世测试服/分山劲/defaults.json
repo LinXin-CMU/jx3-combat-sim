@@ -1,17 +1,19 @@
 {
-  "title": "分山劲·苍生铸世测试服默认配置（装备沿用暗影千机）",
+  "title": "分山劲·苍生铸世50级裸装基础属性",
   "attributes": {
-    "vitality": 45,
-    "li_dao": 44,
-    "shen_fa": 44,
-    "base_attack": 7,
-    "weapon_damage": 12098,
-    "surplus_value": 39774,
-    "crit_level": 39,
+    "vitality": 18,
+    "li_dao": 17,
+    "shen_fa": 18,
+    "base_attack": 2538,
+    "weapon_damage": 0,
+    "surplus_value": 0,
+    "crit_level": 4,
     "crit_effect_level": 0,
-    "overcome_level": 13,
-    "strain_level": 129800,
-    "haste_level": 42087
+    "overcome_level": 165,
+    "strain_level": 0,
+    "haste_level": 0,
+    "parry_value": 1,
+    "parry_level": 131
   },
   "talents": {
     "1": 30769,

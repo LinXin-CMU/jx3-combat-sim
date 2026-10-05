@@ -7,6 +7,7 @@
 pub mod artifacts;
 pub mod berserk;
 pub mod compare;
+pub mod completion;
 pub mod domain;
 pub mod distillation;
 mod macro_tuning;
@@ -26,6 +27,7 @@ pub mod run;
 pub mod runtime;
 pub mod saved;
 pub mod schema;
+mod skill_catalog;
 pub mod session;
 pub mod timeline;
 mod time_budget;

@@ -112,9 +112,6 @@ fn validate_identity(game_version: &str, mount: &str) -> Result<(), ScenarioErro
     if !matches!(mount, "fenshanjin" | "tieguyi") {
         return Err(ScenarioError::InvalidField("mount"));
     }
-    if game_version == "2026_10_cangsheng_zhushi_test" && mount != "fenshanjin" {
-        return Err(ScenarioError::InvalidField("mount"));
-    }
     Ok(())
 }
 
@@ -206,6 +203,7 @@ mod tests {
             pauses: Vec::new(),
             boss_attack_interval: None,
             hanjia_expectation: None,
+            dunya_reset_seed: Default::default(),
             tiegu_mode: 2,
             experimental: false,
             lite: false,

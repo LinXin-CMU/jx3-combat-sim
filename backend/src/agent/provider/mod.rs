@@ -2,9 +2,12 @@
 //!
 //! Provider adapters translate a normalized, versioned protocol into upstream
 //! requests. They never receive simulator internals, filesystem access, or a
-//! browser-supplied credential.
+//! arbitrary browser configuration. User-owned credentials enter only through
+//! the dedicated custom-provider endpoint and remain in worker memory.
 
 mod config;
+pub mod custom;
+mod custom_network;
 mod fake;
 pub(crate) mod openai;
 pub mod protocol;

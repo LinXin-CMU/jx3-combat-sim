@@ -570,6 +570,7 @@ fn sanitize_artifact(kind: SavedArtifactKind, value: &Value) -> Option<Value> {
             "boss_attack_interval",
             "macro_duration",
             "hanjia_expectation",
+            "dunya_reset_seed",
             "tiegu_mode",
             "team_buffs",
             "formation",
@@ -873,6 +874,9 @@ fn merge_saved_scenario(
     if let Some(value) = root.get("hanjia_expectation").and_then(Value::as_bool) {
         simulation.hanjia_expectation = Some(value);
     }
+    if let Some(value) = root.get("dunya_reset_seed") {
+        simulation.dunya_reset_seed = serde_json::from_value(value.clone()).map_err(|_| SavedArtifactError::InvalidFormat)?;
+    }
     if let Some(value) = root.get("tiegu_mode").and_then(Value::as_u64) {
         simulation.tiegu_mode = value
             .try_into()
@@ -885,6 +889,7 @@ fn merge_saved_scenario(
         simulation.sequence = flattened.sequence;
         simulation.channel_ticks = flattened.channel_ticks;
         simulation.timing_offsets = flattened.timing_offsets;
+        simulation.solidified_casts = flattened.solidified_casts;
         simulation.qijin_buffs = flattened.qijin_buffs;
         simulation.pre_releases = flattened.pre_releases;
     }
@@ -908,6 +913,7 @@ struct FlattenedSequence {
     sequence: Vec<String>,
     channel_ticks: HashMap<String, u32>,
     timing_offsets: HashMap<String, f64>,
+    solidified_casts: HashMap<String, crate::macro_solidify::FrozenCast>,
     qijin_buffs: HashMap<String, u32>,
     pre_releases: Vec<PreReleaseSpec>,
 }
@@ -962,6 +968,12 @@ fn flatten_sequence(value: &Value) -> Result<FlattenedSequence, SavedArtifactErr
                 output.timing_offsets.insert(index.clone(), -1.0);
             } else if let Some(offset) = entry.get("offset").and_then(Value::as_f64) {
                 output.timing_offsets.insert(index.clone(), offset);
+            }
+            if let Some(frozen) = entry.get("solidified_cast") {
+                if output.timing_offsets.get(&index).copied().unwrap_or(0.0) == 0.0 {
+                    output.solidified_casts.insert(index.clone(), serde_json::from_value(frozen.clone())
+                        .map_err(|_| SavedArtifactError::InvalidFormat)?);
+                }
             }
             if let Some(buff) = entry.get("qijin_buff").and_then(Value::as_u64) {
                 output.qijin_buffs.insert(
@@ -1048,6 +1060,7 @@ fn complete_patch(simulation: &SimulateRequest) -> ScenarioPatchV1 {
             Some(value) => PatchValueV1::Set(value),
             None => PatchValueV1::Clear,
         }),
+        dunya_reset_seed: Some(simulation.dunya_reset_seed),
         tiegu_mode: Some(simulation.tiegu_mode),
         experimental: Some(simulation.experimental),
         equipment: Some(simulation.equipment.clone()),

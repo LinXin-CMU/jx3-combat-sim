@@ -1,5 +1,6 @@
-﻿id   = 13458
+id   = 13458
 name = "盾墙下盾舞"
+description = "可移动中释放，每0.5秒对半径8尺内的最多6个敌对目标造成100%的武器伤害外加{{damage:盾舞·每跳}}外功伤害，持续5秒。"
 
 icon = "https://icon.jx3box.com/icon/6302.png"
 # 盾墙状态下施展，可移动释放
@@ -34,6 +35,6 @@ haste    = true
 rank         = 1
 name         = "盾墙下盾舞·每跳"
 icon = "https://icon.jx3box.com/icon/6302.png"
-base_damage  = 340.0      # (325 + 355) / 2
-attack_coeff = 0.97500
+base_damage_range = [32.0, 35.0]
+attack_coeff = 0.10842327646467613
 weapon_coeff = 1.0

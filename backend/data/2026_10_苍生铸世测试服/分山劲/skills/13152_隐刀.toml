@@ -1,7 +1,7 @@
-﻿id   = 13152
+id   = 13152
 name = "隐刀"
 icon = "https://icon.jx3box.com/icon/6355.png"
-description = "奇穴 / 擎刀 / 消耗5~15怒气 / 闪刀命中虚弱/流血后可连续施展 / 免疫1秒"
+description = "最少消耗5点怒气，最多消耗15点怒气，消耗逐渐增加，闪刀命中附带自身虚弱或流血效果的目标后10秒内可连续施展，隐刀命中附带自身虚弱或流血效果的目标可对其造成100%的武器伤害外加{{damage:隐刀}}外功伤害，并冲刺穿过目标，期间自身免疫伤害和控制效果，持续1秒，施展次数越多，怒气消耗越高。"
 
 # 奇穴技能（第三重·隐刀）
 # 消耗 5~15 怒气（逐渐递增）/ "闪刀"命中虚弱/流血目标后10秒内连续施展
@@ -22,6 +22,6 @@ rank           = 1
 name           = "隐刀"
 icon = "https://icon.jx3box.com/icon/6355.png"
 requires_combo = "闪刀_后续"
-base_damage  = 31.5       # (30 + 33) / 2
-attack_coeff = 0.3062
+base_damage_range = [3.0, 3.3]
+attack_coeff = 0.034056029145955964
 weapon_coeff = 1.0

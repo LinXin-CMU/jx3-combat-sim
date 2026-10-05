@@ -1,7 +1,7 @@
-﻿id   = 13046
+id   = 13046
 name = "盾猛"
 icon = "https://icon.jx3box.com/icon/6324.png"
-description = "擎盾 / CD15秒 / 12尺突进 / 回复15怒气 / 击倒目标3秒"
+description = "回复15点怒气，冲向目标，对目标造成100%的武器伤害外加{{damage:盾猛}}外功伤害，将目标击倒3秒。"
 
 # 姿态: 擎盾 / 距离: 12尺突进 / CD: 15秒 / GCD: 1.5秒
 # 回复 15 怒气 / 将目标击倒 3秒
@@ -37,6 +37,6 @@ haste    = false
 rank         = 1
 name         = "盾猛"
 icon = "https://icon.jx3box.com/icon/6324.png"
-base_damage  = 136.0      # (130 + 142) / 2
-attack_coeff = 6.26875
+base_damage_range = [13.0, 14.0]
+attack_coeff = 0.6971060659876293
 weapon_coeff = 1.0

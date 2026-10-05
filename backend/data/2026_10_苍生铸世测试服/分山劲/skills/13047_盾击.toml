@@ -1,7 +1,7 @@
-﻿id   = 13047
+id   = 13047
 name = "盾击"
 icon = "https://icon.jx3box.com/icon/6339.png"
-description = "擎盾 / 充能3层4秒 / 回复10怒气 / 无视50%防御 / 降低盾飞2秒调息"
+description = "回复10点怒气，对目标造成100%的武器伤害外加{{damage:盾击·一段}}外功伤害，无视目标50%的外功防御等级，降低自身“盾飞”2秒的调息时间。"
 
 # 姿态: 擎盾 / 距离: 4尺 / 充能: 3层，4秒 / GCD: 1秒
 # 回复 10 怒气 / 无视目标 50% 外功防御等级 / 降低[盾飞] 2秒调息
@@ -34,8 +34,8 @@ haste    = true
 rank           = 1
 name           = "盾击·一段"
 icon = "https://icon.jx3box.com/icon/6339.png"
-base_damage    = 109.0      # (104 + 114) / 2
-attack_coeff   = 1.91875
+base_damage_range = [10.4, 11.4]
+attack_coeff = 0.2133714479144588
 weapon_coeff   = 1.0
 defense_ignore = 0.5
 grants_combo   = "盾击_2"
@@ -45,8 +45,8 @@ combo_duration = 24          # 1.5秒 = 24帧 (BUFF 8254)
 rank           = 2
 name           = "盾击·二段"
 icon = "https://icon.jx3box.com/icon/6339.png"
-base_damage    = 218.0      # (208 + 228) / 2
-attack_coeff   = 1.91875
+base_damage_range = [10.4, 11.4]
+attack_coeff = 0.2133714479144588
 weapon_coeff   = 1.0
 defense_ignore = 0.5
 requires_combo = "盾击_2"
@@ -57,8 +57,8 @@ combo_duration = 24          # 1.5秒 = 24帧 (BUFF 8255)
 rank           = 3
 name           = "盾击·三段"
 icon = "https://icon.jx3box.com/icon/6339.png"
-base_damage    = 327.5      # (312 + 343) / 2
-attack_coeff   = 1.91875
+base_damage_range = [10.4, 11.4]
+attack_coeff = 0.2133714479144588
 weapon_coeff   = 1.0
 defense_ignore = 0.5
 requires_combo = "盾击_3"

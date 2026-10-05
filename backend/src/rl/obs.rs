@@ -260,10 +260,7 @@ fn gcd_progress(player: &Player) -> f64 {
     if total_base <= 0.0 {
         return 0.0;
     }
-    let total_actual = frames_to_sec(get_actual_frames(
-        sec_to_frames(total_base),
-        player.effective_haste_level(),
-    ));
+    let total_actual = frames_to_sec(player.actual_frames(sec_to_frames(total_base)));
     if total_actual <= 0.0 {
         return 0.0;
     }

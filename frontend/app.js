@@ -21,6 +21,42 @@ let currentMount = {
   workflow_a: { default_consistency: [], consistency_sensitive_skills: [] },
 };
 
+// API 提供等级参数，页面展示、导入与目标选项使用同一份数据。
+function currentAttributeParams() {
+  return currentMount.attribute_params || {
+    level: 130, crit: 197703, crit_effect: 72844.2, overcome: 225957.6,
+    strain: 133333.2, haste: 210078, parry: 107553.6, defense: 126007.2,
+    dodge: 91634.4, toughness: 197703, decritical: 33046.2, base_life: 199476,
+    base_agility: 44, base_strength: 44, has_surplus: true, agility_to_crit: 0.9, strength_to_attack: 0.163, strength_to_overcome: 0.3, pvx_to_surplus: 0.5, pvx_to_strain: 1.5,
+  };
+}
+function isCangShengTest() { return currentMount.version === 'CangShengZhuShiTest'; }
+function syncLevelUi() {
+  const lp = currentAttributeParams();
+  const normalized = value => {
+    const n = Number(value), offset = n > 100 ? n - 130 : n - 50;
+    return lp.level + (offset >= 1 && offset <= 4 ? offset : 4);
+  };
+  for (const id of ['target_level', 'wzc_target_level']) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    const value = normalized(el.value);
+    el.innerHTML = [1, 2, 3, 4].map(offset => `<option value="${lp.level + offset}">${lp.level + offset}级</option>`).join('');
+    el.value = String(value);
+  }
+  document.querySelectorAll('[data-target-value], #wza1_target_menu [data-value]').forEach(el => {
+    const key = el.hasAttribute('data-target-value') ? 'targetValue' : 'value';
+    el.dataset[key] = String(normalized(el.dataset[key]));
+    el.textContent = `${el.dataset[key]}级`;
+  });
+  const label = document.getElementById('target_level_label');
+  if (label) label.textContent = `${document.getElementById('target_level')?.value || lp.level + 4}级`;
+  const brand = document.querySelector('.tb-brand');
+  if (brand) brand.title = `${currentMount.mount_label}伤害计算器 · 苍云 · 外功 · ${lp.level}级`;
+  const surplus = document.getElementById('surplus_value');
+  if (surplus?.parentElement) surplus.parentElement.style.display = lp.has_surplus ? '' : 'none';
+}
+
 /** fetchCurrentMount 完成信号：其他初始化（如 autosave restore / initMacros 心法校验）等它再判断 */
 let _currentMountReadyResolve;
 const currentMountReady = new Promise(r => { _currentMountReadyResolve = r; });
@@ -52,6 +88,7 @@ async function fetchCurrentMount() {
     } else {
       currentMount = data;
     }
+    syncLevelUi();
     updateMountButtonLabel();
     // 帮助函数：从原始数据构建临时秘籍选择，只有含内容时才返回（否则 null）
     const buildRecipes = (src) => {
@@ -181,6 +218,7 @@ async function openMountPicker() {
       const version = b.dataset.version;
       const mount = b.dataset.mount;
       if (version === currentMount.version && mount === currentMount.mount) { close(); return; }
+      if (_attrsAutosaveTimer) clearTimeout(_attrsAutosaveTimer);
       const r = await fetch(API.mount_switch, {
         method: 'POST', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ version, mount }),
@@ -200,15 +238,7 @@ async function openMountPicker() {
         const defRes = await fetch('/api/mounts/defaults');
         const defData = await defRes.json();
         if (defData) {
-          // 后端已切到新心法，attrs/load 读的是新心法的文件
-          const existingRes = await fetch('/api/attrs/load');
-          const existing = await existingRes.json();
-          if ((!existing || typeof existing !== 'object') && defData.attributes) {
-            await fetch('/api/attrs/save', {
-              method: 'POST', headers: {'Content-Type':'application/json'},
-              body: JSON.stringify(defData.attributes),
-            });
-          }
+          // 属性由刷新后的 loadAttrs 读取对应等级存档或当前配装默认值。
           if (defData.talents && typeof defData.talents === 'object'
               && !Array.isArray(defData.talents)) {
             for (let t = 1; t <= 10; t++) {
@@ -315,9 +345,26 @@ async function saveAttrs() {
 
 async function loadAttrs(silent = false) {
   try {
+    await currentMountReady;
     const res = await fetch('/api/attrs/load');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
+    let data = await res.json();
+    if (!data || typeof data !== 'object') {
+      // 新等级尚无独立属性存档时，从当前配装取得该等级的数值。
+      const cfg = currentAttributeParams().level === 50 ? window.Jx3Equip?.getCurrentConfig?.() : null;
+      if (cfg && Object.values(cfg.slots || {}).some(slot => slot?.equip_id)) {
+        const response = await fetch('/api/equip/calculate', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ slots:cfg.slots, stone_id:cfg.stoneId || 0, talents:[] }),
+        });
+        const raw = response.ok ? (await response.json())?.raw : null;
+        if (raw) data = { ...raw, li_dao:raw.strength, shen_fa:raw.agility };
+      }
+    }
+    if (!data || typeof data !== 'object') {
+      const defaultsResponse = await fetch('/api/mounts/defaults');
+      if (defaultsResponse.ok) data = (await defaultsResponse.json())?.attributes;
+    }
     if (!data || typeof data !== 'object') {
       if (!silent) setAttrsStatus('尚无保存', true);
       return false;
@@ -340,6 +387,7 @@ document.getElementById('btn_attrs_import')?.addEventListener('click', importAtt
 let _currentAttrsProfile = ''; // '' = 默认
 
 async function refreshAttrsProfiles() {
+  await currentMountReady;
   const sel = document.getElementById('attrs_profile_select');
   if (!sel) return;
   const old = sel.value;
@@ -458,42 +506,42 @@ function importAttrsFromJson() {
     : null;
 
   // 副属性等级折算常数（130级）
-  const LP_CRIT = 197703.0, LP_CRIT_EFF = 72844.2, LP_OVERCOME = 225957.6;
-  const LP_STRAIN = 133333.2, LP_HASTE = 210078.0, LP_PARRY = 107553.6;
+  const lp = currentAttributeParams();
+  const { crit: LP_CRIT, crit_effect: LP_CRIT_EFF, overcome: LP_OVERCOME, strain: LP_STRAIN, haste: LP_HASTE, parry: LP_PARRY } = lp;
   const pctToLevel = (pct, lp) => pct != null ? Math.round(pct * lp) : null;
 
-  // base_attack：如果 PhysicsAttackPowerBase 太小（<100），尝试从总攻击力反推
-  // 总攻击 = base_attack + Agility * 1.88 + Strength * 0.163
+  // 基础攻击字段优先；总攻击反推时仅扣除心法主属性转化。
   let baseAtk = obj.PhysicsAttackPowerBase;
-  if ((baseAtk == null || baseAtk < 100) && obj.PhysicsAttackPower != null) {
-    const shenfa = obj.Agility || 44;
-    const lidao = obj.Strength || 44;
-    baseAtk = Math.round(obj.PhysicsAttackPower - shenfa * 1.88 - lidao * 0.163);
+  if (baseAtk == null && obj.PhysicsAttackPower != null) {
+    const mc = currentMount.mount_constants || { shenfa_to_attack: 1.88, vitality_to_attack: 0 };
+    baseAtk = Math.round(obj.PhysicsAttackPower
+      - Math.floor((obj.Agility ?? lp.base_agility) * mc.shenfa_to_attack)
+      - Math.floor((obj.Vitality ?? 0) * mc.vitality_to_attack));
   }
 
   // 会心等级：优先取等级字段；没有则从百分比反推（减去基底后 × LP）
-  const critLevel = obj.PhysicsCriticalStrike > 100 ? obj.PhysicsCriticalStrike
+  const critLevel = obj.PhysicsCriticalStrike != null ? obj.PhysicsCriticalStrike
     : obj.PhysicsCriticalStrikeRate != null ? pctToLevel(obj.PhysicsCriticalStrikeRate, LP_CRIT)
     : obj.PhysicsCriticalStrike;
   // 会效等级
-  const critEffLevel = obj.PhysicsCriticalDamagePower > 100 ? obj.PhysicsCriticalDamagePower
+  const critEffLevel = obj.PhysicsCriticalDamagePower != null ? obj.PhysicsCriticalDamagePower
     : obj.PhysicsCriticalDamagePowerPercent != null ? pctToLevel(obj.PhysicsCriticalDamagePowerPercent - 1.75, LP_CRIT_EFF)
     : obj.PhysicsCriticalDamagePower;
   // 破防等级
-  const overcomeLevel = obj.PhysicsOvercome > 100 ? obj.PhysicsOvercome
+  const overcomeLevel = obj.PhysicsOvercome != null ? obj.PhysicsOvercome
     : obj.PhysicsOvercomePercent != null ? pctToLevel(obj.PhysicsOvercomePercent, LP_OVERCOME)
     : null;
   // 无双等级
-  const strainLevel = obj.Strain > 100 ? obj.Strain
+  const strainLevel = obj.Strain != null ? obj.Strain
     : obj.StrainPercent != null ? pctToLevel(obj.StrainPercent, LP_STRAIN)
     : null;
   // 加速等级
-  const hasteLevel = obj.Haste > 100 ? obj.Haste
+  const hasteLevel = obj.Haste != null ? obj.Haste
     : obj.HastePercent != null ? pctToLevel(obj.HastePercent, LP_HASTE)
     : null;
   // 招架等级
-  const parryLevel = obj.Parry > 100 ? obj.Parry
-    : obj.ParryPercent != null ? pctToLevel(obj.ParryPercent - 0.03, LP_PARRY)
+  const parryLevel = obj.Parry != null ? obj.Parry
+    : obj.ParryPercent != null ? Math.round(LP_PARRY * Math.max(0, obj.ParryPercent - 0.03) / Math.max(0.000001, 1 - Math.max(0, obj.ParryPercent - 0.03)))
     : null;
   // 体质：如果是小数值（<1000），可能是裸属性；如果 >10000，可能是配装器的总体质
   const vitality = obj.Vitality;
@@ -588,7 +636,7 @@ function renderStats(data) {
 // ── 读取目标配置 ───────────────────────────────────────────────────
 function getTarget() {
   return {
-    level:          parseInt(document.getElementById('target_level').value) || 134,
+    level:          parseInt(document.getElementById('target_level').value) || currentAttributeParams().level + 4,
     defense_bonus:  parseFloat(document.getElementById('target_defense_bonus').value) || 0,
   };
 }
@@ -681,7 +729,7 @@ async function calculate() {
         target: getTarget(),
         recipes: getSelectedRecipes(),
         talents: getSelectedTalents(),
-        tiegu_mode: getTieguMode(), experimental: isExperimental(),
+        ...getDunyaResetOptions(), tiegu_mode: getTieguMode(), experimental: isExperimental(),
       }),
       signal: AbortSignal.timeout(2000),
     });
@@ -695,12 +743,16 @@ async function calculate() {
 // ── 页面切换 ─────────────────────────────────────────────────────────
 document.querySelectorAll('.tab').forEach(tab => {
   tab.addEventListener('click', () => {
+    if (tab.dataset.page === 'page-harness' && document.getElementById('page-harness')?.hidden) {
+      window.Jx3Assistant?.open('analysis', true);
+      return;
+    }
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     tab.classList.add('active');
     document.getElementById(tab.dataset.page).classList.add('active');
     // 切到循环模拟页时，如果还没有模拟结果，自动跑一次空序列获取初始技能状态
-    if (tab.dataset.page === 'page-sim' && typeof lastSimResult !== 'undefined' && !lastSimResult) {
+    if (tab.dataset.page === 'page-sim' && typeof lastSimResult !== 'undefined' && !lastSimResult && !(simPendingGeneration > 0 && simPendingGeneration === simRequestGeneration)) {
       if (typeof runSimulate === 'function') runSimulate();
     }
   });
@@ -728,7 +780,7 @@ function isCangShengFenShan() {
 /** 首轮测试服的核心奇穴依赖；旧版不使用这组限制。 */
 function testTalentCoreRequirement(id) {
   if (!isCangShengFenShan()) return null;
-  if (id === 91001 || id === 91002) return { id: 30769, name: '阵云结晦' };
+  if (id === 91001) return { id: 30769, name: '阵云结晦' };
   if (id === 37559 || id === 37558) return { id: 41740, name: '崩血' };
   return null;
 }
@@ -794,7 +846,7 @@ async function initTalentModal() {
     for (const t of opts) {
       const requirement = testTalentCoreRequirement(t.id);
       const hint = requirement ? `<small class="talent-core-requirement">需${requirement.name}</small>` : '';
-      html += `<button class="talent-btn" data-id="${t.id}" data-tier="${tier}" title="${esc(t.desc)}">${esc(t.name)}${hint}</button>`;
+      html += `<button class="talent-btn" data-id="${t.id}" data-tier="${tier}" title="${esc(window.Jx3SkillDamageDescription.descriptionText(t.desc, skillDescriptionSpecs))}">${esc(t.name)}${hint}</button>`;
     }
     html += '</div></div>';
   }
@@ -803,7 +855,7 @@ async function initTalentModal() {
   const mixed = talentList.filter(t => t.tier === 8);
   html += '<div class="talent-tier talent-tier-mixed"><span class="talent-tier-label">混池<small>（12选3）</small></span><div class="talent-options">';
   for (const t of mixed) {
-    html += `<button class="talent-btn" data-id="${t.id}" data-tier="mixed" title="${esc(t.desc)}">${esc(t.name)}</button>`;
+    html += `<button class="talent-btn" data-id="${t.id}" data-tier="mixed" title="${esc(window.Jx3SkillDamageDescription.descriptionText(t.desc, skillDescriptionSpecs))}">${esc(t.name)}</button>`;
   }
   html += '</div></div></div></div>';
 
@@ -1357,19 +1409,19 @@ function jx3BuildAttrTooltip(key, raw, panel, extra, ctx) {
       break;
     case 'hp':
       html = sec('最大气血', row('气血', num(panel.max_life)) + row('体质', num(panel.vitality ?? raw.vitality)) +
-        dim('基础 199476（全心法）+ 体质 × (系统 10 + 心法附加)；铁骨衣 = 12.2 / 体质'));
+        dim(`基础 ${currentAttributeParams().base_life} + 体质 × (10 + ${currentMount.mount_conversions?.vitality_to_hp || 0})${currentMount.mount_conversions?.base_life_percent ? "；气血提高5%" : ""}`));
       break;
     case 'vit':
       html = sec('体质', row('数值', num(panel.vitality ?? raw.vitality)) +
-        dim('→ 气血 ×10（系统）；铁骨衣专属 → 外攻 郭氏 41 / 招架 184 / 拆招 2304 / 气血 +2.2'));
+        dim(`→ 气血 ×10（系统）；心法附加：外攻 ×${currentMount.mount_constants?.vitality_to_attack || 0} / 招架 ×${currentMount.mount_constants?.vitality_to_parry_level || 0} / 拆招 ×${currentMount.mount_constants?.vitality_to_parry_value || 0} / 气血 ×${currentMount.mount_conversions?.vitality_to_hp || 0}`));
       break;
     case 'str':
       html = sec('力道', row('数值', num(panel.strength ?? raw.strength)) +
-        dim('→ 外攻 ×0.163 / 破防 ×0.3（系统）'));
+        dim(`→ 外攻 ×${currentAttributeParams().strength_to_attack} / 破防 ×${currentAttributeParams().strength_to_overcome}（系统）`));
       break;
     case 'agi':
       html = sec('身法', row('数值', num(panel.agility ?? panel.shen_fa ?? raw.agility ?? raw.shen_fa)) +
-        dim('→ 会心 ×0.9（系统）；分山劲专属 → 外攻 郭氏 1925 / 招架 113 / 拆招 1024'));
+        dim(`→ 会心 ×${currentAttributeParams().agility_to_crit}（系统）；心法附加：外攻 ×${currentMount.mount_constants?.shenfa_to_attack || 0} / 招架 ×${currentMount.mount_constants?.shenfa_to_parry || 0} / 拆招 ×${currentMount.mount_constants?.shenfa_to_parry_value || 0}`));
       break;
     case 'atk': {
       const base = Math.round(raw.base_attack || 0);
@@ -1379,28 +1431,28 @@ function jx3BuildAttrTooltip(key, raw, panel, extra, ctx) {
         row('基础', num(raw.base_attack)) +
         row('最终', num(attackVal)) +
         (delta !== 0 ? row('差额', (delta > 0 ? '+' : '') + num(delta)) : '') +
-        dim('基础 = 心法固定 + 装备 + 力道×0.163；最终 = 基础 + 百分比加成 + 心法转化（身法/体质 → 攻击）'));
+        dim(`基础 = 心法固定 + 装备 + 力道×${currentAttributeParams().strength_to_attack}；最终 = 基础 + 百分比加成 + 心法转化（身法/体质 → 攻击）`));
       break;
     }
     case 'crit':
       html = sec('会心', row('等级', num(raw.crit_level)) + row('面板', pct(panel.crit_rate)) +
-        dim('等级 / 197703 → 百分比'));
+        dim(`等级 / ${currentAttributeParams().crit} → 百分比`));
       break;
     case 'crit_eff':
       html = sec('会心效果', row('等级', num(raw.crit_effect_level)) + row('面板', pct(panel.crit_effect)) +
-        dim('基础 1.75 + 等级 / 72844.2'));
+        dim(`基础 1.75 + 等级 / ${currentAttributeParams().crit_effect}`));
       break;
     case 'oc':
       html = sec('破防', row('等级', num(raw.overcome_level)) + row('面板', pct(ocRate)) +
-        dim('等级 / 225957.6 → 百分比'));
+        dim(`等级 / ${currentAttributeParams().overcome} → 百分比`));
       break;
     case 'strain':
       html = sec('无双', row('等级', num(raw.strain_level)) + row('面板', pct(strainRate)) +
-        dim('等级 / 133333.2 → 百分比'));
+        dim(`等级 / ${currentAttributeParams().strain} → 百分比`));
       break;
     case 'haste':
       html = sec('加速', row('等级', num(raw.haste_level)) + row('面板', pct(panel.haste_rate)) +
-        dim('等级 / 210078，封顶 25%'));
+        dim(`等级 / ${currentAttributeParams().haste}，封顶 25%`));
       break;
     case 'surplus':
       html = sec('破招', row('数值', num(panel.surplus_value ?? raw.surplus_value)) +
@@ -1409,39 +1461,39 @@ function jx3BuildAttrTooltip(key, raw, panel, extra, ctx) {
     case 'pvx': {
       const v = Math.round(raw.pvx_all_round || 0);
       html = sec('全能', row('点数', num(raw.pvx_all_round)) +
-        (v > 0 ? row('破招', '+' + num(Math.floor(v * 0.5))) +
-                  row('无双', '+' + num(Math.floor(v * 1.5))) +
+        (v > 0 ? row('破招', '+' + num(Math.floor(v * currentAttributeParams().pvx_to_surplus))) +
+                  row('无双', '+' + num(Math.floor(v * currentAttributeParams().pvx_to_strain))) +
                   row('化劲', '+' + num(Math.floor(v * 1.0))) : '') +
-        dim('每点 = 0.5 破招等级 + 1.5 无双等级 + 1 化劲等级'));
+        dim(`每点 = ${currentAttributeParams().has_surplus ? "0.5 破招等级 + " : ""}${currentAttributeParams().pvx_to_strain} 无双等级 + 1 化劲等级`));
       break;
     }
     case 'pshield':
       html = sec('外功防御', row('等级', num(raw.physics_shield)) + row('面板', pct(panel.physics_shield_rate)) +
-        dim('130 级：等级 / (等级 + 126007.2)，封顶 75%'));
+        dim(`${currentAttributeParams().level} 级：等级 / (等级 + ${currentAttributeParams().defense})，封顶 75%`));
       break;
     case 'mshield':
       html = sec('内功防御', row('等级', num(raw.magic_shield)) + row('面板', pct(panel.magic_shield_rate)) +
-        dim('130 级：等级 / (等级 + 126007.2)，封顶 75%'));
+        dim(`${currentAttributeParams().level} 级：等级 / (等级 + ${currentAttributeParams().defense})，封顶 75%`));
       break;
     case 'parry':
       html = sec('招架', row('等级', num(raw.parry_level)) + row('面板', pct(panel.parry_rate)) +
-        dim('等级 / (等级 + 107553.6) + 3%（心法自带基础）'));
+        dim(`等级 / (等级 + ${currentAttributeParams().parry}) + 3%（心法自带基础）`));
       break;
     case 'parry_val':
       html = sec('拆招', row('数值', num(panel.parry_value)) +
-        dim('用于减免被招架后的伤害；铁骨衣靠体质 ×2.25 堆叠'));
+        dim(`用于减免被招架后的伤害；体质转化系数 ${currentMount.mount_constants?.vitality_to_parry_value || 0}`));
       break;
     case 'dodge':
       html = sec('闪避', row('等级', num(raw.dodge_level)) + row('面板', pct(panel.dodge_rate)) +
-        dim('等级 / (等级 + 91634.4)'));
+        dim(`等级 / (等级 + ${currentAttributeParams().dodge})`));
       break;
     case 'tough':
       html = sec('御劲', row('等级', num(raw.toughness_level)) + row('面板', pct(panel.toughness_rate)) +
-        dim('等级 / 197703 → 百分比（PvP 减会心率）'));
+        dim(`等级 / ${currentAttributeParams().toughness} → 百分比（PvP 减会心率）`));
       break;
     case 'decrit':
       html = sec('化劲', row('等级', num(raw.decritical_damage_level)) + row('面板', pct(panel.decritical_damage_rate)) +
-        dim('等级 / (等级 + 33046.2) + 9.96%（PvP 减会心伤害）'));
+        dim(`等级 / (等级 + ${currentAttributeParams().decritical})${currentAttributeParams().level === 50 && currentMount.mount === "TieGuYi" ? "" : " + 9.96%"}（PvP 减会心伤害）`));
       break;
   }
   // 在最终公式段后追加"增益来源"（适用所有 case；无来源时不输出）
@@ -2490,7 +2542,7 @@ function buildSimulateRequest(options = {}) {
     attributes: getSimAttrs(), target: getTarget(), initial_rage: adminInitialRage,
     network_delay: parseInt(document.getElementById('sim_delay').value) || 0, recipes: getSelectedRecipes(),
     boss_attack_interval: getBossAttackInterval(), hanjia_expectation: isHanjiaExpectationEnabled(),
-    ...(typeof getDunyaResetOptions === "function" ? getDunyaResetOptions() : {}), tiegu_mode: getTieguMode(), experimental: isExperimental(),
+    ...getDunyaResetOptions(), tiegu_mode: getTieguMode(), experimental: isExperimental(),
     equipment: getEquipmentMap(), team_buffs: getTeamBuffs(), formation: getCurrentFormation(),
     pre_releases: getPreReleases(container), ...(options.lite ? { lite: true, lite_keep_timeline: true } : {}) };
   const duration = options.macroDuration ?? macroLastDuration;
@@ -4007,7 +4059,7 @@ async function _liteSimulateAt(insertIdx) {
     initial_rage: adminInitialRage,
     boss_attack_interval: getBossAttackInterval(),
     hanjia_expectation: isHanjiaExpectationEnabled(),
-    ...(typeof getDunyaResetOptions === "function" ? getDunyaResetOptions() : {}), tiegu_mode: getTieguMode(),
+    ...getDunyaResetOptions(), tiegu_mode: getTieguMode(),
     experimental: isExperimental(),
     equipment: getEquipmentMap(),
     team_buffs: getTeamBuffs(),
@@ -7206,7 +7258,7 @@ loadFormations();
     try { expOn = localStorage.getItem('expectation_enabled') === '1'; } catch {}
     try { const s = localStorage.getItem('boss_attack_interval'); if (s) intervalVal = parseFloat(s) || 2.0; } catch {}
     try { expSkillOn = isExperimental(); } catch {}
-    const expSkillUnavailable = isCangShengFenShan();
+    const expSkillUnavailable = isCangShengTest();
 
     overlay.innerHTML = `
       <div class="talent-modal" style="min-width:360px;max-width:440px">
@@ -7246,11 +7298,12 @@ loadFormations();
           </div>
           <div class="settings-row">
             <label class="settings-label">期望传播</label>
-            <span class="settings-hint">基于 Boss 攻击频率计算坚铁/寒甲的期望层数与攻击力加成（关闭 = 原静态稳态近似）</span>
+            <span class="settings-hint">${isCangShengFenShan() ? '盾压重置：开启＝累计概率（每次35%，满100%重置并保留余量）；关闭＝每次独立真随机。秘籍可提高概率，盾生锋禁用重置。' : '基于 Boss 攻击频率计算坚铁/寒甲的期望层数与攻击力加成（关闭 = 原静态稳态近似）'}</span>
             <button class="settings-toggle ${expOn ? 'on' : ''}" id="toggle_expectation" role="switch" aria-checked="${expOn}">
               <span class="settings-toggle-knob"></span>
             </button>
           </div>
+          <div id="dunya_reset_settings" class="settings-row" style="grid-template-columns:1fr"></div>
           <div class="settings-row">
             <label class="settings-label">实验性武学</label>
             <span class="settings-hint">${expSkillUnavailable ? '苍生铸世测试服使用独立武学规则' : '镜花水月而已'}</span>
@@ -7274,6 +7327,8 @@ loadFormations();
     document.body.appendChild(overlay);
     overlay.querySelector('.talent-close').onclick = () => overlay.remove();
     overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+    const syncDunyaSettings = initDunyaResetSettings(overlay.querySelector('#dunya_reset_settings'));
 
     // 配色滑块
     overlay.querySelector('#theme_slider').addEventListener('input', (e) => {
@@ -7436,12 +7491,13 @@ loadFormations();
       el.classList.toggle('on', nowOn);
       el.setAttribute('aria-checked', String(nowOn));
       try { localStorage.setItem('expectation_enabled', nowOn ? '1' : '0'); } catch {}
+      syncDunyaSettings();
       runSimulate();
     });
 
     // 实验性技能 toggle
     overlay.querySelector('#toggle_exp_skills').addEventListener('click', (e) => {
-      if (isCangShengFenShan()) return;
+      if (isCangShengTest()) return;
       const el = e.currentTarget;
       const nowOn = !el.classList.contains('on');
       el.classList.toggle('on', nowOn);
@@ -7489,7 +7545,7 @@ function getTieguMode() {
   try { const s = localStorage.getItem('tiegu_mode'); return s != null ? parseInt(s) : 2; } catch { return 2; }
 }
 function isExperimental() {
-  if (isCangShengFenShan()) return false;
+  if (isCangShengTest()) return false;
   try { return localStorage.getItem('experimental_skills') === '1'; } catch { return false; }
 }
 
@@ -7501,13 +7557,21 @@ runSimulate();
 // ─────────────────────────────────────────────────────────────────────────────
 
 const skillInfoMap = {};
+const skillDescriptionSpecs = new Map();
 
 async function loadSkillInfo() {
   try {
-    const res = await fetch(API.list);
+    const [res, talentsResponse] = await Promise.all([
+      fetch(API.list), talentList.length ? null : fetch(API.talents),
+    ]);
     if (!res.ok) return;
+    if (talentsResponse?.ok) talentList = await talentsResponse.json();
     const list = await res.json();
     const stanceNames = { shield: '擎盾', blade: '擎刀', wall: '盾墙', not_wall: '非盾墙', any: '通用' };
+    const damageGroups = window.Jx3SkillDamageDescription.group(list);
+    skillDescriptionSpecs.clear();
+    for (const spec of list) skillDescriptionSpecs.set(spec.name, spec);
+    for (const name of Object.keys(skillInfoMap)) delete skillInfoMap[name];
     for (const s of list) {
       if (s.passive) continue;
       // 雾海阵云系列用完整名做 key（避免和旧版阵云合并）
@@ -7517,6 +7581,7 @@ async function loadSkillInfo() {
         id: s.skill_id,
         name: baseName,
         description: s.description || '',
+        damage_specs: damageGroups[baseName] || [],
         stance: stanceNames[s.stance] || s.stance,
         rage_cost: s.rage_cost,
         rage_gain: s.rage_gain,
@@ -7536,16 +7601,7 @@ function skillTooltipHtml(info) {
   let lines = [];
   lines.push(`<b>${info.name}</b> <span style="opacity:.5">ID:${info.id}</span>`);
   if (info.description) {
-    lines.push(info.description);
-    // 有 description 时只显示奇穴修正的差异
-    if (eff) {
-      let diffs = [];
-      if (eff.max_charges !== info.max_charges || Math.abs(eff.charge_cd - info.charge_cd) > 0.001)
-        diffs.push(`充能: ${eff.max_charges}层 / ${eff.charge_cd}秒`);
-      if (eff.rage_cost !== info.rage_cost)
-        diffs.push(`消耗: ${eff.rage_cost}怒气`);
-      if (diffs.length) lines.push(`<span style="color:#8ab4f8">[ ${diffs.join(' / ')} ]</span>`);
-    }
+    lines.push(window.Jx3SkillDamageDescription.renderDescription(info.description, skillDescriptionSpecs));
   } else {
     const maxCh = eff ? eff.max_charges : info.max_charges;
     const chCd = eff ? eff.charge_cd : info.charge_cd;
@@ -7562,7 +7618,10 @@ function skillTooltipHtml(info) {
     else if (!info.cooldowns.some(c => c.cd_id.startsWith('gcd_'))) meta.push('GCD: 无');
     lines.push(meta.join(' / '));
   }
-  return lines.join('<br>');
+  const descriptions = window.Jx3SkillDamageDescription;
+  return '<div class="skill-description">' + lines.join('<br>')
+    + descriptions.render(info.damage_specs, descriptions.descriptionReferences(info.description))
+    + descriptions.renderTalents(info, talentList, getSelectedTalents(), skillDescriptionSpecs) + '</div>';
 }
 
 function bindSkillTooltips() {
@@ -8924,7 +8983,7 @@ async function runMacroSimulate(duration) {
     attributes: getSimAttrs(), target: getTarget(),
     initial_rage: adminInitialRage,
     boss_attack_interval: getBossAttackInterval(),
-    hanjia_expectation: isHanjiaExpectationEnabled(), ...(typeof getDunyaResetOptions === "function" ? getDunyaResetOptions() : {}), tiegu_mode: getTieguMode(), experimental: isExperimental(),
+    hanjia_expectation: isHanjiaExpectationEnabled(), ...getDunyaResetOptions(), tiegu_mode: getTieguMode(), experimental: isExperimental(),
     equipment: getEquipmentMap(),
     team_buffs: getTeamBuffs(),
     formation: getCurrentFormation(),
@@ -9048,7 +9107,7 @@ function buildLoopConfig() {
     initial_rage: adminInitialRage,
     boss_attack_interval: getBossAttackInterval(),
     macro_duration: macroLastDuration > 0 ? macroLastDuration : undefined,
-    hanjia_expectation: isHanjiaExpectationEnabled(), ...(typeof getDunyaResetOptions === "function" ? getDunyaResetOptions() : {}), tiegu_mode: getTieguMode(),
+    hanjia_expectation: isHanjiaExpectationEnabled(), ...getDunyaResetOptions(), tiegu_mode: getTieguMode(),
     // 团队增益：导出全量（含 enabled=false 的）以完整描述状态；导入时 applyLoopConfig 会按全量替换
     team_buffs: Array.from(window._teamBuffSelections.values()),
     // 阵法：单选 {key} | null
@@ -11685,7 +11744,7 @@ async function optStart() {
     recipes: getSelectedRecipes(),
     initial_rage: adminInitialRage,
     boss_attack_interval: getBossAttackInterval(),
-    hanjia_expectation: isHanjiaExpectationEnabled(), tiegu_mode: getTieguMode(),
+    hanjia_expectation: isHanjiaExpectationEnabled(), ...getDunyaResetOptions(), tiegu_mode: getTieguMode(),
     network_delay: parseInt(document.getElementById('sim_delay')?.value) || 0,
     duration,
     duration_min: durMin,
@@ -14371,7 +14430,7 @@ function showSeqMacroModal(resp) {
         attributes: getAttrs(), target: getTarget(),
         initial_rage: adminInitialRage,
         boss_attack_interval: getBossAttackInterval(),
-        hanjia_expectation: isHanjiaExpectationEnabled(), tiegu_mode: getTieguMode(), experimental: isExperimental(),
+        hanjia_expectation: isHanjiaExpectationEnabled(), ...getDunyaResetOptions(), tiegu_mode: getTieguMode(), experimental: isExperimental(),
         equipment: getEquipmentMap(),
         team_buffs: getTeamBuffs(),
         formation: getCurrentFormation(),
@@ -14479,7 +14538,7 @@ function showSeqMacroModal(resp) {
           target: getTarget(),
           initial_rage: adminInitialRage,
           boss_attack_interval: getBossAttackInterval(),
-          hanjia_expectation: isHanjiaExpectationEnabled(), tiegu_mode: getTieguMode(),
+          hanjia_expectation: isHanjiaExpectationEnabled(), ...getDunyaResetOptions(), tiegu_mode: getTieguMode(),
           equipment: getEquipmentMap(),
           team_buffs: getTeamBuffs(),
         formation: getCurrentFormation(),
@@ -14824,6 +14883,7 @@ window.Jx3Nav = {
     'page-equip': '⚔️ 配装器',
     'page-plaza': '🏟️ 战斗广场',
     'page-agent': '✦ AI 战斗分析',
+    'page-harness': '◇ 武学助手',
     'page-plaza-step2': '🏟️ 战斗广场 · 第1步',
     'page-plaza-step4': '🏟️ 战斗广场 · 第4步',
   };
@@ -14904,12 +14964,9 @@ window.Jx3Nav = {
     const el = document.getElementById(id);
     if (el) el.addEventListener('change', pushSharedToLS);
   });
+  currentMountReady.then(() => {
   const stored = window.Jx3State?.loadSharedInputs?.();
-  if (stored && stored.attrs) {
-    Object.entries(stored.attrs).forEach(([k, v]) => {
-      const el = document.getElementById(k);
-      if (el && v != null) el.value = v;
-    });
+  if (stored) {
     if (stored.target) {
       const tl = document.getElementById('target_level');
       if (tl && stored.target.level != null) tl.value = stored.target.level;
@@ -14921,6 +14978,7 @@ window.Jx3Nav = {
       if (sd) sd.value = stored.delay;
     }
   }
+  });
   setTimeout(refreshSummaries, 100);
 })();
 
@@ -16061,7 +16119,7 @@ window.Jx3Nav = {
       target: getTarget(),
       initial_rage: 0,
       pauses: [],
-      tiegu_mode: getTieguMode(), experimental: isExperimental(),
+      ...getDunyaResetOptions(), tiegu_mode: getTieguMode(), experimental: isExperimental(),
       hanjia_expectation: isHanjiaExpectationEnabled(),
       equipment: getEquipmentMap(),
       team_buffs: getTeamBuffs(),
@@ -20228,6 +20286,7 @@ window.Jx3Nav = {
       initial_rage: (typeof adminInitialRage !== 'undefined') ? (adminInitialRage || 0) : 0,
       boss_attack_interval: (typeof getBossAttackInterval === 'function') ? getBossAttackInterval() : 0,
       hanjia_expectation: (typeof isHanjiaExpectationEnabled === 'function') ? isHanjiaExpectationEnabled() : false,
+      ...getDunyaResetOptions(),
       tiegu_mode: (typeof getTieguMode === 'function') ? getTieguMode() : 0,
       experimental: (typeof isExperimental === 'function') ? isExperimental() : false,
       equipment,
@@ -21703,6 +21762,7 @@ window.Jx3Nav = {
       initial_rage: (typeof adminInitialRage !== 'undefined') ? (adminInitialRage || 0) : 0,
       boss_attack_interval: bossInterval > 0 ? bossInterval : 0,
       // 与模拟器主页面同步：铁骨气劲 / 实验性武学 / 寒甲期望 / 团队增益
+      ...getDunyaResetOptions(),
       tiegu_mode: (typeof getTieguMode === 'function') ? getTieguMode() : 2,
       experimental: (typeof isExperimental === 'function') ? isExperimental() : false,
       hanjia_expectation: (typeof isHanjiaExpectationEnabled === 'function') ? isHanjiaExpectationEnabled() : false,
@@ -21750,6 +21810,7 @@ window.Jx3Nav = {
       mount_label: currentMount?.mount_label || '',
       // 全局 simulate 参数快照（fit_curve / 发送广场 时复用，避免用户搜完改了全局导致 DPS 对不上）
       hanjia_expectation: (typeof isHanjiaExpectationEnabled === 'function') ? isHanjiaExpectationEnabled() : false,
+      ...getDunyaResetOptions(),
       tiegu_mode: (typeof getTieguMode === 'function') ? getTieguMode() : 2,
       experimental: (typeof isExperimental === 'function') ? isExperimental() : false,
       team_buffs: (typeof getTeamBuffs === 'function') ? getTeamBuffs() : [],
@@ -22498,6 +22559,7 @@ window.Jx3Nav = {
       // 全局参数：优先用搜索时 ctx 快照（保证 DPS 与 t.dps 一致）；ctx 没存时 fallback 到当前全局
       hanjia_expectation: ('hanjia_expectation' in (ctx || {})) ? !!ctx.hanjia_expectation
         : ((typeof isHanjiaExpectationEnabled === 'function') ? isHanjiaExpectationEnabled() : false),
+      ...getDunyaResetOptions(ctx),
       tiegu_mode: (ctx?.tiegu_mode != null) ? ctx.tiegu_mode
         : ((typeof getTieguMode === 'function') ? getTieguMode() : 2),
       experimental: ('experimental' in (ctx || {})) ? !!ctx.experimental
@@ -25036,7 +25098,8 @@ window.Jx3Nav = {
           initial_rage: bundle.initial_rage || 0,
           boss_attack_interval: bundle.boss_attack_interval || 0,
           hanjia_expectation: (typeof isHanjiaExpectationEnabled === 'function') ? isHanjiaExpectationEnabled() : false,
-          tiegu_mode: (typeof getTieguMode === 'function') ? getTieguMode() : 2,
+          ...getDunyaResetOptions(),
+      tiegu_mode: (typeof getTieguMode === 'function') ? getTieguMode() : 2,
           experimental: (typeof isExperimental === 'function') ? isExperimental() : false,
           team_buffs: (typeof getTeamBuffs === 'function') ? getTeamBuffs() : [],
           formation: window._formationSelection ? { ...window._formationSelection } : null,
@@ -25255,9 +25318,9 @@ window.Jx3Nav = {
     const defs = [
       { id: 'score',    title: '装分',       build: (r, p, d) => sec('装分', row('总分', num(d.score)) + dim('所有装备的分数累加（含精炼/镶嵌/附魔）')) },
       { id: 'quality',  title: '品质等级',   build: (r, p, d) => sec('品质等级', row('平均', num(d.quality_level)) + dim('装备品级的平均值（含精炼加成）')) },
-      { id: 'hp',       title: '最大气血',   build: (r, p) => sec('最大气血', row('气血', num(p.max_life)) + row('体质', num(r.vitality)) + dim('基础 199476（全心法）+ 体质 × (系统 10 + 心法附加)；铁骨衣 = 12.2 / 体质')) },
+      { id: 'hp',       title: '最大气血',   build: (r, p) => sec('最大气血', row('气血', num(p.max_life)) + row('体质', num(r.vitality)) + dim(`基础 ${currentAttributeParams().base_life} + 体质 × (10 + ${currentMount.mount_conversions?.vitality_to_hp || 0})${currentMount.mount_conversions?.base_life_percent ? "；气血提高5%" : ""}`)) },
       { id: 'vit',      title: '体质',       build: (r) => sec('体质', row('数值', num(r.vitality)) + dim('→ 气血 ×10（系统）；铁骨衣专属 → 外攻 郭氏 41 / 招架 郭氏 184 / 拆招 郭氏 2304 / 气血 +2.2')) },
-      { id: 'str',      title: '力道',       build: (r) => sec('力道', row('数值', num(r.strength)) + dim('→ 外攻 ×0.163 / 破防 ×0.3（系统）')) },
+      { id: 'str',      title: '力道',       build: (r) => sec('力道', row('数值', num(r.strength)) + dim(`→ 外攻 ×${currentAttributeParams().strength_to_attack} / 破防 ×${currentAttributeParams().strength_to_overcome}（系统）`)) },
       { id: 'agi',      title: '身法',       build: (r) => sec('身法', row('数值', num(r.agility)) + dim('→ 会心 ×0.9（系统）；分山劲专属 → 外攻 郭氏 1925 / 招架 郭氏 113 / 拆招 郭氏 1024')) },
       { id: 'atk',      title: '外功攻击',   build: (r, p) => {
         const base = Math.round(r.base_attack || 0);
@@ -25267,31 +25330,31 @@ window.Jx3Nav = {
           row('基础', num(r.base_attack)) +
           row('最终', num(p.physics_attack_power)) +
           (delta !== 0 ? row('差额', (delta > 0 ? '+' : '') + num(delta)) : '') +
-          dim('基础 = 心法固定 + 装备 + 力道×0.163；最终 = 基础 + 百分比加成 + 心法转化（身法/体质 → 攻击）'));
+          dim(`基础 = 心法固定 + 装备 + 力道×${currentAttributeParams().strength_to_attack}；最终 = 基础 + 百分比加成 + 心法转化（身法/体质 → 攻击）`));
       }},
-      { id: 'crit',     title: '会心',       build: (r, p) => sec('会心', row('等级', num(r.crit_level)) + row('面板', pct(p.crit_rate)) + dim('等级 / 197703 → 百分比')) },
-      { id: 'crit_eff', title: '会心效果',   build: (r, p) => sec('会心效果', row('等级', num(r.crit_effect_level)) + row('面板', pct(p.crit_effect)) + dim('基础 1.75 + 等级 / 72844.2')) },
-      { id: 'oc',       title: '破防',       build: (r, p) => sec('破防', row('等级', num(r.overcome_level)) + row('面板', pct(p.overcome_rate)) + dim('等级 / 225957.6 → 百分比')) },
-      { id: 'strain',   title: '无双',       build: (r, p) => sec('无双', row('等级', num(r.strain_level)) + row('面板', pct(p.strain_rate)) + dim('等级 / 133333.2 → 百分比')) },
-      { id: 'haste',    title: '加速',       build: (r, p) => sec('加速', row('等级', num(r.haste_level)) + row('面板', pct(p.haste_rate)) + dim('等级 / 210078，封顶 25%')) },
+      { id: 'crit',     title: '会心',       build: (r, p) => sec('会心', row('等级', num(r.crit_level)) + row('面板', pct(p.crit_rate)) + dim(`等级 / ${currentAttributeParams().crit} → 百分比`)) },
+      { id: 'crit_eff', title: '会心效果',   build: (r, p) => sec('会心效果', row('等级', num(r.crit_effect_level)) + row('面板', pct(p.crit_effect)) + dim(`基础 1.75 + 等级 / ${currentAttributeParams().crit_effect}`)) },
+      { id: 'oc',       title: '破防',       build: (r, p) => sec('破防', row('等级', num(r.overcome_level)) + row('面板', pct(p.overcome_rate)) + dim(`等级 / ${currentAttributeParams().overcome} → 百分比`)) },
+      { id: 'strain',   title: '无双',       build: (r, p) => sec('无双', row('等级', num(r.strain_level)) + row('面板', pct(p.strain_rate)) + dim(`等级 / ${currentAttributeParams().strain} → 百分比`)) },
+      { id: 'haste',    title: '加速',       build: (r, p) => sec('加速', row('等级', num(r.haste_level)) + row('面板', pct(p.haste_rate)) + dim(`等级 / ${currentAttributeParams().haste}，封顶 25%`)) },
       { id: 'surplus',  title: '破招',       build: (r, p) => sec('破招', row('数值', num(p.surplus_value)) + dim('破招伤害公式的直乘因子（已含游戏内 7.421 常数）')) },
       { id: 'pvx',      title: '全能',       build: (r) => {
         const v = Math.round(r.pvx_all_round || 0);
         return sec('全能',
           row('点数', num(r.pvx_all_round)) +
-          (v > 0 ? row('破招', '+' + num(Math.floor(v * 0.5))) +
-                    row('无双', '+' + num(Math.floor(v * 1.5))) +
+          (v > 0 ? row('破招', '+' + num(Math.floor(v * currentAttributeParams().pvx_to_surplus))) +
+                    row('无双', '+' + num(Math.floor(v * currentAttributeParams().pvx_to_strain))) +
                     row('化劲', '+' + num(Math.floor(v * 1.0)))
                   : '') +
-          dim('每点 = 0.5 破招等级 + 1.5 无双等级 + 1 化劲等级'));
+          dim(`每点 = ${currentAttributeParams().has_surplus ? "0.5 破招等级 + " : ""}${currentAttributeParams().pvx_to_strain} 无双等级 + 1 化劲等级`));
       }},
-      { id: 'pshield',  title: '外功防御',   build: (r, p) => sec('外功防御', row('等级', num(r.physics_shield)) + row('面板', pct(p.physics_shield_rate)) + dim('130 级：等级 / (等级 + 126007.2)，封顶 75%')) },
-      { id: 'mshield',  title: '内功防御',   build: (r, p) => sec('内功防御', row('等级', num(r.magic_shield)) + row('面板', pct(p.magic_shield_rate)) + dim('130 级：等级 / (等级 + 126007.2)，封顶 75%')) },
-      { id: 'parry',    title: '招架',       build: (r, p) => sec('招架', row('等级', num(r.parry_level)) + row('面板', pct(p.parry_rate)) + dim('等级 / (等级 + 107553.6) + 3%（心法自带基础）')) },
-      { id: 'parry_val',title: '拆招',       build: (r, p) => sec('拆招', row('数值', num(p.parry_value)) + dim('用于减免被招架后的伤害；铁骨衣靠体质 ×2.25 堆叠')) },
-      { id: 'dodge',    title: '闪避',       build: (r, p) => sec('闪避', row('等级', num(r.dodge_level)) + row('面板', pct(p.dodge_rate)) + dim('等级 / (等级 + 91634.4)')) },
-      { id: 'tough',    title: '御劲',       build: (r, p) => sec('御劲', row('等级', num(r.toughness_level)) + row('面板', pct(p.toughness_rate)) + dim('等级 / 197703 → 百分比（PvP 减会心率）')) },
-      { id: 'decrit',   title: '化劲',       build: (r, p) => sec('化劲', row('等级', num(r.decritical_damage_level)) + row('面板', pct(p.decritical_damage_rate)) + dim('等级 / (等级 + 33046.2) + 9.96%（PvP 减会心伤害）')) },
+      { id: 'pshield',  title: '外功防御',   build: (r, p) => sec('外功防御', row('等级', num(r.physics_shield)) + row('面板', pct(p.physics_shield_rate)) + dim(`${currentAttributeParams().level} 级：等级 / (等级 + ${currentAttributeParams().defense})，封顶 75%`)) },
+      { id: 'mshield',  title: '内功防御',   build: (r, p) => sec('内功防御', row('等级', num(r.magic_shield)) + row('面板', pct(p.magic_shield_rate)) + dim(`${currentAttributeParams().level} 级：等级 / (等级 + ${currentAttributeParams().defense})，封顶 75%`)) },
+      { id: 'parry',    title: '招架',       build: (r, p) => sec('招架', row('等级', num(r.parry_level)) + row('面板', pct(p.parry_rate)) + dim(`等级 / (等级 + ${currentAttributeParams().parry}) + 3%（心法自带基础）`)) },
+      { id: 'parry_val',title: '拆招',       build: (r, p) => sec('拆招', row('数值', num(p.parry_value)) + dim(`用于减免被招架后的伤害；体质转化系数 ${currentMount.mount_constants?.vitality_to_parry_value || 0}`)) },
+      { id: 'dodge',    title: '闪避',       build: (r, p) => sec('闪避', row('等级', num(r.dodge_level)) + row('面板', pct(p.dodge_rate)) + dim(`等级 / (等级 + ${currentAttributeParams().dodge})`)) },
+      { id: 'tough',    title: '御劲',       build: (r, p) => sec('御劲', row('等级', num(r.toughness_level)) + row('面板', pct(p.toughness_rate)) + dim(`等级 / ${currentAttributeParams().toughness} → 百分比（PvP 减会心率）`)) },
+      { id: 'decrit',   title: '化劲',       build: (r, p) => sec('化劲', row('等级', num(r.decritical_damage_level)) + row('面板', pct(p.decritical_damage_rate)) + dim(`等级 / (等级 + ${currentAttributeParams().decritical})${currentAttributeParams().level === 50 && currentMount.mount === "TieGuYi" ? "" : " + 9.96%"}（PvP 减会心伤害）`)) },
     ];
 
     for (const def of defs) {
@@ -26454,6 +26517,7 @@ window.Jx3Nav = {
       let sequence = [];
       const channelTicks = {};
       const timingOffsetsMap = {};
+      const solidifiedCastsMap = {};
       const qijinBuffsMap = {};
       let outIdx = 0;
       for (const e of (rot.sequence || [])) {
@@ -26467,6 +26531,7 @@ window.Jx3Nav = {
         for (let k = 0; k < n; k++) {
           if (e.channel_ticks) channelTicks[String(outIdx)] = e.channel_ticks;
           if (e.offset)        timingOffsetsMap[String(outIdx)] = e.offset;
+          if (e.solidified_cast && !e.offset && !e.offset_max) solidifiedCastsMap[String(outIdx)] = e.solidified_cast;
           if (e.qijin_buff)    qijinBuffsMap[String(outIdx)] = e.qijin_buff;
           sequence.push(name);
           outIdx++;
@@ -26493,6 +26558,7 @@ window.Jx3Nav = {
         sequence,
         channel_ticks: channelTicks,
         timing_offsets: timingOffsetsMap,
+        solidified_casts: solidifiedCastsMap,
         qijin_buffs: qijinBuffsMap,
         talents: d.talents || [],
         recipes: d.recipes || [],
@@ -26506,6 +26572,7 @@ window.Jx3Nav = {
         equipment: equipMap,
         // 与 runMacroSimulate / runSimulate 对齐，否则 DPS / fight_time 与 sim 页不一致
         hanjia_expectation: (typeof isHanjiaExpectationEnabled === 'function') ? isHanjiaExpectationEnabled() : undefined,
+        ...getDunyaResetOptions(),
         tiegu_mode:         (typeof getTieguMode === 'function')              ? getTieguMode()              : undefined,
         experimental:       (typeof isExperimental === 'function')            ? isExperimental()            : undefined,
         // 团辅 / 阵法：方案级 d 优先，fallback 全局当前
@@ -27918,3 +27985,5 @@ window.Jx3Nav = {
 
   apply();
 })();
+
+currentMountReady.then(syncLevelUi);

@@ -3,8 +3,4 @@
 
 use crate::*;
 
-pub fn override_attack_coeff(player: &Player) -> Option<f64> {
-    super::zhen_yun::uses_high_coefficient(player).then_some(11.725)
-}
-
 pub fn cast_skill(_player: &mut Player, _em: &mut ScriptEmitter, _t: f64) {}

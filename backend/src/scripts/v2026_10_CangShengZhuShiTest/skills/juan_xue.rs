@@ -1,7 +1,7 @@
 //! 卷雪刀（平砍）脚本 (ID: 13039)
 //!
 //! - 自动周期触发，间隔 = 基础 25帧 受加速影响
-//! - 系数 = (实际帧数 - 1) × 0.00625
+//! - 系数随实际攻击间隔变化，使用测试服攻击系数单位
 //! - 不被任何主动技能打断，不吃技能秘籍，不触发苍雪刀公共效果
 //! - 首个主动技能 cast 时启动循环
 
@@ -12,13 +12,13 @@ pub const BASE_FRAMES: u32 = 24;
 
 /// 当前加速下的实际间隔帧数
 pub fn interval_frames(haste_level: u32) -> u32 {
-    get_actual_frames(BASE_FRAMES, haste_level).max(1)
+    get_actual_frames_at_level(BASE_FRAMES, haste_level, 50).max(1)
 }
 
 /// 当前加速下的实际攻击系数
 pub fn attack_coeff(haste_level: u32) -> f64 {
     let frames = interval_frames(haste_level);
-    (frames.saturating_sub(1) as f64) * 0.00625
+    (frames.saturating_sub(1) as f64) / (16.0 * 89.92534)
 }
 
 /// 产出 (last_swing_time, to_time] 区间内所有平砍事件

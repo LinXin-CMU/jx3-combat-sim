@@ -1,0 +1,136 @@
+{
+  "status": "sat",
+  "method": "unbounded_ordered_cover",
+  "rules": [
+    {
+      "action": 10,
+      "atoms": []
+    },
+    {
+      "action": 6,
+      "atoms": [
+        13
+      ]
+    },
+    {
+      "action": 4,
+      "atoms": []
+    },
+    {
+      "action": 12,
+      "atoms": [
+        253
+      ]
+    },
+    {
+      "action": 0,
+      "atoms": [
+        42
+      ]
+    },
+    {
+      "action": 16,
+      "atoms": [
+        357
+      ]
+    },
+    {
+      "action": 18,
+      "atoms": [
+        0
+      ]
+    },
+    {
+      "action": 2,
+      "atoms": []
+    },
+    {
+      "action": 14,
+      "atoms": [
+        5
+      ]
+    },
+    {
+      "action": 14,
+      "atoms": [
+        37
+      ]
+    },
+    {
+      "action": 8,
+      "atoms": [
+        311
+      ]
+    },
+    {
+      "action": 20,
+      "atoms": []
+    },
+    {
+      "action": 14,
+      "atoms": []
+    }
+  ],
+  "sample_certificate": [
+    {
+      "anchor": 0,
+      "covered_samples": 2
+    },
+    {
+      "anchor": 2,
+      "covered_samples": 2
+    },
+    {
+      "anchor": 6,
+      "covered_samples": 6
+    },
+    {
+      "anchor": 13,
+      "covered_samples": 2
+    },
+    {
+      "anchor": 18,
+      "covered_samples": 2
+    },
+    {
+      "anchor": 19,
+      "covered_samples": 1
+    },
+    {
+      "anchor": 23,
+      "covered_samples": 1
+    },
+    {
+      "anchor": 27,
+      "covered_samples": 1
+    },
+    {
+      "anchor": 31,
+      "covered_samples": 1
+    },
+    {
+      "anchor": 35,
+      "covered_samples": 1
+    },
+    {
+      "anchor": 36,
+      "covered_samples": 1
+    },
+    {
+      "anchor": 64,
+      "covered_samples": 1
+    },
+    {
+      "anchor": 68,
+      "covered_samples": 2
+    }
+  ],
+  "solve_ms": 10.882600035984069,
+  "slots": null,
+  "terms": null,
+  "rule_count": 13,
+  "max_terms_used": 1,
+  "sample_count": 86,
+  "distinct_atoms": 324,
+  "variant": 0
+}

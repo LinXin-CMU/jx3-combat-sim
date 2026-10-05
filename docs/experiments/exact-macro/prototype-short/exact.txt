@@ -1,0 +1,13 @@
+/cast 盾猛
+/cast [buff:威压<2] 盾压
+/cast 盾刀
+/cast [rage=85] 盾飞
+/cast [buff:血怒<1] 斩刀
+/cast [tbufftime:步残<1.0] 血怒
+/cast [buff:劫化] 阵云结晦
+/cast 月照连营
+/cast [buff:嗜血<1] 绝刀
+/cast [buff:缓深] 绝刀
+/cast [sun=30] 盾回
+/cast 雁门迢递
+/cast 绝刀

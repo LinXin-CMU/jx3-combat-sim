@@ -1,7 +1,7 @@
-﻿id   = 13044
+id   = 13044
 name = "盾刀"
 icon = "https://icon.jx3box.com/icon/6327.png"
-description = "擎盾 / 回复10怒气 / 三段连招 / 减速目标60%持续8秒"
+description = "回复10点怒气，对目标造成100%的武器伤害外加{{damage:盾刀·一段}}外功伤害，并使目标减速60%，持续8秒。"
 
 # 姿态: 擎盾 / 距离: 4尺 / GCD: 1秒
 # 回复 10 怒气 / 使目标移动速度降低60% 持续8秒
@@ -35,18 +35,18 @@ haste    = true
 rank         = 1
 name         = "盾刀·一段"
 icon = "https://icon.jx3box.com/icon/6327.png"
-base_damage  = 275.0 # 9月8日公告：旧版对应系数 ×2
-attack_coeff = 2.8125 # 9月8日公告：旧版对应系数 ×2
-weapon_coeff = 2.0 # 9月8日公告：旧版对应系数 ×2
+base_damage_range = [13.0, 14.0]
+attack_coeff = 0.15637972567020597
+weapon_coeff = 1.0
 grants_combo = "盾刀_2"
 
 [[ranks]]
 rank         = 2
 name         = "盾刀·二段"
 icon = "https://icon.jx3box.com/icon/6328.png"
-base_damage  = 275.0 # 9月8日公告：旧版对应系数 ×2
-attack_coeff = 3.075 # 9月8日公告：旧版对应系数 ×2
-weapon_coeff = 2.0 # 9月8日公告：旧版对应系数 ×2
+base_damage_range = [13.0, 14.0]
+attack_coeff = 0.17097516673275853
+weapon_coeff = 1.0
 requires_combo = "盾刀_2"
 grants_combo   = "盾刀_3"
 
@@ -54,16 +54,16 @@ grants_combo   = "盾刀_3"
 rank         = 3
 name         = "盾刀·三段"
 icon = "https://icon.jx3box.com/icon/6329.png"
-base_damage  = 275.0 # 9月8日公告：旧版对应系数 ×2
-attack_coeff = 3.3625 # 9月8日公告：旧版对应系数 ×2
-weapon_coeff = 2.0 # 9月8日公告：旧版对应系数 ×2
+base_damage_range = [13.0, 14.0]
+attack_coeff = 0.18696064980126847
+weapon_coeff = 1.0
 requires_combo = "盾刀_3"
 
 [[ranks]]
 rank         = 4
 name         = "盾刀·四段"
 icon = "https://icon.jx3box.com/icon/6330.png"
-base_damage  = 275.0 # 9月8日公告：旧版对应系数 ×2
-attack_coeff = 2.725 # 9月8日公告：旧版对应系数 ×2
-weapon_coeff = 2.0 # 9月8日公告：旧版对应系数 ×2
+base_damage_range = [13.0, 14.0]
+attack_coeff = 0.1515145786493551
+weapon_coeff = 1.0
 requires_combo = "盾刀_4"

@@ -1,0 +1,13 @@
+id   = 38966
+name = "精简·暗器真伤"
+passive = true
+true_damage = true
+description = "副本/无修精简暗器 38950 黄字特效（暗影千机赛季）：命中触发 976,154 真实伤害，CD 10s"
+
+# 暗影千机品级 lvl 8（IcyTide skills.json 顶级）
+[[ranks]]
+rank          = 1
+name          = "精简·暗器真伤"
+base_damage   = 976154
+attack_coeff  = 0
+weapon_coeff  = 0

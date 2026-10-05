@@ -4,9 +4,10 @@ Requires Python Playwright and local Edge. Writes no simulator userdata and
 never calls a model. Run against the existing local UI on port 3005.
 """
 import json
+import os
 from playwright.sync_api import sync_playwright
 
-BASE = "http://127.0.0.1:3005"
+BASE = os.environ.get("JX3_SMOKE_BASE", "http://127.0.0.1:3005")
 SESSION = "ui-clarification-smoke"
 submitted = []
 
@@ -65,13 +66,13 @@ with sync_playwright() as p:
     page.wait_for_function("!document.querySelector('#agent_run').disabled")
     assert len(submitted) == 1
     assert submitted[-1]['session_id'] == SESSION
-    assert submitted[-1]['question'].endswith('我的回答：继续核实')
+    assert submitted[-1]['question'] == '继续核实'
     assert page.locator('#agent_question').input_value() == '保留未发送的草稿'
     form.get_by_text('3. 自行填写', exact=True).click()
     form.locator('textarea').fill('先看12秒附近')
     form.locator('button[type=submit]').click()
     page.wait_for_function("!document.querySelector('#agent_run').disabled")
-    assert submitted[-1]['question'].endswith('我的回答：先看12秒附近')
+    assert submitted[-1]['question'] == '先看12秒附近'
 
     # Structured options use the same component in the simulation dock.
     page.unroute(f"**/api/agent/sessions/{SESSION}")
@@ -91,7 +92,7 @@ with sync_playwright() as p:
     dock_form.get_by_text('2. 直接给结论', exact=True).click()
     dock_form.locator('button[type=submit]').click()
     page.wait_for_function("!document.querySelector('#sim_ai_send').disabled")
-    assert submitted[-1]['question'].endswith('我的回答：直接给结论')
+    assert submitted[-1]['question'] == '直接给结论'
     assert submitted[-1]['session_id'] == SESSION
     print(json.dumps({"ok": True, "intercepted_submissions": len(submitted),
                       "surfaces": ["full", "dock"], "model_calls": 0}))

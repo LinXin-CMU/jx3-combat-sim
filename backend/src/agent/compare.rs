@@ -47,6 +47,7 @@ pub struct ScenarioPatchV1 {
     pub pauses: Option<Vec<(f64, f64)>>,
     pub boss_attack_interval: Option<PatchValueV1<f64>>,
     pub hanjia_expectation: Option<PatchValueV1<bool>>,
+    pub dunya_reset_seed: Option<u32>,
     pub tiegu_mode: Option<u8>,
     pub experimental: Option<bool>,
     pub equipment: Option<HashMap<String, u32>>,
@@ -227,6 +228,7 @@ pub fn compare_scenarios_with_baseline(
             });
         }
         let (snapshot, changes) = apply_patch(baseline, &candidate.patch, context)?;
+        validate_candidate_actions(baseline, &snapshot, context)?;
         if changes.is_empty() {
             return Err(ToolError::NoScenarioChanges {
                 label: candidate.label.clone(),
@@ -591,12 +593,67 @@ pub(super) fn configure_macro_rotation(simulation: &mut crate::SimulateRequest, 
     simulation.macro_duration = Some(duration);
     simulation.channel_ticks.clear();
     simulation.timing_offsets.clear();
+    simulation.solidified_casts.clear();
     simulation.qijin_buffs.clear();
 }
 
 fn is_new_macro_program(baseline: &ScenarioSnapshotV1, patch: &ScenarioPatchV1) -> bool {
     matches!(patch.macro_text, Some(PatchValueV1::Set(_))) && patch.sequence.is_none()
         && !baseline.simulation.sequence.iter().any(|entry| entry == "__macro__")
+}
+
+/// Reject newly introduced actions that this ruleset cannot execute. An
+/// existing invalid line can still be inspected, retained or removed by a
+/// repair experiment; it cannot become evidence for a new mechanic.
+fn validate_candidate_actions(
+    baseline: &ScenarioSnapshotV1,
+    candidate: &ScenarioSnapshotV1,
+    context: &SimulatorContext<'_>,
+) -> Result<(), ToolError> {
+    fn names(snapshot: &ScenarioSnapshotV1) -> HashSet<String> {
+        let mut names: HashSet<_> = snapshot.simulation.sequence.iter()
+            .filter(|name| name.as_str() != "__macro__").cloned().collect();
+        if let Some(text) = snapshot.simulation.macro_text.as_deref() {
+            if let Ok(program) = crate::macro_parser::parse_macro_text(text) {
+                names.extend(program.pages.iter().flat_map(|page| &page.lines)
+                    .map(|line| line.action.skill_name().to_string()));
+            }
+        }
+        names
+    }
+    let player = crate::Player::with_mount(context.mount, context.game_version,
+        context.constants, candidate.simulation.haste_level,
+        candidate.simulation.talents.clone(), candidate.simulation.recipes.clone());
+    for id in &candidate.simulation.talents {
+        if !baseline.simulation.talents.contains(id)
+            && (!context.talents.iter().any(|talent| talent.id == *id) || !player.has_talent(*id)) {
+            return Err(ToolError::UnavailableCandidateAction { name: id.to_string() });
+        }
+    }
+    let available = |name: &str, talents: &[u32]| context.skills.iter().any(|skill| {
+        let base = if (90010..=90012).contains(&skill.skill_id) { skill.name.as_str() }
+            else { skill.name.split('·').next().unwrap_or(&skill.name) };
+        !skill.passive && base == name && skill.requires_talent.map_or(true, |id|
+            talents.contains(&id) && context.talents.iter().any(|talent| talent.id == id))
+    });
+    if !candidate.simulation.experimental {
+        for talent in context.talents.iter().filter(|talent|
+            candidate.simulation.talents.contains(&talent.id) && !baseline.simulation.talents.contains(&talent.id)) {
+            let count = context.talents.iter().filter(|other| other.tier == talent.tier
+                && candidate.simulation.talents.contains(&other.id)).count();
+            if count > if talent.tier == 8 { 3 } else { 1 } {
+                return Err(ToolError::ConflictingCandidateTalents);
+            }
+        }
+    }
+    let old_names = names(baseline);
+    for name in names(candidate) {
+        if !available(&name, &candidate.simulation.talents)
+            && !old_names.contains(&name) {
+            return Err(ToolError::UnavailableCandidateAction { name });
+        }
+    }
+    Ok(())
 }
 
 fn apply_patch(
@@ -701,6 +758,12 @@ fn apply_patch(
         "simulation.hanjia_expectation",
         &mut simulation.hanjia_expectation,
         &patch.hanjia_expectation,
+        &mut changes,
+    )?;
+    apply_value(
+        "simulation.dunya_reset_seed",
+        &mut simulation.dunya_reset_seed,
+        &patch.dunya_reset_seed,
         &mut changes,
     )?;
     apply_value(
@@ -822,6 +885,10 @@ fn metrics(snapshot: &ScenarioSnapshotV1, response: &SimulateResponse) -> Compar
         skills: summary.skills,
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/agent/candidate_actions.rs"]
+mod candidate_action_tests;
 
 #[cfg(test)]
 mod tests {

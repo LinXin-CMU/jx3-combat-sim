@@ -1,7 +1,7 @@
 use sha2::{Digest, Sha256};
 
-pub const AGENT_PROMPT_VERSION: &str = "agent-system/v50";
-const AGENT_SYSTEM_PROMPT: &str = include_str!("../../prompts/agent_system_v50.md");
+pub const AGENT_PROMPT_VERSION: &str = "agent-system/v53";
+const AGENT_SYSTEM_PROMPT: &str = include_str!("../../prompts/agent_system_v53.md");
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PromptSpec {
@@ -25,13 +25,16 @@ mod tests {
     #[test]
     fn current_prompt_is_single_model_led_instruction() {
         let prompt = agent_prompt();
-        assert_eq!(prompt.version, "agent-system/v50");
+        assert_eq!(prompt.version, "agent-system/v53");
         assert_eq!(prompt.sha256.len(), 64);
         assert!(prompt.instructions.contains("自主选择"));
         assert!(prompt.instructions.contains("可修改的工作状态"));
         assert!(prompt.instructions.contains("ask_user_question"));
         assert!(prompt.instructions.contains("术语卡"));
         assert!(prompt.instructions.contains("AgentReportContentV1"));
+        assert!(prompt.instructions.contains("body_markdown"));
+        assert!(prompt.instructions.contains("可为空"));
+        assert!(prompt.instructions.contains("跨对象实测只能支撑原对象"));
         assert!(prompt.instructions.contains("先给判断"));
         assert!(prompt.instructions.contains("[[盾回前的绝刀|op:24]]"));
         assert!(prompt.instructions.contains("inspect_timeline_events"));
@@ -41,6 +44,6 @@ mod tests {
         assert!(prompt.instructions.contains("mechanics_context"));
         assert!(prompt.instructions.contains("由你根据分析价值自主安排"));
         assert!(prompt.instructions.contains("把它更新为原任务的目标或约束"));
-        assert!(prompt.instructions.len() < 12_000);
+        assert!(prompt.instructions.len() < 16_000);
     }
 }

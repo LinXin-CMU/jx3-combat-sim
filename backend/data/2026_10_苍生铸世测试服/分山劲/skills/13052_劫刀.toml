@@ -1,7 +1,7 @@
-﻿id   = 13052
+id   = 13052
 name = "劫刀"
 icon = "https://icon.jx3box.com/icon/6312.png"
-description = "擎刀 / 消耗10怒气 / 基础苍雪刀招式"
+description = "消耗10点怒气，对目标造成100%的武器伤害外加{{damage:劫刀}}外功伤害。"
 
 # 姿态: 擎刀 / 距离: 4尺 / GCD: 1秒
 # 消耗 10 怒气
@@ -31,6 +31,6 @@ haste    = true
 rank         = 1
 name         = "劫刀"
 icon = "https://icon.jx3box.com/icon/6312.png"
-base_damage  = 124.5      # (110 + 139) / 2
-attack_coeff = 4.8500
+base_damage_range = [11.0, 13.0]
+attack_coeff = 0.5393362983114659
 weapon_coeff = 1.0

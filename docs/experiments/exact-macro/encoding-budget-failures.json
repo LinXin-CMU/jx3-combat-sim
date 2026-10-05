@@ -1,0 +1,74 @@
+[
+  {
+    "encoding": "integer/array lookup",
+    "status": "unknown",
+    "iterations": [
+      {
+        "status": "unknown",
+        "solve_ms": 20049.021999991965,
+        "slots": 8,
+        "terms": 2,
+        "sample_count": 23,
+        "distinct_atoms": 188
+      },
+      {
+        "status": "unknown",
+        "solve_ms": 20101.627600030042,
+        "slots": 12,
+        "terms": 3,
+        "sample_count": 23,
+        "distinct_atoms": 188
+      },
+      {
+        "status": "unknown",
+        "solve_ms": 20216.0431999946,
+        "slots": 20,
+        "terms": 4,
+        "sample_count": 23,
+        "distinct_atoms": 188
+      },
+      {
+        "status": "unknown",
+        "solve_ms": 20338.535600050818,
+        "slots": 32,
+        "terms": 5,
+        "sample_count": 23,
+        "distinct_atoms": 188
+      }
+    ],
+    "elapsed_ms": 82506.9952000049,
+    "reason": "timeout"
+  },
+  {
+    "encoding": "bit-vector/array lookup",
+    "status": "unknown",
+    "iterations": [
+      {
+        "status": "unknown",
+        "solve_ms": 20057.495300017763,
+        "slots": 12,
+        "terms": 2,
+        "sample_count": 23,
+        "distinct_atoms": 188
+      },
+      {
+        "status": "unknown",
+        "solve_ms": 20130.97589998506,
+        "slots": 20,
+        "terms": 3,
+        "sample_count": 23,
+        "distinct_atoms": 188
+      },
+      {
+        "status": "unknown",
+        "solve_ms": 20291.551299975254,
+        "slots": 32,
+        "terms": 4,
+        "sample_count": 23,
+        "distinct_atoms": 188
+      }
+    ],
+    "elapsed_ms": 61524.52119998634,
+    "reason": "timeout"
+  }
+]

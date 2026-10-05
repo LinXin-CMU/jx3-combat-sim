@@ -41,7 +41,7 @@ impl AgentRuntime {
             formations: state.formations.read().await.clone(),
             provenance: state.agent_provenance.read().await.clone(),
             knowledge: state.agent_knowledge.clone(),
-            equip_data: Some(state.equip_data.clone()),
+            equip_data: Some(state.current_equipment().await),
             base_stats: state.base_stats.read().await.clone(),
             mount_conversions: state.mount_conversions.read().await.clone(),
         }
@@ -106,6 +106,37 @@ impl AgentRuntime {
         self.equip_data.as_deref()?.get_item(subtype, id)
     }
 
+    /// Frozen, read-only catalog for typed experiment constraint validation.
+    pub(crate) fn equipment_data(&self) -> Option<&equip::EquipData> {
+        self.equip_data.as_deref()
+    }
+
+    /// Identity of every table used by equipment recalculation, including the
+    /// mount conversions. Composite item keys and set-valued attribute tags
+    /// need explicit ordering; canonical JSON only sorts object keys.
+    pub(crate) fn equipment_identity(&self) -> Result<String, String> {
+        let data = self.equipment_data().ok_or("装备目录不可用")?;
+        let mut items = data.items.iter().collect::<Vec<_>>();
+        items.sort_by_key(|(key, _)| **key);
+        let items = items
+            .into_iter()
+            .map(|(key, item)| {
+                let mut value = serde_json::to_value(item)?;
+                let mut tags = item.attr_tags.iter().collect::<Vec<_>>();
+                tags.sort_unstable();
+                value["attr_tags"] = serde_json::to_value(tags)?;
+                Ok((*key, value))
+            })
+            .collect::<Result<Vec<_>, serde_json::Error>>()
+            .map_err(|e| e.to_string())?;
+        super::hash::canonical_sha256(&serde_json::json!({
+            "items":items,"attrib_table":data.attrib_table,
+            "enhances":data.enhances,"enchants":data.enchants,
+            "stones":data.stones,"sets":data.sets,
+            "base_stats":self.base_stats,"mount_conversions":self.mount_conversions
+        })).map_err(|e|e.to_string())
+    }
+
     pub fn equipment_items(&self) -> impl Iterator<Item = &equip::EquipItem> {
         self.equip_data
             .as_deref()
@@ -123,14 +154,17 @@ impl AgentRuntime {
 
     #[cfg(test)]
     pub fn fixture() -> Self {
+        Self::fixture_for(GameVersion::AnYingQianJi, Mount::FenShanJin)
+    }
+
+    #[cfg(test)]
+    pub fn fixture_for(game_version: GameVersion, mount: Mount) -> Self {
         use crate::{
             formations_file, load_formations, load_recipes, load_school_toml, load_skills,
             load_talents, load_team_buffs, recipes_file, skills_dir, talents_file, team_buffs_file,
         };
         use std::path::Path;
 
-        let game_version = GameVersion::AnYingQianJi;
-        let mount = Mount::FenShanJin;
         let (constants, _, _, _, _) = load_school_toml(game_version, mount).unwrap();
         let skills = load_skills(Path::new(&skills_dir(game_version, mount)));
         let talents = load_talents(Path::new(&talents_file(game_version, mount)));
@@ -214,6 +248,7 @@ impl AgentRuntime {
                 pauses: Vec::new(),
                 boss_attack_interval: None,
                 hanjia_expectation: None,
+            dunya_reset_seed: Default::default(),
                 tiegu_mode: 2,
                 experimental: false,
                 lite: false,
@@ -227,3 +262,7 @@ impl AgentRuntime {
         .unwrap()
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/agent/runtime_identity.rs"]
+mod identity_tests;

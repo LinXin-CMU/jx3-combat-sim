@@ -1,0 +1,4139 @@
+{
+  "comparison": {
+    "actual_count": 251,
+    "exact_prefix": 2,
+    "first_difference": {
+      "actual": {
+        "channel_duration": null,
+        "channel_ticks": null,
+        "is_main": false,
+        "name": "盾飞",
+        "sequence_index": null,
+        "skill_id": 13050,
+        "time": 1.5
+      },
+      "expected": {
+        "channel_duration": null,
+        "channel_ticks": null,
+        "is_main": true,
+        "name": "盾刀·一段",
+        "sequence_index": 2,
+        "skill_id": 13044,
+        "time": 3.0
+      },
+      "index": 2
+    },
+    "max_time_error_on_order_prefix": 0.0,
+    "order_prefix": 2,
+    "reproduced": false,
+    "state_prefix": 2,
+    "target_count": 335,
+    "time_tolerance_seconds": 1e-07
+  },
+  "target": [
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 0.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 1.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 3.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 4.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 5.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 5.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13054,
+      "name": "斩刀",
+      "cast_time": 6.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13040,
+      "name": "血怒",
+      "cast_time": 6.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30769,
+      "name": "阵云结晦",
+      "cast_time": 7.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30855,
+      "name": "月照连营",
+      "cast_time": 9.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 10.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 12.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 12.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 13.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 15.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 16.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 17.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 18.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 18.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13054,
+      "name": "斩刀",
+      "cast_time": 19.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30856,
+      "name": "雁门迢递",
+      "cast_time": 21.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 22.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·20怒",
+      "cast_time": 24.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 24.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 25.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 27.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 28.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 29.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 30.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 30.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13054,
+      "name": "斩刀",
+      "cast_time": 31.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13040,
+      "name": "血怒",
+      "cast_time": 31.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30769,
+      "name": "阵云结晦",
+      "cast_time": 33.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30855,
+      "name": "月照连营",
+      "cast_time": 34.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 36.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 37.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 37.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 39.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 40.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 42.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 43.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 44.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 44.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13054,
+      "name": "斩刀",
+      "cast_time": 45.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30856,
+      "name": "雁门迢递",
+      "cast_time": 46.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 48.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·20怒",
+      "cast_time": 49.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 49.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 51.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 52.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 54.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 55.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 56.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 56.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13054,
+      "name": "斩刀",
+      "cast_time": 57.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13040,
+      "name": "血怒",
+      "cast_time": 57.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30769,
+      "name": "阵云结晦",
+      "cast_time": 58.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30855,
+      "name": "月照连营",
+      "cast_time": 60.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 61.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 63.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 63.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 64.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 66.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 67.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 68.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 69.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 69.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13054,
+      "name": "斩刀",
+      "cast_time": 70.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30856,
+      "name": "雁门迢递",
+      "cast_time": 72.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 73.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·20怒",
+      "cast_time": 75.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 75.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 76.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 78.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 79.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 80.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 81.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 81.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13054,
+      "name": "斩刀",
+      "cast_time": 82.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13040,
+      "name": "血怒",
+      "cast_time": 82.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30769,
+      "name": "阵云结晦",
+      "cast_time": 84.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30855,
+      "name": "月照连营",
+      "cast_time": 85.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 87.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 88.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 88.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 90.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 91.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 93.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 94.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 95.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 95.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13054,
+      "name": "斩刀",
+      "cast_time": 96.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30856,
+      "name": "雁门迢递",
+      "cast_time": 97.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 99.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·20怒",
+      "cast_time": 100.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 100.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 102.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 103.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 105.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 106.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 107.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 113.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13054,
+      "name": "斩刀",
+      "cast_time": 113.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13040,
+      "name": "血怒",
+      "cast_time": 113.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30769,
+      "name": "阵云结晦",
+      "cast_time": 114.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30855,
+      "name": "月照连营",
+      "cast_time": 116.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 117.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 119.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 119.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 120.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 122.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 123.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 124.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 125.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 131.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13054,
+      "name": "斩刀",
+      "cast_time": 131.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30856,
+      "name": "雁门迢递",
+      "cast_time": 132.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 134.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·20怒",
+      "cast_time": 135.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 135.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 137.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 138.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 140.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 141.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 142.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 149.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13054,
+      "name": "斩刀",
+      "cast_time": 149.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13040,
+      "name": "血怒",
+      "cast_time": 149.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30769,
+      "name": "阵云结晦",
+      "cast_time": 150.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30855,
+      "name": "月照连营",
+      "cast_time": 152.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 153.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 155.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 155.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 156.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 158.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 159.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 160.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 161.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 167.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13054,
+      "name": "斩刀",
+      "cast_time": 167.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30856,
+      "name": "雁门迢递",
+      "cast_time": 168.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 170.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·20怒",
+      "cast_time": 171.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 171.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 173.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 174.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 176.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 177.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 178.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 185.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13054,
+      "name": "斩刀",
+      "cast_time": 185.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13040,
+      "name": "血怒",
+      "cast_time": 185.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30769,
+      "name": "阵云结晦",
+      "cast_time": 186.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30855,
+      "name": "月照连营",
+      "cast_time": 188.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 189.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 191.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 191.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 192.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 194.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 195.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 196.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 197.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 203.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13054,
+      "name": "斩刀",
+      "cast_time": 203.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30856,
+      "name": "雁门迢递",
+      "cast_time": 204.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 206.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·20怒",
+      "cast_time": 207.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 207.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 209.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 210.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 212.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 213.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 214.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 221.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13054,
+      "name": "斩刀",
+      "cast_time": 221.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13040,
+      "name": "血怒",
+      "cast_time": 221.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30769,
+      "name": "阵云结晦",
+      "cast_time": 222.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30855,
+      "name": "月照连营",
+      "cast_time": 224.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 225.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 227.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 227.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 228.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 230.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 231.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 232.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 233.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 239.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13054,
+      "name": "斩刀",
+      "cast_time": 239.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30856,
+      "name": "雁门迢递",
+      "cast_time": 240.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 242.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·20怒",
+      "cast_time": 243.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 243.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 245.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 246.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 248.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 249.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 250.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 257.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13054,
+      "name": "斩刀",
+      "cast_time": 257.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13040,
+      "name": "血怒",
+      "cast_time": 257.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30769,
+      "name": "阵云结晦",
+      "cast_time": 258.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30855,
+      "name": "月照连营",
+      "cast_time": 260.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 261.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 263.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 263.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 264.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 266.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 267.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 268.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 269.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 275.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13054,
+      "name": "斩刀",
+      "cast_time": 275.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30856,
+      "name": "雁门迢递",
+      "cast_time": 276.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 278.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·20怒",
+      "cast_time": 279.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 279.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 281.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 282.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 284.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 285.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 286.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 293.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13054,
+      "name": "斩刀",
+      "cast_time": 293.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13040,
+      "name": "血怒",
+      "cast_time": 293.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30769,
+      "name": "阵云结晦",
+      "cast_time": 294.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30855,
+      "name": "月照连营",
+      "cast_time": 296.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 297.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 299.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 299.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 300.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 302.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 303.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 304.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 305.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 311.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13054,
+      "name": "斩刀",
+      "cast_time": 311.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30856,
+      "name": "雁门迢递",
+      "cast_time": 312.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 314.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·20怒",
+      "cast_time": 315.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 315.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 317.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 318.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 320.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 321.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 322.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 329.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13054,
+      "name": "斩刀",
+      "cast_time": 329.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13040,
+      "name": "血怒",
+      "cast_time": 329.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30769,
+      "name": "阵云结晦",
+      "cast_time": 330.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30855,
+      "name": "月照连营",
+      "cast_time": 332.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 333.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 335.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 335.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 336.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 338.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 339.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 340.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 341.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 347.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13054,
+      "name": "斩刀",
+      "cast_time": 347.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30856,
+      "name": "雁门迢递",
+      "cast_time": 348.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 350.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·20怒",
+      "cast_time": 351.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 351.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 353.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 354.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 356.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 357.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 358.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 365.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13054,
+      "name": "斩刀",
+      "cast_time": 365.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13040,
+      "name": "血怒",
+      "cast_time": 365.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30769,
+      "name": "阵云结晦",
+      "cast_time": 366.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30855,
+      "name": "月照连营",
+      "cast_time": 368.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 369.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 371.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 371.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 372.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 374.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 375.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 376.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 377.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 383.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13054,
+      "name": "斩刀",
+      "cast_time": 383.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30856,
+      "name": "雁门迢递",
+      "cast_time": 384.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 386.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·20怒",
+      "cast_time": 387.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 387.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 389.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 390.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 392.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 393.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 394.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 401.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13054,
+      "name": "斩刀",
+      "cast_time": 401.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13040,
+      "name": "血怒",
+      "cast_time": 401.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30769,
+      "name": "阵云结晦",
+      "cast_time": 402.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30855,
+      "name": "月照连营",
+      "cast_time": 404.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 405.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 407.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 407.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 408.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 410.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 411.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 412.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 413.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 419.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13054,
+      "name": "斩刀",
+      "cast_time": 419.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30856,
+      "name": "雁门迢递",
+      "cast_time": 420.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 422.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·20怒",
+      "cast_time": 423.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 423.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 425.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 426.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 428.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 429.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 430.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 437.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13054,
+      "name": "斩刀",
+      "cast_time": 437.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13040,
+      "name": "血怒",
+      "cast_time": 437.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30769,
+      "name": "阵云结晦",
+      "cast_time": 438.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30855,
+      "name": "月照连营",
+      "cast_time": 440.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 441.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 443.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 443.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 444.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 446.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 447.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·二段",
+      "cast_time": 448.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·三段",
+      "cast_time": 449.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 455.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13054,
+      "name": "斩刀",
+      "cast_time": 455.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30856,
+      "name": "雁门迢递",
+      "cast_time": 456.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 458.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·20怒",
+      "cast_time": 459.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    }
+  ],
+  "actual": [
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 0.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 1.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 1.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13054,
+      "name": "斩刀",
+      "cast_time": 3.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13040,
+      "name": "血怒",
+      "cast_time": 3.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 3.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13040,
+      "name": "血怒",
+      "cast_time": 3.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13040,
+      "name": "血怒",
+      "cast_time": 4.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 4.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30769,
+      "name": "阵云结晦",
+      "cast_time": 4.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 5.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 6.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 6.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 7.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30855,
+      "name": "月照连营",
+      "cast_time": 7.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 12.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 13.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30856,
+      "name": "雁门迢递",
+      "cast_time": 15.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30769,
+      "name": "阵云结晦",
+      "cast_time": 19.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 19.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30855,
+      "name": "月照连营",
+      "cast_time": 20.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 20.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 22.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 23.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 32.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 35.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 37.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 37.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13054,
+      "name": "斩刀",
+      "cast_time": 38.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13040,
+      "name": "血怒",
+      "cast_time": 38.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 38.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 42.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 43.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30856,
+      "name": "雁门迢递",
+      "cast_time": 46.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30769,
+      "name": "阵云结晦",
+      "cast_time": 48.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30855,
+      "name": "月照连营",
+      "cast_time": 49.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 51.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30856,
+      "name": "雁门迢递",
+      "cast_time": 52.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 55.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 55.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 56.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 57.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 61.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 62.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30769,
+      "name": "阵云结晦",
+      "cast_time": 69.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 70.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30855,
+      "name": "月照连营",
+      "cast_time": 72.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 74.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 74.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 78.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 79.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 89.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 91.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 91.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13054,
+      "name": "斩刀",
+      "cast_time": 92.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13040,
+      "name": "血怒",
+      "cast_time": 92.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 92.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13040,
+      "name": "血怒",
+      "cast_time": 93.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13040,
+      "name": "血怒",
+      "cast_time": 93.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 99.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 101.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30856,
+      "name": "雁门迢递",
+      "cast_time": 102.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30769,
+      "name": "阵云结晦",
+      "cast_time": 104.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30855,
+      "name": "月照连营",
+      "cast_time": 105.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30856,
+      "name": "雁门迢递",
+      "cast_time": 107.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 109.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 113.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 113.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 114.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 114.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30769,
+      "name": "阵云结晦",
+      "cast_time": 119.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 120.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30855,
+      "name": "月照连营",
+      "cast_time": 122.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 126.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 127.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 131.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 132.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 142.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 144.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 145.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 145.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13054,
+      "name": "斩刀",
+      "cast_time": 146.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13040,
+      "name": "血怒",
+      "cast_time": 146.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 146.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13040,
+      "name": "血怒",
+      "cast_time": 147.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 148.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 152.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30856,
+      "name": "雁门迢递",
+      "cast_time": 154.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30769,
+      "name": "阵云结晦",
+      "cast_time": 156.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30855,
+      "name": "月照连营",
+      "cast_time": 157.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30856,
+      "name": "雁门迢递",
+      "cast_time": 159.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 160.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 162.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 163.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 163.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 164.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 165.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30769,
+      "name": "阵云结晦",
+      "cast_time": 171.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 172.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30855,
+      "name": "月照连营",
+      "cast_time": 174.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 177.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 178.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 180.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 181.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 185.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 186.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 196.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 198.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 199.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 199.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13054,
+      "name": "斩刀",
+      "cast_time": 201.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13040,
+      "name": "血怒",
+      "cast_time": 201.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 201.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13040,
+      "name": "血怒",
+      "cast_time": 201.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13040,
+      "name": "血怒",
+      "cast_time": 202.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 206.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 208.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30856,
+      "name": "雁门迢递",
+      "cast_time": 209.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30769,
+      "name": "阵云结晦",
+      "cast_time": 211.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30855,
+      "name": "月照连营",
+      "cast_time": 212.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30856,
+      "name": "雁门迢递",
+      "cast_time": 214.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 215.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 220.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 220.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 221.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 221.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 225.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30769,
+      "name": "阵云结晦",
+      "cast_time": 227.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30855,
+      "name": "月照连营",
+      "cast_time": 228.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 233.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 235.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 235.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 239.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 240.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 250.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 252.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 253.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 253.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13054,
+      "name": "斩刀",
+      "cast_time": 254.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13040,
+      "name": "血怒",
+      "cast_time": 254.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 254.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13040,
+      "name": "血怒",
+      "cast_time": 255.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 256.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 260.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 262.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30856,
+      "name": "雁门迢递",
+      "cast_time": 263.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30769,
+      "name": "阵云结晦",
+      "cast_time": 265.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30855,
+      "name": "月照连营",
+      "cast_time": 266.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 268.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30856,
+      "name": "雁门迢递",
+      "cast_time": 269.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 274.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 274.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 275.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 275.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 278.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30769,
+      "name": "阵云结晦",
+      "cast_time": 280.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30855,
+      "name": "月照连营",
+      "cast_time": 281.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 286.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 287.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 289.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 293.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 294.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 304.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 306.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 307.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 307.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13054,
+      "name": "斩刀",
+      "cast_time": 309.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13040,
+      "name": "血怒",
+      "cast_time": 309.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 309.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13040,
+      "name": "血怒",
+      "cast_time": 309.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 314.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 316.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30856,
+      "name": "雁门迢递",
+      "cast_time": 317.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30769,
+      "name": "阵云结晦",
+      "cast_time": 319.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30855,
+      "name": "月照连营",
+      "cast_time": 320.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30856,
+      "name": "雁门迢递",
+      "cast_time": 322.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 323.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 328.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 328.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 329.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 329.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 333.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30769,
+      "name": "阵云结晦",
+      "cast_time": 335.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30855,
+      "name": "月照连营",
+      "cast_time": 336.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 341.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 343.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 343.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 347.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13055,
+      "name": "绝刀·50怒",
+      "cast_time": 348.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 358.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 360.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13044,
+      "name": "盾刀·一段",
+      "cast_time": 361.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 361.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13054,
+      "name": "斩刀",
+      "cast_time": 362.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13040,
+      "name": "血怒",
+      "cast_time": 362.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 362.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13040,
+      "name": "血怒",
+      "cast_time": 363.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13040,
+      "name": "血怒",
+      "cast_time": 363.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 364.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 368.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30856,
+      "name": "雁门迢递",
+      "cast_time": 370.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30769,
+      "name": "阵云结晦",
+      "cast_time": 372.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30855,
+      "name": "月照连营",
+      "cast_time": 373.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30856,
+      "name": "雁门迢递",
+      "cast_time": 375.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 376.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 378.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 379.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 379.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 380.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30769,
+      "name": "阵云结晦",
+      "cast_time": 387.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 388.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 390.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30855,
+      "name": "月照连营",
+      "cast_time": 391.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 396.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 402.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 402.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13054,
+      "name": "斩刀",
+      "cast_time": 403.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 403.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13040,
+      "name": "血怒",
+      "cast_time": 404.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 405.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 406.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13040,
+      "name": "血怒",
+      "cast_time": 406.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30856,
+      "name": "雁门迢递",
+      "cast_time": 411.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30769,
+      "name": "阵云结晦",
+      "cast_time": 413.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 414.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 416.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 416.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 417.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30855,
+      "name": "月照连营",
+      "cast_time": 417.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 426.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 428.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 433.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13054,
+      "name": "斩刀",
+      "cast_time": 433.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13040,
+      "name": "血怒",
+      "cast_time": 433.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 434.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 436.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 438.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30856,
+      "name": "雁门迢递",
+      "cast_time": 442.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30769,
+      "name": "阵云结晦",
+      "cast_time": 444.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30855,
+      "name": "月照连营",
+      "cast_time": 445.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 447.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 448.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30856,
+      "name": "雁门迢递",
+      "cast_time": 450.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13050,
+      "name": "盾飞",
+      "cast_time": 451.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13054,
+      "name": "斩刀",
+      "cast_time": 451.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13040,
+      "name": "血怒",
+      "cast_time": 451.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13051,
+      "name": "盾回",
+      "cast_time": 452.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30769,
+      "name": "阵云结晦",
+      "cast_time": 453.375,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 30855,
+      "name": "月照连营",
+      "cast_time": 454.875,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13046,
+      "name": "盾猛",
+      "cast_time": 457.0,
+      "channel_ticks": null,
+      "channel_duration": null
+    },
+    {
+      "skill_id": 13045,
+      "name": "盾压",
+      "cast_time": 458.5,
+      "channel_ticks": null,
+      "channel_duration": null
+    }
+  ]
+}

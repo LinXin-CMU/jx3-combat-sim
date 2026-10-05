@@ -1,0 +1,12 @@
+id   = 42837
+name = "精简·加速腰带真伤"
+passive = true
+true_damage = true
+description = "精简加速腰带 42767 黄字特效：命中触发 268,000 真实伤害，CD 40s"
+
+[[ranks]]
+rank          = 1
+name          = "精简·加速腰带真伤"
+base_damage   = 268000
+attack_coeff  = 0
+weapon_coeff  = 0

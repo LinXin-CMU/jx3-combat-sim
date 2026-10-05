@@ -1,4 +1,4 @@
-﻿id   = 13039
+id   = 13039
 name = "卷雪刀"
 icon = "https://icon.jx3box.com/icon/6675.png"
 passive = true
@@ -11,6 +11,6 @@ description = "苍云默认平砍。每 1.5s（受加速影响）造成武器伤
 rank         = 1
 name         = "卷雪刀"
 icon = "https://icon.jx3box.com/icon/6675.png"
-base_damage  = 0
-attack_coeff = 0.14375     # 占位（24帧档）；实际由脚本动态覆盖
+base_damage_range = [0.0, 0.0]
+attack_coeff = 0.015985483068509942
 weapon_coeff = 1.0

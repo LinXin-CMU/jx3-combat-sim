@@ -8,7 +8,8 @@
   <link rel="stylesheet" href="style.css?v=20261004-macrospeed1">
   <link rel="stylesheet" href="agent.css?v=20261004-macrospeed1">
   <link rel="stylesheet" href="macro-assist.css?v=20261004-macrospeed1">
-  <link rel="stylesheet" href="assistant-shell.css?v=20261004-macrospeed1">
+  <link rel="stylesheet" href="harness.css?v=20261004-macrospeed1">
+  <link rel="stylesheet" href="assistant-shell.css?v=20261004-analysis1">
   <link rel="stylesheet" href="macro-exact.css?v=20261004-macrospeed1">
   <link rel="stylesheet" href="loop-tabs.css?v=20261004-macrospeed1">
 </head>
@@ -18,7 +19,7 @@
     <div class="top-bar">
       <div class="tb-brand" title="分山劲伤害计算器 · 苍云 · 外功 · 130级">
         <span class="tb-brand-name tb-brand-shimmer" data-text="苍云器灵">苍云器灵</span>
-        <span class="tb-brand-tag">v2.1.0-20261004.3</span>
+        <span class="tb-brand-tag">v2.1.0-20261004.5</span>
       </div>
       <button class="tb-btn" id="btn_mount_picker" title="切换心法 / 武学版本">
         <span class="tb-label">心法</span>
@@ -46,6 +47,7 @@
         <span class="tb-label">延迟</span>
       </div>
       <div class="tb-spacer"></div>
+      <button type="button" class="tb-btn tb-right" data-assistant-open="analysis" title="打开器灵 AI 分析">◇ 器灵助手</button>
       <button class="tb-btn tb-right" id="tb_resume" style="display:none"
         title="跳到上次工作流的当前步骤">上次 ▸</button>
       <button class="tb-btn tb-right" id="tb_home"
@@ -62,6 +64,7 @@
             <div class="sim-dropdown-item" data-quick-page="page-wizard-c">🔍 配装搜索</div>
             <div class="sim-dropdown-item" data-quick-page="page-plaza">🏟️ 战斗广场</div>
             <div class="sim-dropdown-item" data-quick-page="page-agent">✦ AI 战斗分析</div>
+            <div class="sim-dropdown-item" data-quick-page="page-harness" hidden data-assistant-open="harness">◇ 武学助手</div>
           </div>
         </div>
       </div>
@@ -131,6 +134,7 @@
       <button class="tab" data-page="page-wizard-c">配装搜索</button>
       <button class="tab" data-page="page-plaza">战斗广场</button>
       <button class="tab" data-page="page-agent">AI 战斗分析</button>
+      <button class="tab" data-page="page-harness" hidden data-assistant-open="harness">武学助手</button>
     </nav>
 
     <!-- ═══════ Hub 页面（默认落地，PR 1 新增）═══════ -->
@@ -138,6 +142,13 @@
       <div class="hub-container">
         <h1 class="hub-title">🎯 选一个工作流开始</h1>
         <div class="hub-cards">
+          <!-- 武学助手暂时隐藏；保留页面与功能源码，器灵默认打开 AI 分析。 -->
+          <div class="hub-card harness-hub-card" hidden>
+            <div class="hub-card-icon">◇</div>
+            <h2 class="hub-card-title">武学助手</h2>
+            <p class="hub-card-desc">描述写宏、循环或配装目标，让器灵自主实验，用可复现的证据交付方案。</p>
+            <button class="hub-card-btn" data-harness-open data-assistant-open="harness">开始自主实验 →</button>
+          </div>
           <div class="hub-card" data-hub-action="workflow-a">
             <div class="hub-card-icon">📝</div>
             <h2 class="hub-card-title">循环蒸馏</h2>
@@ -178,9 +189,57 @@
             <button class="hub-tool" data-hub-goto="page-equip">⚔️ 配装器</button>
             <button class="hub-tool" id="hub_macro_settings">📝 宏设置</button>
             <button class="hub-tool" data-hub-goto="page-agent">✦ AI 战斗分析</button>
+            <button class="hub-tool" data-hub-goto="page-harness" hidden data-assistant-open="harness">◇ 武学助手</button>
           </div>
         </div>
       </div>
+    </div>
+
+    <div id="page-harness" class="page" hidden>
+      <main class="harness-shell">
+        <header class="harness-hero">
+          <div><div class="harness-eyebrow">苍云 PVE · 武学助手</div><h1>把技能轴，写成能验证的宏。</h1>
+            <p>读取当前循环与战斗配置，生成宏、运行对照，再从首处分歧继续修正。</p></div>
+          <button type="button" class="harness-tag" data-assistant-open="harness">打开自主助手 ↗</button>
+        </header>
+        <ol class="harness-steps" aria-label="写宏流程">
+          <li><b>01</b><span>读取当前技能轴</span></li><li><b>02</b><span>生成与迭代验证</span></li><li><b>03</b><span>检查差异，复制宏</span></li>
+        </ol>
+        <div class="harness-workspace">
+          <section class="harness-card harness-input" aria-labelledby="harness_input_title">
+            <div class="harness-section-title"><h2 id="harness_input_title">这次要写什么</h2><button type="button" class="sim-btn" id="harness_go_sim">打开循环编辑器 ↗</button></div>
+            <div class="harness-source"><span class="harness-source-label">目标技能轴</span><strong id="harness_source_title">当前循环编辑器</strong><p id="harness_source_detail">开始时重新模拟，读取最新技能顺序、装备、奇穴、秘籍和战斗配置。</p></div>
+            <div class="harness-field-row">
+              <label>搜索预算<select id="harness_budget"><option value="quick">快速 · 32 次 / 20 秒</option><option value="standard" selected>标准 · 96 次 / 60 秒</option><option value="thorough">深入 · 192 次 / 120 秒</option></select></label>
+              <label>最多宏页<select id="harness_max_pages"><option value="1">1 页</option><option value="2" selected>2 页</option></select></label>
+            </div>
+            <details class="harness-initial"><summary>已有宏作为起点 <span>可选</span></summary><label class="harness-sr-only" for="harness_initial_macro">起始宏</label><textarea id="harness_initial_macro" rows="6" spellcheck="false" placeholder="粘贴你想继续修正的宏；留空则自动生成。"></textarea><button type="button" class="sim-btn" id="harness_use_draft">读取当前写宏草稿</button></details>
+            <p class="harness-note">每页最多 128 字符。目标是复现这条技能轴；验证范围仅限本次读取的场景。</p>
+            <button type="button" class="harness-primary" id="harness_start">读取技能轴并开始写宏</button>
+            <p id="harness_feedback" class="harness-feedback" role="status" aria-live="polite"></p>
+          </section>
+          <section class="harness-card harness-run" aria-labelledby="harness_run_title">
+            <div class="harness-section-title"><h2 id="harness_run_title">运行与验证</h2><span id="harness_status" class="harness-status">等待开始</span></div>
+            <p id="harness_message" class="harness-run-message" role="status" aria-live="polite">先在循环编辑器排好手动技能轴，再交给助手写宏。</p>
+            <progress id="harness_progress" max="96" value="0" aria-label="已使用的模拟预算"></progress>
+            <div class="harness-run-stats"><span>模拟 <b id="harness_simulations">0 / 96</b></span><span>耗时 <b id="harness_elapsed">0.0 秒</b></span></div>
+            <div class="harness-run-actions"><button type="button" class="sim-btn" id="harness_cancel" disabled>停止搜索</button><button type="button" class="sim-btn" id="harness_download" disabled>下载结果包</button></div>
+            <div class="harness-recent"><label for="harness_recent">最近任务</label><select id="harness_recent"><option value="">暂无任务</option></select><button type="button" class="sim-btn" id="harness_refresh" aria-label="刷新最近任务">刷新</button></div>
+            <p class="harness-note">任务保留在当前服务内存中，刷新页面可恢复；服务重启前可下载结果包。</p>
+            <details class="harness-evidence"><summary>本次验证标识</summary><dl><dt>场景</dt><dd id="harness_scenario_hash">—</dd><dt>任务</dt><dd id="harness_experiment_hash">—</dd></dl></details>
+          </section>
+        </div>
+        <section class="harness-card harness-result" id="harness_result" hidden aria-labelledby="harness_result_title">
+          <div class="harness-section-title"><div><div class="harness-eyebrow">当前最佳已验证候选</div><h2 id="harness_result_title">宏与技能轴对照</h2></div><span id="harness_verdict" class="harness-status"></span></div>
+          <p id="harness_result_note" class="harness-note"></p>
+          <div id="harness_metrics" class="harness-metrics"></div>
+          <div class="harness-result-grid"><div><div class="harness-section-title"><h3>生成的宏</h3><button type="button" class="sim-btn" id="harness_copy_all">复制完整宏（模拟器）</button></div><div id="harness_macro_pages" class="harness-macro-pages"></div><p class="harness-note">复制单页可粘贴到游戏宏。完整宏保留分页标记，适合模拟器编辑器。</p></div>
+            <div><h3>技能轴差异</h3><div id="harness_diff_summary" class="harness-diff-summary"></div><div id="harness_first_difference" class="harness-first-difference"></div><div id="harness_differences" class="harness-differences"></div></div></div>
+          <details class="harness-comparison"><summary>起始宏与生成宏对照</summary><div class="harness-code-comparison"><div><h3>起始宏</h3><pre id="harness_before_macro"></pre></div><div><h3>生成宏</h3><pre id="harness_after_macro"></pre></div></div></details>
+          <details class="harness-history"><summary>迭代记录与测试范围</summary><div id="harness_history"></div><ul id="harness_limitations"></ul></details>
+          <div class="harness-result-footer"><span>仅验证窗口内动作、顺序、时机与已采集资源；更换配装、奇穴或延迟后需要重新验证。</span><button type="button" class="sim-btn" id="harness_open_editor">返回写宏编辑器 ↗</button></div>
+        </section>
+      </main>
     </div>
 
     <!-- ═══════ Agent 实验面板 ═══════ -->
@@ -211,9 +270,9 @@
               <p>语言模型理解策划问题并选择实验；Rust 模拟器计算事实；证据校验器阻止无来源数字进入结论。</p>
             </div>
             <div class="agent-boundary-stack">
-              <span>只读工具 × 4</span>
-              <span>单任务 ≤ 60s</span>
-              <span>并发任务 × 1</span>
+              <span>只读检索与确定性模拟</span>
+              <span>结论关联工具证据</span>
+              <span>保留可追溯执行记录</span>
             </div>
           </header>
 
@@ -247,7 +306,7 @@
               <label for="agent_provider">模型 Profile</label>
               <select class="sim-input" id="agent_provider" aria-label="模型 Profile"><option value="offline">离线测试</option></select>
               <span id="agent_provider_model">deterministic-fixture-v1</span>
-              <span class="agent-provider-note">凭据仅存在于服务端环境变量</span>
+              <button type="button" class="sim-btn agent-provider-settings" data-agent-provider-settings>自定义接口</button>
             </div>
             <div class="agent-input-row">
               <textarea id="agent_question" rows="2" maxlength="16000" placeholder="例如：这套循环做得怎么样？主要问题在哪里？"></textarea>
@@ -1796,12 +1855,29 @@
               </div>
               <span class="sim-rage-value" id="sim_rage_value">0</span>
             </div>
-            <div class="sim-block-column" id="sim_block_row" style="display:none">
-              <div class="sim-block-bar">
-                <div class="sim-block-bar-inner">
-                  <div class="sim-block-fill" id="sim_block_fill" style="height:100%">
-                    <div class="sim-block-glow"></div>
-                  </div>
+            <div class="sim-block-column" id="sim_block_row" style="display:none" role="meter" aria-label="格挡值" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100" title="格挡值：100 / 100">
+              <div class="sim-block-bar" aria-hidden="true">
+                <svg class="sim-block-shield sim-block-shield-empty" viewBox="0 0 48 64" focusable="false">
+                  <defs>
+                    <linearGradient id="sim-block-silver" x1="0" y1="0" x2="1" y2="0.8">
+                      <stop offset="0" stop-color="#edf0f3"/><stop offset="0.3" stop-color="#aab0ba"/>
+                      <stop offset="0.55" stop-color="#555c67"/><stop offset="0.78" stop-color="#c3c8d0"/><stop offset="1" stop-color="#757c87"/>
+                    </linearGradient>
+                    <symbol id="sim-block-shield-art" viewBox="0 0 48 64">
+                      <path d="M24 3 30 13 38 7 36 25 43 18 38 43 24 61 10 43 5 18 12 25 10 7 18 13Z" fill="url(#sim-block-silver)" stroke="#414751" stroke-width="1.4" stroke-linejoin="round"/>
+                      <path d="M11 11 18 17 19 44 24 56 13 41Z" fill="#8e96a1"/>
+                      <path d="M37 11 30 17 29 44 24 56 35 41Z" fill="#686f7b"/>
+                      <path d="M24 7 28 16 26 45 24 56 21 44 20 16Z" fill="#cbd0d7"/>
+                      <path d="M24 8 24 54 21 43 20 16Z" fill="#eef0f3" opacity=".75"/>
+                      <path d="M12 12 15 34 19 45M36 12 33 34 29 45M7 23 12 41 22 55" fill="none" stroke="#e1e5ea" stroke-width="1.3" stroke-linecap="round"/>
+                      <path d="M18 14 24 18 30 14 28 23 24 26 20 23Z" fill="#555e69" stroke="#b8bfc8" stroke-width="1"/>
+                      <path d="m24 17 3 4-3 4-3-4Z" fill="#d9dee5"/>
+                    </symbol>
+                  </defs>
+                  <use href="#sim-block-shield-art"/>
+                </svg>
+                <div class="sim-block-fill" id="sim_block_fill" style="height:100%">
+                  <svg class="sim-block-shield" viewBox="0 0 48 64" focusable="false"><use href="#sim-block-shield-art"/></svg>
                 </div>
               </div>
               <span class="sim-block-value" id="sim_block_value">100</span>
@@ -2127,6 +2203,7 @@
               <option value="offline">离线测试</option>
             </select>
             <span id="sim_ai_provider_model">deterministic-fixture-v1</span>
+            <button type="button" class="sim-btn agent-provider-settings" data-agent-provider-settings>自定义接口</button>
           </div>
           <div class="sim-ai-input-wrap">
             <textarea id="sim_ai_question" rows="2" maxlength="16000" placeholder="问当前攻略、循环基线、时间轴或候选改动…"></textarea>
@@ -2900,7 +2977,7 @@
       s.onload = next; s.onerror = next;
       document.body.appendChild(s);
     }
-    var SCRIPTS = ['state.js?v=20261004-macrospeed1', 'macro-solidify.js?v=20261004-macrospeed1', 'app.js?v=20261004-macrospeed1', 'macro-alignment.js?v=20261004-macrospeed1', 'macro-layout.js?v=20261004-macrospeed1', 'macro-state-diff.js?v=20261004-macrospeed1', 'macro-draft-panes.js?v=20261004-macrospeed1', 'macro-repair.js?v=20261004-macrospeed1', 'macro-repair-group.js?v=20261004-macrospeed1', 'macro-repair-search.js?v=20261004-macrospeed1', 'macro-repair-panel.js?v=20261004-macrospeed1', 'macro-diagnostic.js?v=20261004-macrospeed1', 'macro-editor.js?v=20261004-macrospeed1', 'macro-assist.js?v=20261004-macrospeed1', 'loop-tabs.js?v=20261004-macrospeed1', 'agent.js?v=20261004-macrospeed1', 'assistant-shell.js?v=20261004-macrospeed1', 'harness-workspace.js?v=20261004-macrospeed1', 'macro-exact.js?v=20261004-macrospeed1'];
+    var SCRIPTS = ['state.js?v=20261004-macrospeed1', 'shield-reset.js?v=20261004-macrospeed1', 'skill-damage-description.js?v=20261004-macrospeed1', 'macro-solidify.js?v=20261004-macrospeed1', 'app.js?v=20261004-analysis1', 'macro-alignment.js?v=20261004-macrospeed1', 'macro-layout.js?v=20261004-macrospeed1', 'macro-state-diff.js?v=20261004-macrospeed1', 'macro-draft-panes.js?v=20261004-macrospeed1', 'macro-repair.js?v=20261004-macrospeed1', 'macro-repair-group.js?v=20261004-macrospeed1', 'macro-repair-search.js?v=20261004-macrospeed1', 'macro-repair-panel.js?v=20261004-macrospeed1', 'macro-diagnostic.js?v=20261004-macrospeed1', 'macro-editor.js?v=20261004-macrospeed1', 'macro-assist.js?v=20261004-macrospeed1', 'loop-tabs.js?v=20261004-macrospeed1', 'agent.js?v=20261004-analysis2', 'agent-provider-settings.js?v=20261004-macrospeed1', 'harness.js?v=20261004-macrospeed1', 'assistant-shell.js?v=20261004-analysis1', 'harness-workspace.js?v=20261004-macrospeed1', 'harness-run.js?v=20261004-macrospeed1', 'macro-exact.js?v=20261004-macrospeed1'];
     var go = function () { loadSeq(SCRIPTS); };
     try {
       fetch('/api/settings', { cache: 'no-store' })

@@ -12,7 +12,7 @@ $casesPath = Join-Path $repoRoot 'backend\tests\agent_model_eval\cases.json'
 if (-not $OutputPath) {
   $OutputPath = Join-Path $repoRoot 'backend\runs\agent-real-model-eval-latest.json'
 }
-$allowedTools = @(
+$allowedTools = @('lookup_skill_definitions', 
   'get_current_scenario',
   'search_knowledge_base',
   'simulate_scenario',

@@ -325,6 +325,12 @@ fn tool_error_response(
         ToolError::NoScenarioChanges { .. } => {
             (StatusCode::UNPROCESSABLE_ENTITY, "no_scenario_changes")
         }
+        ToolError::UnavailableCandidateAction { .. } => {
+            (StatusCode::UNPROCESSABLE_ENTITY, "unavailable_candidate_action")
+        }
+        ToolError::ConflictingCandidateTalents => {
+            (StatusCode::UNPROCESSABLE_ENTITY, "conflicting_candidate_talents")
+        }
         ToolError::TimelineDetailsUnavailable => (
             StatusCode::UNPROCESSABLE_ENTITY,
             "timeline_details_unavailable",

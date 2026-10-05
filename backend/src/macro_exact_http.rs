@@ -27,7 +27,6 @@ use tokio::{
 #[derive(Default)]
 pub struct Manager {
     current: Mutex<Option<Arc<Job>>>,
-    admission: tokio::sync::Mutex<()>,
 }
 struct Job {
     id: String,
@@ -269,9 +268,11 @@ pub async fn create(State(shared): State<SharedState>, Json(request): Json<Start
     if let Err(e) = request.validate() {
         return error(StatusCode::BAD_REQUEST, e);
     }
-    let _admission = shared.exact_jobs.admission.lock().await;
+    let _admission = shared.harness_jobs.admission.lock().await;
     if shared.exact_jobs.active()
-        || legacy_busy(&shared).await
+        || shared.harness_jobs.active()
+        || shared.harness_runs.active()
+        || crate::harness::http::legacy_busy(&shared).await
     {
         return error(
             StatusCode::CONFLICT,
@@ -515,41 +516,3 @@ async fn run_process(
 #[cfg(test)]
 #[path = "../tests/macro_exact/http.rs"]
 mod tests;
-
-pub(crate) async fn legacy_busy(shared: &SharedState) -> bool {
-    if shared.exact_jobs.active() { return true; }
-    if shared.optimizer.current.lock().await.is_some()
-        || shared.rl_train.current.lock().await.is_some()
-        || shared.rl_analyze.current.lock().await.is_some()
-        || shared.rl_pretrain.current.lock().await.is_some()
-    {
-        return true;
-    }
-    shared
-        .auto_search
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .running
-}
-
-/// Applied only to the legacy heavy-job start endpoints. Holding the same
-/// admission lock until a handler returns closes the check/start race.
-pub async fn legacy_admission(
-    State(shared): State<SharedState>,
-    request: axum::extract::Request,
-    next: axum::middleware::Next,
-) -> Response {
-    let _admission = shared.exact_jobs.admission.lock().await;
-    if legacy_busy(&shared).await {
-        // Consume a bounded POST body before an early HTTP/1 rejection. Dropping
-        // an unread request can reset the connection on Windows instead of
-        // delivering the structured 409 to the client.
-        let _ = tokio::time::timeout(
-            Duration::from_secs(2),
-            axum::body::to_bytes(request.into_body(), 2 * 1024 * 1024),
-        )
-        .await;
-        return error(StatusCode::CONFLICT, "已有计算任务正在运行，请先完成或取消该任务。");
-    }
-    next.run(request).await
-}

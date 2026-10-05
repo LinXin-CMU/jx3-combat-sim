@@ -15,6 +15,12 @@
   const LS_KEY_SHARED = 'jx3_shared_inputs';
   const LS_KEY_WORKFLOW = 'jx3_last_workflow';
 
+  function sharedInputsKey() {
+    const mount = typeof currentMount === 'object' ? currentMount : null;
+    const level = mount?.attribute_params?.level || 130;
+    return level === 130 ? LS_KEY_SHARED : `${LS_KEY_SHARED}_level${level}_${mount.mount}`;
+  }
+
   // ── 简易 sha1（同步）—— 用于 attrsHash ──
   // 用 Web Crypto subtle.digest 异步太麻烦，这里用快速的 djb2-hash 代替，
   // 够用于"判断两次属性快照是否一致"。
@@ -39,13 +45,13 @@
   //   { attrs: {...}, target: {...}, talents: [...], recipes: [...], delay: 0 }
   function saveSharedInputs(payload) {
     try {
-      localStorage.setItem(LS_KEY_SHARED, JSON.stringify(payload));
+      localStorage.setItem(sharedInputsKey(), JSON.stringify(payload));
     } catch (_) { /* quota */ }
   }
 
   function loadSharedInputs() {
     try {
-      const raw = localStorage.getItem(LS_KEY_SHARED);
+      const raw = localStorage.getItem(sharedInputsKey());
       return raw ? JSON.parse(raw) : null;
     } catch (_) { return null; }
   }

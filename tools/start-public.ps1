@@ -1,5 +1,15 @@
-param([string]$PrivatePath = (Join-Path $env:USERPROFILE '.jx3-public'))
+param([string]$PrivatePath = (Join-Path $env:USERPROFILE '.jx3-public'), [switch]$ForRecovery)
 $ErrorActionPreference = 'Stop'
+$lifecycleLock = [Threading.Mutex]::new($false, 'Global\Jx3PublicLifecycle')
+$lockHeld = $false
+try {
+try { $lockHeld = $lifecycleLock.WaitOne(30000) } catch [Threading.AbandonedMutexException] { $lockHeld = $true }
+if (-not $lockHeld) { throw 'Public lifecycle is busy.' }
+$disabledPath = Join-Path $PrivatePath 'disabled'
+if (Test-Path -LiteralPath $disabledPath) {
+  if ($ForRecovery) { throw 'Public deployment is manually disabled.' }
+  Move-Item -LiteralPath $disabledPath -Destination ($disabledPath + '-' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
+}
 $repo = Split-Path -Parent $PSScriptRoot
 $backend = Join-Path $repo 'backend'
 $exe = (Resolve-Path -LiteralPath (Join-Path $backend 'target/public-runtime/jx3-combat-sim.exe')).Path
@@ -43,3 +53,7 @@ $tunnel = Start-Process -FilePath $frpc -ArgumentList @('-c',('"'+(Join-Path $pr
 $state.frpc_pid=$tunnel.Id; $state.frpc_started=$tunnel.StartTime.ToUniversalTime().Ticks
 $state | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $private 'running.json')
 Write-Output 'Public router started on loopback 3006; Flash only. Local 3005 was not modified.'
+} finally {
+  if ($lockHeld) { $lifecycleLock.ReleaseMutex() }
+  $lifecycleLock.Dispose()
+}

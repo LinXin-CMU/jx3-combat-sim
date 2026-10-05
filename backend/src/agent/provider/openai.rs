@@ -116,7 +116,7 @@ impl OpenAiTransport {
 
     async fn post_json(&self, suffix: &str, body: &Value) -> Result<Vec<u8>, ProviderError> {
         let encoded = serde_json::to_vec(body).map_err(|_| ProviderError::invalid_request())?;
-        let response = self
+        let mut response = self
             .client
             .post(self.endpoint(suffix)?)
             .bearer_auth(&self.api_key)
@@ -133,12 +133,12 @@ impl OpenAiTransport {
         {
             return Err(ProviderError::response_too_large());
         }
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(|error| ProviderError::network(&error))?;
-        if bytes.len() > MAX_PROVIDER_RESPONSE_BYTES {
-            return Err(ProviderError::response_too_large());
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(|error| ProviderError::network(&error))? {
+            if bytes.len().saturating_add(chunk.len()) > MAX_PROVIDER_RESPONSE_BYTES {
+                return Err(ProviderError::response_too_large());
+            }
+            bytes.extend_from_slice(&chunk);
         }
         if !status.is_success() {
             return Err(ProviderError::classified_upstream_response(
@@ -146,7 +146,7 @@ impl OpenAiTransport {
                 &bytes,
             ));
         }
-        Ok(bytes.to_vec())
+        Ok(bytes)
     }
 }
 
@@ -155,6 +155,10 @@ pub struct OpenAiResponsesProvider {
 }
 
 impl OpenAiResponsesProvider {
+    pub(super) fn with_client(mut self, client: Client) -> Self {
+        self.transport.client = client;
+        self
+    }
     pub fn new(
         profile_id: String,
         model: String,
@@ -213,6 +217,10 @@ pub struct OpenAiChatProvider {
 }
 
 impl OpenAiChatProvider {
+    pub(super) fn with_client(mut self, client: Client) -> Self {
+        self.transport.client = client;
+        self
+    }
     #[cfg(test)]
     pub fn new(
         profile_id: String,

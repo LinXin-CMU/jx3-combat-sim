@@ -68,7 +68,7 @@ fn request(sequence: Vec<String>, talents: Vec<u32>) -> SimulateRequest {
             "crit_level": 54841.0, "crit_effect_level": 0.0,
             "overcome_level": 29480.0, "strain_level": 66031.0, "haste_level": 0.0
         },
-        "target": {"level": 134, "defense_bonus": 0.0, "damage_cof": 0.0},
+        "target": {"level": 54, "defense_bonus": 0.0, "damage_cof": 0.0},
         "network_delay": 0, "initial_rage": 0,
         "recipes": [], "equipment": {}, "team_buffs": [], "formation": null,
         "pre_releases": [], "pauses": [], "channel_ticks": {},
@@ -208,7 +208,7 @@ fn berserk_setters_clamp_and_invalidate_without_mutating_rage_or_block() {
 }
 
 #[test]
-fn test_server_removes_surplus_events_without_removing_equipment_attributes() {
+fn test_server_ignores_legacy_surplus_input_and_removes_events() {
     let fixture = Fixture::load();
     assert!(fixture.skills.iter().all(|s|
         !matches!(s.damage_kind, DamageKind::SurplusOnly) && s.surplus_coeff == 0.0));
@@ -229,7 +229,7 @@ fn test_server_removes_surplus_events_without_removing_equipment_attributes() {
     assert_eq!(without.total_damage.to_bits(), with.total_damage.to_bits());
     assert_eq!(without.fingerprint, with.fingerprint);
     assert!(with.timeline.iter().filter_map(|e| e.runtime_stats.as_ref())
-        .any(|stats| stats.surplus_value > 0.0), "equipment attribute still exists");
+        .all(|stats| stats.surplus_value == 0.0), "50级面板不再提供破招");
     req.lite = true;
     let lite = fixture.simulate(&req);
     assert_eq!(with.fingerprint, lite.fingerprint);
@@ -316,12 +316,12 @@ fn zhenyun_cost_thresholds_and_rejection_use_berserk() {
 }
 
 #[test]
-fn shenwei_followups_require_core_and_talent_and_expire_after_ninety_seconds() {
+fn innate_followups_require_core_and_expire_after_ninety_seconds() {
     let fixture = Fixture::load();
     let first = fixture.skill(ZHEN_YUN);
     let second = fixture.skill(30855);
     let third = fixture.skill(30856);
-    for talents in [vec![], vec![ZHEN_YUN], vec![SHEN_WEI]] {
+    for talents in [vec![], vec![SHEN_WEI]] {
         let mut player = fixture.player(talents);
         player.add_state_buff(combo_buff_id("阵云_2"), 1440);
         player.add_state_buff(combo_buff_id("阵云_3"), 1440);
@@ -331,7 +331,8 @@ fn shenwei_followups_require_core_and_talent_and_expire_after_ninety_seconds() {
     let mut without_shenwei = fixture.player(vec![ZHEN_YUN]);
     without_shenwei.apply_cast_effects(first);
     scripts::run_scripts(&mut without_shenwei, first, 0.0);
-    assert!(!without_shenwei.has_buff(combo_buff_id("阵云_2")));
+    assert!(without_shenwei.has_buff(combo_buff_id("阵云_2")));
+    assert!(without_shenwei.can_cast(second));
 
     let mut player = fixture.player(vec![ZHEN_YUN, SHEN_WEI]);
     player.apply_cast_effects(first);
@@ -488,7 +489,7 @@ fn test_server_macro_matches_each_zhenyun_stage_by_its_own_name() {
             ["阵云结晦", "月照连营", "雁门迢递"],
             ["30769", "30855", "30856"],
         ] {
-            let mut req = request(vec!["__macro__".to_string(); 3], vec![ZHEN_YUN, SHEN_WEI]);
+            let mut req = request(vec!["__macro__".to_string(); 3], vec![ZHEN_YUN]);
             req.macro_duration = Some(8.0);
             req.macro_text = Some(format!("{command} {}", names[0]));
             let only_first = fixture.simulate(&req);
@@ -515,14 +516,14 @@ fn test_server_macro_matches_each_zhenyun_stage_by_its_own_name() {
 #[test]
 fn macro_waits_for_berserk_regeneration_and_full_lite_stay_identical() {
     let fixture = Fixture::load();
-    let mut req = request(vec!["__macro__".to_string(); 3], vec![ZHEN_YUN, BU_GUI]);
-    req.macro_text = Some("/cast [berserk>=50] 阵云结晦".to_string());
+    let mut req = request(vec!["__macro__".to_string(); 30], vec![ZHEN_YUN, BU_GUI]);
+    req.macro_text = Some("/cast [berserk>=50] 阵云结晦\n/cast 月照连营\n/cast 雁门迢递".to_string());
     req.macro_duration = Some(41.0);
     let full = fixture.simulate(&req);
     let casts = full
         .timeline
         .iter()
-        .filter(|event| !event.triggered)
+        .filter(|event| !event.triggered && event.skill_id == ZHEN_YUN)
         .collect::<Vec<_>>();
     assert_eq!(casts.len(), 3);
     for (event, expected_time) in casts.iter().zip([0.0, 15.0, 40.0]) {
@@ -548,18 +549,18 @@ fn macro_waits_for_berserk_regeneration_and_full_lite_stay_identical() {
 fn sun_macro_waits_for_berserk_threshold_and_matches_existing_aliases() {
     let fixture = Fixture::load();
     for (threshold, expected_times) in [(50, vec![0.0, 15.0, 40.0]), (100, vec![0.0, 40.0])] {
-        let mut req = request(vec!["__macro__".to_string(); 3], vec![ZHEN_YUN, BU_GUI]);
+        let mut req = request(vec!["__macro__".to_string(); 30], vec![ZHEN_YUN, BU_GUI]);
         req.macro_duration = Some(41.0);
         let mut reference = None;
         for keyword in ["sun", "berserk", "baonu"] {
-            req.macro_text = Some(format!("/cast [{keyword}>={threshold}] 阵云结晦"));
+            req.macro_text = Some(format!("/cast [{keyword}>={threshold}] 阵云结晦\n/cast 月照连营\n/cast 雁门迢递"));
             req.lite = false;
             let full = fixture.simulate(&req);
             assert!(full.skipped.is_empty(), "{keyword}: {:?}", full.skipped);
             let casts = full
                 .timeline
                 .iter()
-                .filter(|event| !event.triggered)
+                .filter(|event| !event.triggered && event.skill_id == ZHEN_YUN)
                 .collect::<Vec<_>>();
             assert_eq!(casts.len(), expected_times.len());
             for (cast, time) in casts.iter().zip(&expected_times) {
@@ -632,6 +633,34 @@ fn energy_macro_casts_from_full_tiegu_block_with_or_without_jianren() {
                 Some(energy)
             );
             assert!(response.berserk_value.is_none());
+        }
+    }
+}
+
+
+#[test]
+fn september11_reset_modes_replay_identically_in_full_and_lite() {
+    use crate::shield_reset::ResetMode;
+    let fixture = Fixture::load();
+    for mode in [ResetMode::Cumulative, ResetMode::Random] {
+        let mut req = request(vec!["__macro__".into(); 200], vec![ZHEN_YUN, SHEN_WEI, 21281]);
+        req.macro_text = Some("/cast 盾压\n/cast 盾刀".into());
+        req.macro_duration = Some(60.0);
+        req.recipes = vec![4005, 4006, 4007, 4008];
+        req.hanjia_expectation = Some(mode == ResetMode::Cumulative);
+        req.dunya_reset_seed = 17;
+        let full = fixture.simulate(&req);
+        assert!(full.timeline.iter().filter(|e| !e.triggered && e.skill_id == 13045).count() > 8);
+        let replay = fixture.simulate(&req);
+        assert_eq!(full.fingerprint, replay.fingerprint);
+        req.lite = true;
+        let lite = fixture.simulate(&req);
+        assert_eq!(full.fingerprint, lite.fingerprint);
+        assert_eq!(full.total_damage.to_bits(), lite.total_damage.to_bits());
+        assert_eq!(full.fight_time.to_bits(), lite.fight_time.to_bits());
+        if mode == ResetMode::Random {
+            req.dunya_reset_seed = 18;
+            assert_ne!(full.fingerprint, fixture.simulate(&req).fingerprint);
         }
     }
 }

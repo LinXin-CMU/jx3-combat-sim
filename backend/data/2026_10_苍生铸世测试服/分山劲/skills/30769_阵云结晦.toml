@@ -1,11 +1,9 @@
-﻿id   = 30769
+id   = 30769
 name = "阵云结晦"
 icon = "https://icon.jx3box.com/icon/17157.png"
-description = "核心奇穴 / 消耗50或100暴怒，无独立调息 / 攻击系数5.33125或9.33125（已含档位增幅） / 非侠士增伤76%或195% / 神威解锁后续两段"
+description = "被动效果：“格挡值”替换为暴怒值。暴怒值上限为120点，非战斗状态下每秒恢复10点。\n\n主动效果：3段招式，消耗50点暴怒值对目标分别造成{{damage:阵云结晦}}→{{damage:月照连营}}→{{damage:雁门迢递}}无质外功伤害，对非侠士目标伤害提高76%，施展时若暴怒值达到100点，则改为消耗100点，使本次造成的伤害额外提高75%，对非侠士目标伤害提高至195%。"
 
 # 2026-09-08 官方首轮：第一重核心奇穴，无调息；仍保留原有公共调息。
-# 暴怒消耗与隐藏秘籍在统一施放链处理。未公布的基础系数按用户要求复用暗影千机。
-# 测试服公告未包含回复普通怒气；仅沿用未公布的伤害基础数据。
 
 stance          = "not_wall"
 rage_gain       = 0
@@ -31,7 +29,7 @@ duration = 0.5
 mode     = "check_and_trigger"
 haste    = true
 
-# 宏只需写一行"阵云结晦"，后端按连招状态自动重定向到二/三段
+# 手动轴可按母招式转段；宏须分别写阵云结晦、月照连营、雁门迢递。
 [[combo_follow]]
 requires_combo = "阵云_3"
 skill_id = 30856
@@ -44,7 +42,11 @@ skill_id = 30855
 rank           = 1
 name           = "阵云结晦"
 icon = "https://icon.jx3box.com/icon/17157.png"
-base_damage    = 73.0      # (72 + 74) / 2
-attack_coeff   = 5.33125 # 50暴怒；100暴怒为9.33125，由版本脚本按首段消耗切换。
+base_damage_range = [7.2, 7.5]
+attack_coeff = 0.5928529155408253
 weapon_coeff   = 1.0
 defense_ignore = 1.0
+
+[ranks.high_berserk_damage]
+base_damage_range = [7.2, 7.5]
+attack_coeff = 1.037666357447189

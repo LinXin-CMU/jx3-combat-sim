@@ -1718,6 +1718,11 @@ pub struct MountBaseStats {
 /// 唯一例外：`vitality_to_hp` 是直接小数（+N HP/体质，不走 /1024）。
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct MountConversions {
+    #[serde(default)]
+    pub level: u32,
+    #[serde(default)]
+    pub base_life_percent: f64,
+
     /// 身法 → 外功攻击（郭氏 /1024）。分山 1925 ≈ 1.88
     #[serde(default)]
     pub agility_to_attack: f64,
@@ -1770,6 +1775,7 @@ pub fn calculate(
     base_stats: &MountBaseStats,
     conversions: &MountConversions,
 ) -> CalcResponse {
+    let lp = crate::level_params::LevelParams::for_level(conversions.level);
     let mut acc = AttrAccum::new();
     let mut total_score: i64 = 0;
     let mut total_quality: i64 = 0;
@@ -1954,13 +1960,13 @@ pub fn calculate(
     }
 
     // ── 全角色基础（130 级人物默认主属性 + 系统给所有角色的基础防御）──
-    acc.add("atVitalityBase", PLAYER_BASE_VITALITY);
-    acc.add("atStrengthBase", PLAYER_BASE_STRENGTH);
-    acc.add("atAgilityBase", PLAYER_BASE_AGILITY);
-    acc.add("atSpiritBase", PLAYER_BASE_SPIRIT);
-    acc.add("atSpunkBase", PLAYER_BASE_SPUNK);
-    acc.add("atPhysicsShieldBase", PLAYER_BASE_PHYSICS_SHIELD);
-    acc.add("atMagicShield", PLAYER_BASE_MAGIC_SHIELD);
+    acc.add("atVitalityBase", lp.base_vitality);
+    acc.add("atStrengthBase", lp.base_strength);
+    acc.add("atAgilityBase", lp.base_agility);
+    acc.add("atSpiritBase", lp.base_spirit);
+    acc.add("atSpunkBase", lp.base_spunk);
+    acc.add("atPhysicsShieldBase", lp.base_shield);
+    acc.add("atMagicShield", lp.base_shield);
 
     // ── 心法固定增益（从 school.toml [base_stats] 注入；req.mount 仅作记录，不再决定数值）──
     let _mount_id = req.mount; // 保留兼容字段，未来可能做 sanity check
@@ -2024,10 +2030,12 @@ pub fn calculate(
     // 每点全能 = 0.5 破招 + 1.5 无双 + 1 化劲（每项单独 floor）
     let pvx = acc.get("atPVXAllRound");
     if pvx > 0.0 {
-        acc.add("atSurplusValueBase", (pvx * PVX_TO_SURPLUS).floor());
-        acc.add("atStrainBase", (pvx * PVX_TO_STRAIN).floor());
+        acc.add("atSurplusValueBase", (pvx * lp.pvx_to_surplus).floor());
+        acc.add("atStrainBase", (pvx * lp.pvx_to_strain).floor());
         acc.add("atDecriticalDamagePowerBase", (pvx * PVX_TO_DECRIT).floor());
     }
+
+    if !lp.has_surplus { acc.map.insert("atSurplusValueBase".into(), 0.0); }
 
     // ── 主属性百分比加成 ──
     let pct_pairs = [
@@ -2074,15 +2082,15 @@ pub fn calculate(
     let vitality = acc.get("atVitalityBase");
     acc.add(
         "atPhysicsCriticalStrike",
-        (agility * SYS_AGILITY_TO_CRIT).floor(),
+        (agility * lp.agility_to_crit).floor(),
     );
     acc.add(
         "atPhysicsAttackPowerBase",
-        (strength * SYS_STRENGTH_TO_ATTACK).floor(),
+        (strength * lp.strength_to_attack).floor(),
     );
     acc.add(
         "atPhysicsOvercomeBase",
-        (strength * SYS_STRENGTH_TO_OVERCOME).floor(),
+        (strength * lp.strength_to_overcome).floor(),
     );
 
     // ── 攻击百分比加成（在心法转化之前算，心法转化结果不进百分比）──
@@ -2112,7 +2120,7 @@ pub fn calculate(
     // ── 加速百分比 ──
     let haste_base = acc.get("atHasteBase");
     let haste_pct = acc.get("atHasteBasePercentAdd");
-    let haste_rate = (haste_base / LP_HASTE + haste_pct / 1024.0).min(0.25);
+    let haste_rate = (haste_base / lp.haste + haste_pct / 1024.0).min(0.25);
 
     // ── 组装结果（所有整数字段 floor 栅栏，防止浮点误差导致前端显示 8 变成 9） ──
     let f = |slot: &str| acc.get(slot).floor();
@@ -2157,7 +2165,7 @@ pub fn calculate(
     // 气血：全心法基础 + 体质×10（系统）+ 体质×心法附加 + 装备/镶嵌的 atMaxLifeAdditional
     // 每项系数单独 floor
     let final_vit = acc.get("atVitalityBase");
-    let max_life = PLAYER_BASE_MAX_LIFE
+    let max_life = lp.base_life
         + (final_vit * SYS_VITALITY_TO_HP).floor()
         + (final_vit * conversions.vitality_to_hp).floor()
         + acc.get("atMaxLifeAdditional");
@@ -2166,21 +2174,22 @@ pub fn calculate(
     // 面板数值：整数字段 floor；百分比保留 f64 给前端格式化
     let panel = PanelAttrs {
         physics_attack_power: final_attack.floor(),
-        crit_rate: crit / LP_CRIT,
-        crit_effect: 1.75 + crit_eff / LP_CRIT_EFF,
-        overcome_rate: overcome / LP_OVERCOME,
-        strain_rate: strain / LP_STRAIN,
+        crit_rate: crit / lp.crit,
+        crit_effect: 1.75 + crit_eff / lp.crit_effect,
+        overcome_rate: overcome / lp.overcome,
+        strain_rate: strain / lp.strain,
         haste_rate,
         surplus_value: acc.get("atSurplusValueBase").floor(),
-        physics_shield_rate: (phys_shield / (phys_shield + DEFENSE_NONLINEAR)).min(0.75),
-        magic_shield_rate: (mag_shield / (mag_shield + DEFENSE_NONLINEAR)).min(0.75),
-        parry_rate: parry / (parry + PARRY_NONLINEAR) + 0.03,
+        physics_shield_rate: (phys_shield / (phys_shield + lp.defense)).min(0.75),
+        magic_shield_rate: (mag_shield / (mag_shield + lp.defense)).min(0.75),
+        parry_rate: parry / (parry + lp.parry) + 0.03,
         parry_value: acc.get("atParryValueBase").floor(),
-        dodge_rate: dodge / (dodge + DODGE_NONLINEAR),
-        toughness_rate: toughness / LP_TOUGHNESS,
-        max_life: max_life.floor(),
+        dodge_rate: dodge / (dodge + lp.dodge),
+        toughness_rate: toughness / lp.toughness,
+        max_life: (max_life * (1.0 + conversions.base_life_percent)).floor(),
         // 化劲：level / (level + 33046.2) + 102/1024（基础 9.96%）
-        decritical_damage_rate: decrit_level / (decrit_level + DECRIT_NONLINEAR) + DECRIT_BASE_RATE,
+        decritical_damage_rate: decrit_level / (decrit_level + lp.decritical)
+            + if lp.level == 50 && conversions.base_life_percent > 0.0 { 0.0 } else { DECRIT_BASE_RATE },
         agility: acc.get("atAgilityBase").floor(),
         strength: acc.get("atStrengthBase").floor(),
         vitality: final_vit.floor(),
@@ -2679,6 +2688,7 @@ pub mod search_calc {
         base_stats: &MountBaseStats,
         conversions: &MountConversions,
     ) -> InitCtx {
+        let lp = crate::level_params::LevelParams::for_level(conversions.level);
         let mut accum = [0.0_f64; N_ATTRS];
         let mut set_counts: HashMap<u32, u32> = HashMap::new();
         let mut effect_ids: HashSet<u32> = HashSet::new();
@@ -2703,13 +2713,13 @@ pub mod search_calc {
         }
 
         // 2. 全角色基础属性
-        accum[ATTR_VITALITY_BASE] += PLAYER_BASE_VITALITY;
-        accum[ATTR_STRENGTH_BASE] += PLAYER_BASE_STRENGTH;
-        accum[ATTR_AGILITY_BASE] += PLAYER_BASE_AGILITY;
-        accum[ATTR_SPIRIT_BASE] += PLAYER_BASE_SPIRIT;
-        accum[ATTR_SPUNK_BASE] += PLAYER_BASE_SPUNK;
-        accum[ATTR_PHYSICS_SHIELD_BASE] += PLAYER_BASE_PHYSICS_SHIELD;
-        accum[ATTR_MAGIC_SHIELD] += PLAYER_BASE_MAGIC_SHIELD;
+        accum[ATTR_VITALITY_BASE] += lp.base_vitality;
+        accum[ATTR_STRENGTH_BASE] += lp.base_strength;
+        accum[ATTR_AGILITY_BASE] += lp.base_agility;
+        accum[ATTR_SPIRIT_BASE] += lp.base_spirit;
+        accum[ATTR_SPUNK_BASE] += lp.base_spunk;
+        accum[ATTR_PHYSICS_SHIELD_BASE] += lp.base_shield;
+        accum[ATTR_MAGIC_SHIELD] += lp.base_shield;
 
         // 3. 心法 base_stats
         if base_stats.physics_attack_power != 0.0 {
@@ -2803,6 +2813,7 @@ pub mod search_calc {
         live_diamond_count: u32,
         live_diamond_level: u32,
     ) -> RawAttrs {
+        let lp = crate::level_params::LevelParams::for_level(ctx.mount_conv.level);
         let mut a = *live_accum;
 
         // 套装件数加成
@@ -2842,10 +2853,12 @@ pub mod search_calc {
         // 2) PVX 全能展开
         let pvx = a[ATTR_PVX_ALL_ROUND];
         if pvx > 0.0 {
-            a[ATTR_SURPLUS_VALUE_BASE] += (pvx * 0.5).floor();
-            a[ATTR_STRAIN_BASE] += (pvx * 1.5).floor();
+            a[ATTR_SURPLUS_VALUE_BASE] += (pvx * lp.pvx_to_surplus).floor();
+            a[ATTR_STRAIN_BASE] += (pvx * lp.pvx_to_strain).floor();
             a[ATTR_DECRIT_DAMAGE_BASE] += (pvx * 1.0).floor();
         }
+
+        if !lp.has_surplus { a[ATTR_SURPLUS_VALUE_BASE] = 0.0; }
 
         // 3) 主属性百分比
         let pct_pairs = [
@@ -2889,9 +2902,9 @@ pub mod search_calc {
         let agility = a[ATTR_AGILITY_BASE];
         let strength = a[ATTR_STRENGTH_BASE];
         let vitality = a[ATTR_VITALITY_BASE];
-        a[ATTR_PHYSICS_CRITICAL_STRIKE] += (agility * SYS_AGILITY_TO_CRIT).floor();
-        a[ATTR_PHYSICS_ATTACK_POWER_BASE] += (strength * SYS_STRENGTH_TO_ATTACK).floor();
-        a[ATTR_PHYSICS_OVERCOME_BASE] += (strength * SYS_STRENGTH_TO_OVERCOME).floor();
+        a[ATTR_PHYSICS_CRITICAL_STRIKE] += (agility * lp.agility_to_crit).floor();
+        a[ATTR_PHYSICS_ATTACK_POWER_BASE] += (strength * lp.strength_to_attack).floor();
+        a[ATTR_PHYSICS_OVERCOME_BASE] += (strength * lp.strength_to_overcome).floor();
 
         // 7) 攻击百分比
         let atk_pct = a[ATTR_PHYSICS_ATTACK_POWER_PCT];

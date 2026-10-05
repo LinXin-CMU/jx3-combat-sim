@@ -38,7 +38,7 @@ pub fn effective_rage_cost(player: &Player, _skill: &SkillSpec) -> u32 {
 }
 
 /// 按本次实际消耗的怒气选择附加的隐藏秘籍 ID
-/// 25/10怒（最低段）不加成；35/20怒 +20%；以此类推
+/// 25/10怒（最低段）不加成；每额外10怒 +20%，嗜血替换为 +30%；以此类推
 pub fn runtime_recipes(player: &Player) -> Vec<u32> {
     let cost = player.last_rage_cost;
     let segs = segments(player);
@@ -50,6 +50,9 @@ pub fn runtime_recipes(player: &Player) -> Vec<u32> {
         c if c == segs[4] => 4,
         _ => 0,
     };
+    if player.has_talent(21281) && tier > 0 {
+        return vec![99430 + tier];
+    }
     match tier {
         1 => vec![99035],
         2 => vec![99045],

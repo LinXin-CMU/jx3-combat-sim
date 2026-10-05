@@ -1,4 +1,4 @@
-﻿id   = 37239
+id   = 37239
 name = "麾远"
 icon = "https://icon.jx3box.com/icon/21953.png"
 passive = true
@@ -14,7 +14,7 @@ requires_talent = 37239
 rank           = 1
 name           = "麾远"
 icon = "https://icon.jx3box.com/icon/21953.png"
-base_damage    = 82.5      # (80 + 85) / 2
-attack_coeff   = 2.97500
+base_damage_range = [8.0, 9.0]
+attack_coeff = 0.33013497641487927
 weapon_coeff   = 1.0
 defense_ignore = 0.3

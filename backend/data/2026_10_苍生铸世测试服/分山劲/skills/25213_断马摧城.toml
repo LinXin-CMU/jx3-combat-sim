@@ -1,7 +1,7 @@
 id   = 25213
 name = "断马摧城"
 icon = "https://icon.jx3box.com/icon/14087.png"
-description = "擎盾 / 奇穴 / 30秒CD / 举盾锤击范围目标，造成高额外功伤害并回复20怒"
+description = "回复20点怒气，举盾对自身8尺范围最多5个目标造成一次锤击，造成{{damage:断马摧城}}无质外功伤害并使其被击倒5秒，“分山劲”心法下该伤害提高100%。"
 
 stance          = "shield"
 rage_cost       = 0
@@ -36,7 +36,7 @@ haste    = false
 rank         = 1
 name         = "断马摧城"
 icon = "https://icon.jx3box.com/icon/14087.png"
-base_damage  = 61
+base_damage_range = [12.0, 12.4]
 # 2026 正式服：分山劲系数
-attack_coeff = 16.78125
+attack_coeff = 1.8661313929977912
 weapon_coeff = 0

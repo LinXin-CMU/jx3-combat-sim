@@ -7,6 +7,8 @@
 })(typeof window !== 'undefined' ? window : null, function () {
   'use strict';
   const STORAGE = 'jx3_assistant_geometry_v1';
+  // Keep autonomous experiments available in source while hiding their UI entry.
+  const VISIBLE_MODES = ['analysis', 'exact'];
   const SIGIL = `<svg viewBox="0 0 32 32" fill="none" aria-hidden="true" focusable="false"><path d="M16 3 27 7v8c0 7-6.5 12-11 15C11.5 27 5 22 5 15V7L16 3Z" fill="currentColor" fill-opacity=".08" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="m16 7 2 4v9l-2 4-2-4v-9l2-4Z" fill="currentColor"/><path d="M8 12h3l2 3m11-3h-3l-2 3M8.5 19l3 3m12-3-3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
   function fit(rect, viewport) {
@@ -37,12 +39,11 @@
     shell.setAttribute('aria-label', '苍云器灵助手');
     shell.innerHTML = `<div class="assistant-resize-left" role="separator" aria-label="调整助手宽度" aria-orientation="vertical" tabindex="0"></div>
       <header class="assistant-handle"><div class="assistant-brand"><span class="assistant-sigil" aria-hidden="true">${SIGIL}</span><div><strong>苍云器灵</strong><span>把想法变成可验证的方案</span></div></div><div class="assistant-window-actions"><button type="button" data-assistant-reset title="恢复侧栏位置" aria-label="恢复助手位置">↗</button><button type="button" data-assistant-close title="收起，后台任务继续" aria-label="收起助手">−</button></div></header>
-      <div class="assistant-tabs" role="tablist" aria-label="助手模式"><button type="button" id="assistant_tab_harness" role="tab" aria-selected="true" aria-controls="assistant_harness_panel" data-assistant-mode="harness"><span>武学助手</span><small>自主实验</small></button><button type="button" id="assistant_tab_analysis" role="tab" aria-selected="false" aria-controls="assistant_analysis_panel" data-assistant-mode="analysis"><span>AI 分析</span><small>对话与诊断</small></button></div>
-      <section id="assistant_harness_panel" class="assistant-panel" role="tabpanel" aria-labelledby="assistant_tab_harness"></section>
+      <div class="assistant-tabs" role="tablist" aria-label="助手模式"><button type="button" id="assistant_tab_harness" role="tab" aria-selected="false" hidden aria-controls="assistant_harness_panel" data-assistant-mode="harness"><span>武学助手</span><small>自主实验</small></button><button type="button" id="assistant_tab_analysis" role="tab" aria-selected="true" aria-controls="assistant_analysis_panel" data-assistant-mode="analysis"><span>AI 分析</span><small>对话与诊断</small></button></div>
+      <section id="assistant_harness_panel" class="assistant-panel" role="tabpanel" aria-labelledby="assistant_tab_harness" hidden></section>
       <section id="assistant_exact_panel" class="assistant-panel" role="tabpanel" aria-labelledby="assistant_tab_exact" hidden></section>
-      <section id="assistant_analysis_panel" class="assistant-panel assistant-analysis" role="tabpanel" aria-labelledby="assistant_tab_analysis" hidden></section>
+      <section id="assistant_analysis_panel" class="assistant-panel assistant-analysis" role="tabpanel" aria-labelledby="assistant_tab_analysis"></section>
       <div class="assistant-resize-corner" aria-hidden="true"></div>`;
-    shell.querySelector('#assistant_tab_harness').hidden = true;
     const ball = doc.createElement('button');
     const exactTab = doc.createElement('button');
     exactTab.type = 'button'; exactTab.id = 'assistant_tab_exact'; exactTab.setAttribute('data-assistant-mode', 'exact');
@@ -60,7 +61,7 @@
     if (legacy) { shell.querySelector('#assistant_analysis_panel').append(legacy); legacy.classList.add('assistant-embedded'); }
     const oldBall = doc.getElementById('sim_ai_fab'); if (oldBall) oldBall.hidden = true;
     let saved = {}; try { saved = JSON.parse(root.localStorage.getItem(STORAGE) || '{}') || {}; } catch (_) {}
-    let rect, position, mode = 'exact', opened = false, suppressClick = false;
+    let rect, position, mode = 'analysis', opened = false, suppressClick = false;
     const viewport = () => ({ width: root.innerWidth, height: root.innerHeight });
     const place = () => {
       rect = fit(rect || saved.panel || {}, viewport()); position = fitBall(position || saved.ball || {}, viewport());
@@ -70,7 +71,7 @@
     };
     const save = () => { try { root.localStorage.setItem(STORAGE, JSON.stringify({ panel: rect, ball: position })); } catch (_) {} };
     function select(next) {
-      mode = ['harness', 'analysis', 'exact'].includes(next) ? next : 'harness'; shell.dataset.mode = mode;
+      mode = VISIBLE_MODES.includes(next) ? next : 'analysis'; shell.dataset.mode = mode;
       shell.querySelectorAll('[data-assistant-mode]').forEach(tab => {
         const selected = tab.dataset.assistantMode === mode;
         tab.setAttribute('aria-selected', String(selected)); tab.tabIndex = selected ? 0 : -1;
@@ -126,14 +127,14 @@
     });
     shell.querySelectorAll('[data-assistant-mode]').forEach(tab => {
       tab.addEventListener('click', () => select(tab.dataset.assistantMode));
-      tab.addEventListener('keydown', event => { if (['ArrowLeft', 'ArrowRight'].includes(event.key)) { event.preventDefault(); const modes = ['analysis', 'exact', 'harness']; select(modes[(modes.indexOf(mode) + (event.key === 'ArrowRight' ? 1 : 2)) % 3]); doc.getElementById(`assistant_tab_${mode}`).focus(); } });
+      tab.addEventListener('keydown', event => { if (['ArrowLeft', 'ArrowRight'].includes(event.key)) { event.preventDefault(); const modes = VISIBLE_MODES; select(modes[(modes.indexOf(mode) + (event.key === 'ArrowRight' ? 1 : modes.length - 1)) % modes.length]); doc.getElementById(`assistant_tab_${mode}`).focus(); } });
     });
     shell.querySelector('[data-assistant-close]').addEventListener('click', close);
     shell.querySelector('[data-assistant-reset]').addEventListener('click', () => { rect = fit({}, viewport()); place(); save(); });
     doc.addEventListener('keydown', event => { if (event.key === 'Escape' && opened && !doc.querySelector('dialog[open],.modal-overlay[style*="display: flex"]')) close(); });
     const openFromButton = (event, button) => {
       if (event._assistantOpened || !button) return;
-      event._assistantOpened = true; open(button.dataset.assistantOpen || 'harness', true);
+      event._assistantOpened = true; open(button.dataset.assistantOpen || 'analysis', true);
     };
     // Existing navigation menus stop bubbling after choosing a page.
     doc.querySelectorAll('[data-assistant-open]').forEach(button => button.addEventListener('click', event => openFromButton(event, button)));
@@ -150,6 +151,7 @@
       observer.observe(legacy, { childList: true, subtree: true });
     }
     root.dispatchEvent(new root.CustomEvent('jx3-assistant-ready'));
+    if (root.location?.hash === '#page-harness') open('analysis');
   }
   return { fit, fitBall, resize, mount };
 });

@@ -1,4 +1,5 @@
 mod berserk;
+pub mod shield_reset;
 use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
 use axum::{
     extract::{Json, State},
@@ -18,9 +19,13 @@ use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::ServeDir;
 
 pub mod agent;
+pub mod harness;
 mod auth;
 mod buffs;
 pub mod equip;
+pub mod level_params;
+mod attribute_storage;
+use level_params::LevelParams;
 pub mod equip_effects;
 pub mod expectation;
 pub mod macro_assist;
@@ -41,6 +46,9 @@ mod scripts;
 #[cfg(test)]
 #[path = "../tests/cangsheng/resource_state.rs"]
 mod cangsheng_tests;
+#[cfg(test)]
+#[path = "../tests/macro_assist/snapshot.rs"]
+mod macro_snapshot_tests;
 
 pub use buffs::*;
 pub use equip_effects::*;
@@ -108,6 +116,8 @@ fn default_major() -> f64 {
 /// 计算后的战斗属性（含 buff/秘籍聚合后的最终值）
 #[derive(Debug, Serialize, Clone)]
 pub struct CombatStats {
+    #[serde(skip)]
+    pub level: u32,
     pub shen_fa: f64,
     pub panel_attack: f64,   // 最终外功面板攻击
     pub magical_attack: f64, // 最终内功面板攻击
@@ -310,6 +320,11 @@ struct SkillRankConfig {
     icon: Option<String>,
     #[serde(default)]
     base_damage: f64,
+    /// 已配置范围时，计算链使用范围均值。
+    #[serde(default)]
+    base_damage_range: Option<[f64; 2]>,
+    #[serde(default)]
+    high_berserk_damage: Option<DamageParameters>,
     #[serde(default)]
     attack_coeff: f64,
     #[serde(default)]
@@ -341,6 +356,12 @@ struct SkillRankConfig {
 }
 
 /// 内存中的技能规格
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct DamageParameters {
+    pub base_damage_range: [f64; 2],
+    pub attack_coeff: f64,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct SkillSpec {
     pub skill_id: u32,
@@ -351,6 +372,10 @@ pub struct SkillSpec {
     pub icon: String,
     pub damage_kind: DamageKind,
     pub base_damage: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_damage_range: Option<[f64; 2]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub high_berserk_damage: Option<DamageParameters>,
     pub attack_coeff: f64,
     pub weapon_coeff: f64,
     pub defense_ignore: f64,
@@ -454,8 +479,11 @@ impl Default for GameVersion {
 /// 从 school.toml 注入 Player（Phase 2）；当前全部默认分山劲值
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct MountConstants {
+    pub level: u32,
     pub shenfa_to_attack: f64,        // 身法 → 外功攻击
     pub shenfa_to_crit: f64,          // 身法 → 外功会心等级
+    pub shenfa_to_parry: f64,
+    pub shenfa_to_parry_value: f64,
     pub lidao_to_attack: f64,         // 力道 → 外功攻击
     pub lidao_to_overcome: f64,       // 力道 → 外功破防
     pub yuanqi_to_attack: f64,        // 元气 → 内功攻击
@@ -469,8 +497,11 @@ pub struct MountConstants {
 impl MountConstants {
     pub fn fenshanjin_default() -> Self {
         MountConstants {
+            level: 130,
             shenfa_to_attack: 1.88,
             shenfa_to_crit: 0.9,
+            shenfa_to_parry: 0.0,
+            shenfa_to_parry_value: 0.0,
             lidao_to_attack: 0.163,
             lidao_to_overcome: 0.3,
             yuanqi_to_attack: 0.181,
@@ -483,8 +514,11 @@ impl MountConstants {
     }
     pub fn tieguyi_default() -> Self {
         MountConstants {
+            level: 130,
             shenfa_to_attack: 0.0, // 铁骨衣身法不转外攻
             shenfa_to_crit: 0.9,
+            shenfa_to_parry: 0.0,
+            shenfa_to_parry_value: 0.0,
             lidao_to_attack: 0.163,
             lidao_to_overcome: 0.3,
             yuanqi_to_attack: 0.181,
@@ -610,10 +644,14 @@ pub fn load_school_toml(
 > {
     let path = school_toml_path(version, mount);
     let text = std::fs::read_to_string(&path).map_err(|e| format!("read {}: {}", path, e))?;
-    let s: SchoolToml = toml::from_str(&text).map_err(|e| format!("parse {}: {}", path, e))?;
+    let mut s: SchoolToml = toml::from_str(&text).map_err(|e| format!("parse {}: {}", path, e))?;
+    s.mount_conversions.level = level_params::player_level(version);
     let c = MountConstants {
+        level: level_params::player_level(version),
         shenfa_to_attack: s.constants.shenfa_to_attack,
         shenfa_to_crit: s.constants.shenfa_to_crit,
+        shenfa_to_parry: s.mount_conversions.agility_to_parry / 1024.0,
+        shenfa_to_parry_value: s.mount_conversions.agility_to_parry_value / 1024.0,
         lidao_to_attack: s.constants.lidao_to_attack,
         lidao_to_overcome: s.constants.lidao_to_overcome,
         yuanqi_to_attack: s.constants.yuanqi_to_attack,
@@ -707,8 +745,14 @@ fn macro_save_path() -> std::path::PathBuf {
     user_data_path("macros.json")
 }
 
-fn attrs_save_path(mount: Mount) -> std::path::PathBuf {
-    user_data_path(&format!("attrs_{}.json", mount_dir_name(mount)))
+fn attrs_prefix(version: GameVersion, mount: Mount) -> String {
+    let level = level_params::player_level(version);
+    if level == 130 { format!("attrs_{}", mount_dir_name(mount)) }
+    else { format!("attrs_level{}_{}", level, mount_dir_name(mount)) }
+}
+
+fn attrs_save_path(version: GameVersion, mount: Mount) -> std::path::PathBuf {
+    user_data_path(&format!("{}.json", attrs_prefix(version, mount)))
 }
 
 /// userdata 根目录。进程隔离时由 Router 通过 `JX3_USERDATA_DIR` 给每个 worker 指定独立目录，
@@ -789,8 +833,12 @@ const FRAMES_PER_SEC: u32 = 16;
 
 /// 加速阈值算法：根据原始帧数和加速等级计算实际帧数
 pub fn get_actual_frames(original_frames: u32, haste_level: u32) -> u32 {
+    get_actual_frames_at_level(original_frames, haste_level, 130)
+}
+
+pub fn get_actual_frames_at_level(original_frames: u32, haste_level: u32, level: u32) -> u32 {
     let num = 1024u64 * original_frames as u64;
-    let den = (1024u64 * haste_level as u64) / LP_HASTE as u64 + 1024;
+    let den = (1024.0 * haste_level as f64 / LevelParams::for_level(level).haste).floor() as u64 + 1024;
     (num / den) as u32
 }
 
@@ -802,11 +850,15 @@ pub fn get_actual_frames(original_frames: u32, haste_level: u32) -> u32 {
 /// 自动停在 `haste_max >= cap` 之处（cap 默认 50000，覆盖 130 级合理 haste 上限）。
 /// 配装搜索把"目标加速段"作为硬约束 → 直接读这表的 `(haste_min, haste_max)`。
 pub fn haste_tier_boundaries(original_frames: u32, cap: u32) -> Vec<(u32, u32, u32, u32)> {
+    haste_tier_boundaries_at_level(original_frames, cap, 130)
+}
+
+pub fn haste_tier_boundaries_at_level(original_frames: u32, cap: u32, level: u32) -> Vec<(u32, u32, u32, u32)> {
     let mut out: Vec<(u32, u32, u32, u32)> = Vec::new();
     let mut prev_actual = u32::MAX;
     let mut prev_min = 0u32;
     for h in 0..=cap {
-        let a = get_actual_frames(original_frames, h);
+        let a = get_actual_frames_at_level(original_frames, h, level);
         if a != prev_actual {
             if prev_actual != u32::MAX {
                 let tier = original_frames.saturating_sub(prev_actual);
@@ -838,6 +890,10 @@ fn frames_to_sec(frames: u32) -> f64 {
 /// 各等级目标基础防御等级
 fn target_base_defense(level: u32) -> f64 {
     match level {
+        51 => 2791.0,
+        52 => 3841.0,
+        53 => 6399.0,
+        54 => 6592.0,
         131 => 33_338.0,
         132 => 46_901.0,
         133 => 79_721.0,
@@ -848,14 +904,7 @@ fn target_base_defense(level: u32) -> f64 {
 
 /// 各等级防御转化系数
 fn defense_level_param(level: u32) -> f64 {
-    match level {
-        130 => 126_007.20,
-        131 => 133_357.62,
-        132 => 140_708.04,
-        133 => 148_058.46,
-        134 => 155_408.88,
-        _ => 126_007.20,
-    }
+    LevelParams::for_level(level).defense
 }
 
 // calc_defense_rate 已合并到 calc_defense_rate_with_ignore（伤害链 Step 4 的同一份实现）
@@ -1072,7 +1121,7 @@ pub fn collect_recipes_indexed<'a>(
             s.extend(player.active_recipes.iter().copied());
             s.extend(player.buff_recipes.keys().copied());
             if player.has_talent(21281) {
-                s.insert(99240);
+                if player.version != GameVersion::CangShengZhuShiTest { s.insert(99240); }
                 s.insert(99241);
             }
             if player.has_talent(14838) {
@@ -1160,9 +1209,9 @@ pub fn collect_recipes<'a>(
     let mut ids: HashSet<u32> = player.active_recipes.iter().copied().collect();
     ids.extend(player.buff_recipes.keys().copied());
     ids.extend(runtime_extra.iter().copied());
-    // 奇穴 21281「嗜血」常驻激活 99240（绝刀+40%）+ 99241（双会），不依赖 buff
+    // 嗜血双会常驻；99240固定增伤仅旧版使用，测试服改为运行时怒气档秘籍。
     if player.has_talent(21281) {
-        ids.insert(99240);
+        if player.version != GameVersion::CangShengZhuShiTest { ids.insert(99240); }
         ids.insert(99241);
     }
     // 奇穴 14838「刀煞」常驻激活 99242（绝刀+破·绝刀无视 100% 外功防御）
@@ -1202,6 +1251,7 @@ pub fn build_runtime_stats(
     slots: &AttribSlots,
     constants: &MountConstants,
 ) -> CombatStats {
+    let lp = LevelParams::for_level(constants.level);
     // 主属性增量重算（仅用于 buff 加主属性时）
     // 用户输入的面板已含基础主属性的转化，所以这里只算"buff 多给的主属性"带来的增量
     let extra_strength =
@@ -1221,22 +1271,23 @@ pub fn build_runtime_stats(
         extra_vitality_raw
     };
 
-    // 外功攻击：基础攻击 + 身法×shenfa_to_attack（心法常量） + 体质×vitality_to_attack（铁骨衣） + buff 加成 + 力道增量×lidao_to_attack
     let final_vitality = attr.vitality + extra_vitality;
+    let converted_delta = |base: f64, extra: f64, coef: f64| {
+        if lp.level == 50 { ((base + extra) * coef).floor() - (base * coef).floor() }
+        else { (extra * coef).floor() }
+    };
+    let final_shenfa = if lp.level == 50 { attr.shen_fa + extra_shenfa } else { attr.shen_fa };
+    let mount_attack = (final_shenfa * constants.shenfa_to_attack).floor()
+        + (final_vitality * constants.vitality_to_attack).floor();
     let mut panel_attack = attr.base_attack
-        + (attr.shen_fa * constants.shenfa_to_attack).floor()
-        + (final_vitality * constants.vitality_to_attack).floor()
         + slot(slots, AttribField::PhysicsAttackPowerBase)
-        + (extra_strength * constants.lidao_to_attack).floor();
-    // 铁骨气劲：体质→攻击（0.198 或 0.594）
+        + converted_delta(attr.li_dao, extra_strength, constants.lidao_to_attack);
     let vta = slot(slots, AttribField::VitalityToAttackCof);
-    if vta != 0.0 {
-        panel_attack += (final_vitality * vta).floor();
-    }
+    if vta != 0.0 { panel_attack += (final_vitality * vta).floor(); }
+    if lp.level != 50 { panel_attack += mount_attack; }
     let pct = slot(slots, AttribField::PhysicsAttackPowerPercent);
-    if pct != 0.0 {
-        panel_attack += (panel_attack * pct / 1024.0).floor();
-    }
+    if pct != 0.0 { panel_attack += (panel_attack * pct / 1024.0).floor(); }
+    if lp.level == 50 { panel_attack += mount_attack; }
 
     // 内功攻击（同理）
     let magical_attack =
@@ -1245,18 +1296,18 @@ pub fn build_runtime_stats(
     // 会心等级：面板 + buff 加算 + 主属性增量
     let crit_level = attr.crit_level
         + slot(slots, AttribField::PhysicsCriticalStrike)
-        + (extra_shenfa * constants.shenfa_to_crit).floor();
-    let crit_rate = (crit_level / LP_CRIT).clamp(0.0, 1.0);
+        + converted_delta(attr.shen_fa, extra_shenfa, constants.shenfa_to_crit);
+    let crit_rate = (crit_level / lp.crit).clamp(0.0, 1.0);
 
     // 会心效果等级
     let crit_eff_level =
         attr.crit_effect_level + slot(slots, AttribField::PhysicsCriticalDamagePowerBase);
-    let crit_effect = BASE_CRIT_POWER + crit_eff_level / LP_CRIT_EFF;
+    let crit_effect = BASE_CRIT_POWER + crit_eff_level / lp.crit_effect;
 
     // 破防等级：面板 + buff 加算 + 力道增量
     let mut overcome_level = attr.overcome_level
         + slot(slots, AttribField::PhysicsOvercomeBase)
-        + (extra_strength * constants.lidao_to_overcome).floor();
+        + converted_delta(attr.li_dao, extra_strength, constants.lidao_to_overcome);
     // 铁骨气劲：体质→破防（0.152 或 0.456）
     let vto = slot(slots, AttribField::VitalityToOvercomeCof);
     if vto != 0.0 {
@@ -1266,7 +1317,7 @@ pub fn build_runtime_stats(
     if opct != 0.0 {
         overcome_level += (overcome_level * opct / 1024.0).floor();
     }
-    let overcome = overcome_level / LP_OVERCOME;
+    let overcome = overcome_level / lp.overcome;
 
     // 无双等级
     let mut strain_level = attr.strain_level + slot(slots, AttribField::StrainBase);
@@ -1274,7 +1325,7 @@ pub fn build_runtime_stats(
     if strain_pct != 0.0 {
         strain_level += (strain_level * strain_pct / 1024.0).floor();
     }
-    let mut strain = strain_level / LP_STRAIN;
+    let mut strain = strain_level / lp.strain;
     // StrainPercent: 直接加到最终无双率（如寒啸千军 +51/1024 ≈ +5%）
     let strain_direct = slot(slots, AttribField::StrainPercent);
     if strain_direct != 0.0 {
@@ -1283,35 +1334,38 @@ pub fn build_runtime_stats(
 
     // 加速：从加速等级换算的加速率封顶 25%；UnlimitedAdditionalHastePercent 绕过封顶
     let haste_level = attr.haste_level + slot(slots, AttribField::HasteBase);
-    let base_haste = (haste_level / LP_HASTE).clamp(0.0, 0.25);
+    let base_haste = (haste_level / lp.haste).clamp(0.0, 0.25);
     let extra_haste = slot(slots, AttribField::UnlimitedAdditionalHastePercent) / 1024.0;
     let haste_rate = (base_haste + extra_haste).clamp(0.0, 1.0);
 
     // 破招值
-    let surplus_value = attr.surplus_value + slot(slots, AttribField::SurplusValueBase);
+    let surplus_value = if lp.has_surplus { attr.surplus_value + slot(slots, AttribField::SurplusValueBase) } else { 0.0 };
 
     // 拆招值（防御向；铁骨衣寒甲奇穴用）：面板 + buff 加算 + 体质增量×vitality_to_parry_value
     let parry_value = attr.parry_value
         + slot(slots, AttribField::ParryValueBase)
-        + (extra_vitality * constants.vitality_to_parry_value).floor();
+        + converted_delta(attr.vitality, extra_vitality, constants.vitality_to_parry_value)
+        + if lp.level == 50 { converted_delta(attr.shen_fa, extra_shenfa, constants.shenfa_to_parry_value) } else { 0.0 };
 
     // 招架等级：面板 + buff 加算 + 体质增量×vitality_to_parry_level
     let parry_level = attr.parry_level
         + slot(slots, AttribField::ParryBase)
-        + (extra_vitality * constants.vitality_to_parry_level).floor();
+        + converted_delta(attr.vitality, extra_vitality, constants.vitality_to_parry_level)
+        + if lp.level == 50 { converted_delta(attr.shen_fa, extra_shenfa, constants.shenfa_to_parry) } else { 0.0 };
 
-    // 招架率：level / (level + LP_PARRY) + 心法基础 + 直接加成 (ParryValuePercent/10000)
+    // 招架率：level / (level + lp.parry) + 心法基础 + 直接加成 (ParryValuePercent/10000)
     let parry_direct = slot(slots, AttribField::ParryValuePercent) / 10000.0;
     let parry_rate =
-        (parry_level / (parry_level + LP_PARRY)) + constants.parry_base_rate + parry_direct;
+        (parry_level / (parry_level + lp.parry)) + constants.parry_base_rate + parry_direct;
     // 不 clamp：坚铁满层可超过 100%
 
     CombatStats {
-        shen_fa: attr.shen_fa,
+        level: lp.level,
+        shen_fa: final_shenfa,
         panel_attack,
         magical_attack,
         base_attack: attr.base_attack,
-        shenfa_attack: attr.shen_fa * constants.shenfa_to_attack,
+        shenfa_attack: final_shenfa * constants.shenfa_to_attack,
         crit_rate,
         crit_effect,
         overcome,
@@ -1420,7 +1474,7 @@ pub fn calc_damage(
     };
 
     // ── Step 5: 等级压制（所有伤害都走）──
-    let lv_factor = calc_level_suppression(PLAYER_LEVEL, target.level);
+    let lv_factor = calc_level_suppression(rt.level, target.level);
     let lv_delta = lv_factor - 1.0;
     if lv_delta != 0.0 {
         damage = damage + ((damage as f64) * lv_delta).floor() as i64;
@@ -1493,16 +1547,7 @@ pub fn calc_event_damage(
     channel_ticks: u32,
 ) -> (SkillResult, f64, CombatStats) {
     let (buff_slots, target_slots, rt) = calc_stats_cached(player, attr);
-    // 奇穴/加速 等动态覆盖 attack_coeff
-    let spec_owned;
-    let effective_spec = if let Some(coeff) = scripts::override_attack_coeff(player, spec) {
-        let mut s = spec.clone();
-        s.attack_coeff = coeff;
-        spec_owned = s;
-        &spec_owned
-    } else {
-        spec
-    };
+    let effective_spec = scripts::effective_damage_spec(player, spec);
     let base_name = effective_spec
         .name
         .split('·')
@@ -1516,7 +1561,7 @@ pub fn calc_event_damage(
         recipes_table,
     );
     let r = calc_damage(
-        effective_spec,
+        &effective_spec,
         attr,
         target,
         &rt,
@@ -1571,6 +1616,9 @@ pub fn compute_runtime_recipes(skill: &SkillSpec, player: &Player) -> Vec<u32> {
     if player.version == GameVersion::CangShengZhuShiTest && player.mount == Mount::FenShanJin {
         result.extend(scripts::v2026_10_CangShengZhuShiTest::runtime_recipes(skill, player));
         result.extend(scripts::v2026_10_CangShengZhuShiTest::skills::zhen_yun::runtime_recipes(skill, player));
+    }
+    if player.version == GameVersion::CangShengZhuShiTest && player.mount == Mount::TieGuYi {
+        result.extend(scripts::v2026_10_CangShengZhuShiTest_TieGuYi::runtime_recipes(skill, player));
     }
     result
 }
@@ -1666,7 +1714,7 @@ fn calc_damage_with_snapshot(
         damage = ((damage as f64) * (1.0 - def_rate)).floor() as i64;
     }
     // Step 5: 等级压制实时
-    let lv_delta = calc_level_suppression(PLAYER_LEVEL, target.level) - 1.0;
+    let lv_delta = calc_level_suppression(player.constants.level, target.level) - 1.0;
     if lv_delta != 0.0 {
         damage = damage + ((damage as f64) * lv_delta).floor() as i64;
     }
@@ -1913,7 +1961,11 @@ fn load_skills(dir: &Path) -> Vec<SkillSpec> {
                 description: config.description.clone(),
                 icon: rank.icon.clone().unwrap_or_else(|| config.icon.clone()),
                 damage_kind: config.damage_kind,
-                base_damage: rank.base_damage,
+                base_damage: rank.base_damage_range
+                    .map(|[min, max]| (min + max) / 2.0)
+                    .unwrap_or(rank.base_damage),
+                base_damage_range: rank.base_damage_range,
+                high_berserk_damage: rank.high_berserk_damage.clone(),
                 attack_coeff: rank.attack_coeff,
                 weapon_coeff: rank.weapon_coeff,
                 defense_ignore: rank.defense_ignore,
@@ -2018,6 +2070,9 @@ pub struct SimulateRequest {
     /// 寒甲期望传播开关（true 时寒甲 A/B 走期望；false/None 时走原 100% 招架假设）
     #[serde(default)]
     pub hanjia_expectation: Option<bool>,
+    /// 苍生测试服盾压随机种子；模式复用 hanjia_expectation 开关。
+    #[serde(default, skip_serializing_if = "shield_reset::is_zero_seed")]
+    pub dunya_reset_seed: u32,
     /// 铁骨气劲模式：0=关，1=铁骨（副T），2=铁骨·宿敌（主T）
     #[serde(default = "default_tiegu_mode")]
     pub tiegu_mode: u8,
@@ -2552,6 +2607,7 @@ pub struct Player {
     pub boss_attack_interval: f64,
     /// 盾压 CD 期望重置状态（仅铁骨衣）
     pub dunya_cd: Option<DunyaCdState>,
+    pub shield_reset_proc: shield_reset::ShieldResetProc,
     /// 上一帧是否施放了非盾压盾系技能（盾刀/盾击/盾猛）
     pub last_cast_shield_non_dunya: bool,
     /// buff 变更代数（每次 add/remove/modify buff 递增，用于属性缓存）
@@ -2658,6 +2714,8 @@ impl Player {
     ) -> Self {
         let talents = if version == GameVersion::CangShengZhuShiTest && mount == Mount::FenShanJin {
             scripts::v2026_10_CangShengZhuShiTest::normalize_talents(talents)
+        } else if version == GameVersion::CangShengZhuShiTest && mount == Mount::TieGuYi {
+            scripts::v2026_10_CangShengZhuShiTest_TieGuYi::normalize_talents(talents)
         } else {
             talents
         };
@@ -2710,6 +2768,7 @@ impl Player {
             next_boss_attack: None,
             boss_attack_interval: 0.0,
             dunya_cd: None,
+            shield_reset_proc: shield_reset::ShieldResetProc::new(Default::default()),
             last_cast_shield_non_dunya: false,
             buff_generation: 0,
             buff_cache: std::cell::RefCell::new(None),
@@ -2789,7 +2848,7 @@ impl Player {
 
     /// 宏及手动轴先按母招式选 rank，再解析 combo_follow；后续段不再消耗暴怒。
     fn is_zhen_yun_followup_entry(&self, skill: &SkillSpec) -> bool {
-        self.uses_berserk() && skill.skill_id == 30769 && self.has_talent(91002)
+        self.uses_berserk() && skill.skill_id == 30769
             && (self.has_buff(combo_buff_id("阵云_2")) || self.has_buff(combo_buff_id("阵云_3")))
     }
 
@@ -3018,7 +3077,7 @@ impl Player {
 
         // 7. 卷雪刀下次触发（24 帧 × 加速折算）
         if let Some(last_swing) = self.last_swing_time {
-            let actual = get_actual_frames(24, self.effective_haste_level());
+            let actual = self.actual_frames(24);
             let next_swing = last_swing + frames_to_sec(actual);
             consider(&mut next, next_swing);
         }
@@ -3207,7 +3266,7 @@ impl Player {
                 let k = (elapsed / old_interval_sec).floor() as u32;
                 let next_tick = old_start + (k + 1) as f64 * old_interval_sec;
 
-                let new_tick = get_actual_frames(def.tick_interval, eff_haste).max(1);
+                let new_tick = get_actual_frames_at_level(def.tick_interval, eff_haste, self.constants.level).max(1);
                 let new_interval_sec = frames_to_sec(new_tick);
                 let new_start = next_tick - new_interval_sec;
                 let new_duration = new_tick * total_ticks;
@@ -3234,7 +3293,7 @@ impl Player {
         } else {
             // 初次添加：按当前 haste 快照 tick_interval 和 duration
             let (actual_tick, actual_dur) = if def.haste_scaled && def.tick_interval > 0 {
-                let at = get_actual_frames(def.tick_interval, eff_haste).max(1);
+                let at = get_actual_frames_at_level(def.tick_interval, eff_haste, self.constants.level).max(1);
                 let total_ticks = def.duration_frames / def.tick_interval;
                 (at, at * total_ticks)
             } else {
@@ -3932,8 +3991,12 @@ impl Player {
 
     /// 有效加速等级：基础加速等级（25% 封顶）+ buff 突破上限加速（折算为等级）
     /// 用于 get_actual_frames 的所有帧数缩减计算
+    pub fn actual_frames(&self, frames: u32) -> u32 {
+        get_actual_frames_at_level(frames, self.effective_haste_level(), self.constants.level)
+    }
+
     pub fn effective_haste_level(&self) -> u32 {
-        let cap = (0.25 * LP_HASTE) as u32;
+        let cap = (0.25 * LevelParams::for_level(self.constants.level).haste) as u32;
         let base = self.haste_level.min(cap);
         let t = self.current_time;
         let mut extra_pct = 0.0f64;
@@ -3951,7 +4014,7 @@ impl Player {
                 }
             }
         }
-        let extra_level = (extra_pct / 1024.0 * LP_HASTE) as u32;
+        let extra_level = (extra_pct / 1024.0 * LevelParams::for_level(self.constants.level).haste) as u32;
         base + extra_level
     }
 
@@ -4083,6 +4146,11 @@ impl Player {
                 }
             }
             13050 if self.version == GameVersion::CangShengZhuShiTest
+                && self.mount == Mount::TieGuYi
+                && self.has_talent(scripts::v2026_10_CangShengZhuShiTest_TieGuYi::TALENT_JING_TING) => {
+                cd -= 10.0;
+            }
+            13050 if self.version == GameVersion::CangShengZhuShiTest
                 && self.mount == Mount::FenShanJin && self.has_talent(22897) => {
                 cd -= 6.0;
             }
@@ -4110,7 +4178,7 @@ impl Player {
     }
 
     pub fn can_cast(&self, skill: &SkillSpec) -> bool {
-        if self.version == GameVersion::CangShengZhuShiTest {
+        if self.version == GameVersion::CangShengZhuShiTest && self.mount == Mount::FenShanJin {
             if !scripts::v2026_10_CangShengZhuShiTest::skill_allowed(self, skill) {
                 return false;
             }
@@ -4195,7 +4263,7 @@ impl Player {
 
     /// 返回技能不可释放的原因（可释放返回 None）
     pub fn reject_reason(&self, skill: &SkillSpec) -> Option<String> {
-        if self.version == GameVersion::CangShengZhuShiTest {
+        if self.version == GameVersion::CangShengZhuShiTest && self.mount == Mount::FenShanJin {
             if !scripts::v2026_10_CangShengZhuShiTest::skill_allowed(self, skill) {
                 return Some("需要苍生铸世分山劲对应核心奇穴及连招奇穴".into());
             }
@@ -4581,9 +4649,9 @@ impl Player {
             let stats = self.current_stats();
             let x = stats.parry_level;
             const RESET_COEFF: f64 = 3.154;
-            let base = RESET_COEFF * x / (RESET_COEFF * x + LP_PARRY);
+            let base = RESET_COEFF * x / (RESET_COEFF * x + LevelParams::for_level(self.constants.level).parry);
             // Δ招架率加成 = 面板招架率 - 等级换算基础 - 心法基础
-            let level_base = x / (x + LP_PARRY);
+            let level_base = x / (x + LevelParams::for_level(self.constants.level).parry);
             let direct = stats.parry_rate - level_base - self.constants.parry_base_rate;
             base + self.constants.parry_base_rate + direct.max(0.0)
         } else {
@@ -4915,7 +4983,7 @@ impl Player {
             };
             let frames = sec_to_frames(duration);
             let actual = if cd.haste {
-                get_actual_frames(frames, self.effective_haste_level())
+                get_actual_frames_at_level(frames, self.effective_haste_level(), self.constants.level)
             } else {
                 frames
             };
@@ -4945,8 +5013,8 @@ impl Player {
                 }
                 _ => 0,
             };
-            let actual_frame = get_actual_frames(cf + extra_channel, self.effective_haste_level());
-            let actual_interval = get_actual_frames(ci, self.effective_haste_level());
+            let actual_frame = get_actual_frames_at_level(cf + extra_channel, self.effective_haste_level(), self.constants.level);
+            let actual_interval = get_actual_frames_at_level(ci, self.effective_haste_level(), self.constants.level);
             let total = if actual_interval > 0 {
                 actual_frame / actual_interval
             } else {
@@ -4962,7 +5030,7 @@ impl Player {
                 .map(|cd| {
                     let f = sec_to_frames(cd.duration);
                     if cd.haste {
-                        get_actual_frames(f, self.effective_haste_level())
+                        get_actual_frames_at_level(f, self.effective_haste_level(), self.constants.level)
                     } else {
                         f
                     }
@@ -4986,7 +5054,7 @@ impl Player {
             let actual_first = if first_frame == 0 {
                 0
             } else if skill.first_tick_frame.is_some() {
-                get_actual_frames(first_frame, self.effective_haste_level())
+                get_actual_frames_at_level(first_frame, self.effective_haste_level(), self.constants.level)
             } else {
                 actual_interval
             };
@@ -5002,7 +5070,7 @@ impl Player {
             self.channel_interval_frame = actual_interval;
             self.channel_skill_id = skill.skill_id;
         } else if let Some(cf) = skill.channel_frame {
-            let actual = get_actual_frames(cf, self.effective_haste_level());
+            let actual = get_actual_frames_at_level(cf, self.effective_haste_level(), self.constants.level);
             self.channel_end = cast_time + frames_to_sec(actual);
         }
 
@@ -5017,7 +5085,7 @@ impl Player {
         let is_damage = skill.attack_coeff > 0.0 || skill.base_damage > 0.0;
         if is_damage {
             let weapon_id = self.equip_id_at("PRIMARY_WEAPON");
-            if let Some((level, strain)) = shen_bing_wu_shuang_for(weapon_id) {
+            if let Some((level, strain)) = shen_bing_wu_shuang_at_level(weapon_id, self.constants.level) {
                 self.add_buff((BUFF_SHEN_BING_WU_SHUANG, level));
                 self.bind_buff_effects(
                     BUFF_SHEN_BING_WU_SHUANG,
@@ -5091,6 +5159,9 @@ pub struct TalentEntry {
     /// 1-7 = 固定层，8 = 混选池（第八~十重）
     pub tier: u32,
     pub desc: String,
+    /// 展示该奇穴说明的关联技能；不参与战斗计算。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description_skills: Option<Vec<u32>>,
 }
 
 /// 从 TOML 文件加载奇穴列表
@@ -5811,13 +5882,14 @@ fn snapshot_buff_list(
     current_time: f64,
     is_target: bool,
     version: GameVersion,
+    mount: Mount,
 ) -> Vec<BuffSnapshot> {
     list.iter()
         .filter_map(|inst| {
             if inst.expires_at != 0.0 && inst.expires_at <= current_time {
                 return None;
             }
-            let def = scripts::get_buff_def_by_version(version, inst.buff_id)?;
+            let def = scripts::get_buff_def_by_version(version, mount, inst.buff_id)?;
             let remaining = if inst.expires_at == 0.0 {
                 0.0
             } else {
@@ -6020,7 +6092,7 @@ fn snapshot_event_state(player: &Player) -> EventState {
         (30769, "阵云结晦", 2, 30.0),
     ];
     for &(sid, name, max_ch, cd) in charge_info {
-        let cd = if player.version == GameVersion::CangShengZhuShiTest {
+        let cd = if player.version == GameVersion::CangShengZhuShiTest && player.mount == Mount::FenShanJin {
             match sid {
                 13047 => 4.0,
                 13040 => 25.0
@@ -6095,12 +6167,14 @@ fn snapshot_buffs(player: &Player) -> Vec<BuffSnapshot> {
         player.current_time,
         false,
         player.version,
+        player.mount,
     );
     result.extend(snapshot_buff_list(
         &player.target_buffs,
         player.current_time,
         true,
         player.version,
+        player.mount,
     ));
     result
 }
@@ -6120,6 +6194,9 @@ pub struct SharedState {
     pub agent_providers: Arc<agent::provider::ProviderCatalog>,
     /// 当前 worker 的瞬态 Agent run；每个 worker 同时只允许一个活动 run。
     pub agent_runs: Arc<agent::run::AgentRunManager>,
+    /// Bounded PVE experiments, kept separate from legacy AI conversations.
+    pub harness_jobs: Arc<harness::job::JobManager>,
+    pub harness_runs: Arc<harness::run_store::RunManager>,
     pub exact_jobs: Arc<macro_exact_http::Manager>,
     /// 当前 worker 用户目录内的 append-only Agent 会话。
     pub agent_sessions: Arc<agent::session::AgentSessionStore>,
@@ -6153,12 +6230,23 @@ pub struct SharedState {
     pub rl_pretrain: Arc<rl::pretrain::PretrainState>,
     /// 装备配装数据（启动时加载，只读）
     pub equip_data: Arc<equip::EquipData>,
+    pub equip_data_level50: Arc<equip::EquipData>,
     /// 自动配装搜索进度（单 slot：同时只允许一个搜索）
     pub auto_search: Arc<std::sync::Mutex<AutoSearchProgress>>,
     /// 自动配装：取消标志（spawn 任务在 recurse / rayon iter 中检测，true 即中止）
     pub auto_search_cancel: Arc<std::sync::atomic::AtomicBool>,
     /// 自动配装：暂停标志（true 时 spawn 任务 spin-wait 100ms 重检）
     pub auto_search_pause: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl SharedState {
+    fn equipment_at_level(&self, level: u32) -> &Arc<equip::EquipData> {
+        if level == 50 { &self.equip_data_level50 } else { &self.equip_data }
+    }
+
+    async fn current_equipment(&self) -> Arc<equip::EquipData> {
+        self.equipment_at_level(level_params::player_level(*self.version.read().await)).clone()
+    }
 }
 
 /// 自动配装搜索进度状态。前端通过 GET /api/equip/auto_optimize/progress 拉。
@@ -6799,7 +6887,7 @@ async fn attrs_save(
     Json(body): Json<serde_json::Value>,
 ) -> String {
     let mount = *state.mount.read().await;
-    let path = attrs_save_path(mount);
+    let path = attrs_save_path(*state.version.read().await, mount);
     match std::fs::write(
         &path,
         serde_json::to_string_pretty(&body).unwrap_or_default(),
@@ -6810,9 +6898,26 @@ async fn attrs_save(
 }
 
 async fn attrs_load(State(state): State<SharedState>) -> String {
+    let _gate = state.agent_context_gate.read().await;
     let mount = *state.mount.read().await;
-    let path = attrs_save_path(mount);
-    std::fs::read_to_string(&path).unwrap_or_else(|_| "null".into())
+    let version = *state.version.read().await;
+    let path = attrs_save_path(version, mount);
+    if let Ok(saved) = std::fs::read_to_string(&path) { return saved; }
+    if level_params::player_level(version) == 50 {
+        let read_json = |path| std::fs::read_to_string(path).ok()
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok());
+        if let (Some(old), Some(settings)) = (
+            read_json(attrs_save_path(GameVersion::AnYingQianJi, mount)),
+            read_json(user_data_path("settings.json")),
+        ) {
+            if let Some(attributes) = attribute_storage::recalculate_legacy_equipment(
+                &old, &settings, mount, &state.equip_data, &state.equip_data_level50,
+            ) {
+                return serde_json::to_string(&attributes).unwrap_or_else(|_| "null".into());
+            }
+        }
+    }
+    "null".into()
 }
 
 // ─── 属性/宏 多配置档 ────────────────────────────────────────────────
@@ -6830,7 +6935,7 @@ struct ProfileSaveBody {
 
 async fn attrs_profiles(State(state): State<SharedState>) -> Json<Vec<String>> {
     let mount = *state.mount.read().await;
-    let prefix = format!("attrs_{}_", mount_dir_name(mount));
+    let prefix = format!("{}_", attrs_prefix(*state.version.read().await, mount));
     let dir = user_data_dir();
     let mut names = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&dir) {
@@ -6856,7 +6961,7 @@ async fn attrs_save_profile(
         return (axum::http::StatusCode::BAD_REQUEST, "invalid profile name").into_response();
     };
     let mount = *state.mount.read().await;
-    let filename = format!("attrs_{}_{}.json", mount_dir_name(mount), safe_name);
+    let filename = format!("{}_{}.json", attrs_prefix(*state.version.read().await, mount), safe_name);
     let path = user_data_path(&filename);
     match std::fs::write(
         &path,
@@ -6879,7 +6984,7 @@ async fn attrs_load_profile(
         return (axum::http::StatusCode::BAD_REQUEST, "invalid profile name").into_response();
     };
     let mount = *state.mount.read().await;
-    let filename = format!("attrs_{}_{}.json", mount_dir_name(mount), safe_name);
+    let filename = format!("{}_{}.json", attrs_prefix(*state.version.read().await, mount), safe_name);
     let path = user_data_path(&filename);
     match std::fs::read_to_string(&path) {
         Ok(s) => s.into_response(),
@@ -6895,7 +7000,7 @@ async fn attrs_delete_profile(
         return (axum::http::StatusCode::BAD_REQUEST, "invalid profile name").into_response();
     };
     let mount = *state.mount.read().await;
-    let filename = format!("attrs_{}_{}.json", mount_dir_name(mount), safe_name);
+    let filename = format!("{}_{}.json", attrs_prefix(*state.version.read().await, mount), safe_name);
     let path = user_data_path(&filename);
     match std::fs::remove_file(&path) {
         Ok(_) => "ok".into_response(),
@@ -7068,9 +7173,11 @@ async fn skill_damage(
 
     // 基线防御率：无技能减防、无 buff/debuff 修饰，等同于 9 步链 Step 4 的退化形式
     let base_defense_rate = calc_defense_rate_with_ignore(&req.target, 0.0, 0.0, 0.0, 0.0);
-    let level_suppression = calc_level_suppression(PLAYER_LEVEL, req.target.level);
+    let level_suppression = calc_level_suppression(player.constants.level, req.target.level);
 
     ensure_recipe_index(recipes_table);
+    // 每个静态预览也是独立场景，不能沿用另一位 Player 的秘籍激活缓存。
+    ACTIVE_IDS.with(|c| *c.borrow_mut() = None);
     let skill_results: Vec<SkillResult> = skills
         .iter()
         .map(|s| {
@@ -7083,32 +7190,17 @@ async fn skill_damage(
             let recipes = collect_recipes_indexed(
                 &player, s.skill_id, base_name, &runtime_recipes, recipes_table,
             );
-            // 奇穴/加速 动态覆盖 attack_coeff
-            if let Some(coeff) = scripts::override_attack_coeff(&player, s) {
-                let mut s2 = s.clone();
-                s2.attack_coeff = coeff;
-                calc_damage(
-                    &s2,
-                    &req.attributes,
-                    &req.target,
-                    &rt,
-                    &recipes,
-                    &buff_slots,
-                    &target_slots,
-                    player.constants.non_player_bonus,
-                )
-            } else {
-                calc_damage(
-                    s,
-                    &req.attributes,
-                    &req.target,
-                    &rt,
-                    &recipes,
-                    &buff_slots,
-                    &target_slots,
-                    player.constants.non_player_bonus,
-                )
-            }
+            let effective = scripts::effective_damage_spec(&player, s);
+            calc_damage(
+                &effective,
+                &req.attributes,
+                &req.target,
+                &rt,
+                &recipes,
+                &buff_slots,
+                &target_slots,
+                player.constants.non_player_bonus,
+            )
         })
         .collect();
     let sd_elapsed = sd_start.elapsed();
@@ -7221,8 +7313,8 @@ async fn switch_mount(
     };
     let new_skills = load_skills(Path::new(&skills_dir(req.version, req.mount)));
     let new_talents = load_talents(Path::new(&talents_file(req.version, req.mount)));
-    let new_recipes = load_recipes(Path::new(&recipes_file(req.version)));
-    let new_team_buffs = load_team_buffs(Path::new(&team_buffs_file(req.version)));
+    let new_recipes = load_recipes(Path::new(&recipes_file_for_mount(req.version, req.mount)));
+    let new_team_buffs = load_team_buffs(Path::new(&team_buffs_file_for_mount(req.version, req.mount)));
     let new_formations = load_formations(Path::new(&formations_file(req.version)));
     let new_agent_provenance = agent::ToolProvenance::from_runtime_data(
         req.version,
@@ -7271,6 +7363,9 @@ struct CurrentMountInfo {
     mount_label: String,
     school_ui: SchoolUi,
     workflow_a: WorkflowA,
+    attribute_params: LevelParams,
+    mount_constants: MountConstants,
+    mount_conversions: MountConversions,
 }
 
 async fn current_mount(State(state): State<SharedState>) -> impl IntoResponse {
@@ -7285,6 +7380,9 @@ async fn current_mount(State(state): State<SharedState>) -> impl IntoResponse {
         mount_label: mount_dir_name(m).to_string(),
         school_ui: state.school_ui.read().await.clone(),
         workflow_a: state.workflow_a.read().await.clone(),
+        attribute_params: LevelParams::for_version(v),
+        mount_constants: *state.constants.read().await,
+        mount_conversions: state.mount_conversions.read().await.clone(),
     })
 }
 
@@ -7463,6 +7561,10 @@ fn simulate_core_with_trace(
     }
     player.experimental = req.experimental && cur_version != GameVersion::CangShengZhuShiTest;
     player.lite_mode = req.lite;
+    player.shield_reset_proc = shield_reset::ShieldResetProc::new(shield_reset::ResetOptions {
+        mode: if req.hanjia_expectation.unwrap_or(false) { shield_reset::ResetMode::Cumulative } else { shield_reset::ResetMode::Random },
+        seed: req.dunya_reset_seed,
+    });
     player.snapshot_skill_specs = (!req.lite).then(|| {
         let mut specs = skill_map.values()
             .filter_map(|ranks| ranks.first())
@@ -7494,7 +7596,7 @@ fn simulate_core_with_trace(
             }
         }
     }
-    // 盾压 CD 期望重置（仅铁骨衣）
+    // 盾压 CD 期望重置：铁骨旧规则保持；测试服分山走 shield_reset 的施放触发。
     if player.mount == Mount::TieGuYi {
         let cd_frames = sec_to_frames(player.dunya_cooldown_duration(12.0));
         let extra_prob = if player.has_recipe(4007) { 0.05 } else { 0.0 }
@@ -8103,6 +8205,7 @@ fn simulate_core_with_trace(
                         player.current_time,
                         false,
                         player.version,
+        player.mount,
                     )
                     .into_iter()
                     .filter(|b| !b.is_debuff)
@@ -8607,10 +8710,7 @@ fn simulate_core_with_trace(
         });
     let total_gcd = if total_gcd_base > 0.0 {
         let base_frames = sec_to_frames(total_gcd_base);
-        frames_to_sec(get_actual_frames(
-            base_frames,
-            player.effective_haste_level(),
-        ))
+        frames_to_sec(player.actual_frames(base_frames))
     } else {
         0.0
     };
@@ -8862,13 +8962,13 @@ fn simulate_core_with_trace(
         damage_add_buff_ids: if req.lite {
             Vec::new()
         } else {
-            crate::scripts::collect_damage_add_buff_ids(player.version)
+            crate::scripts::collect_damage_add_buff_ids(player.version, player.mount)
         },
         initial_buffs,
         buff_attr_keys: if req.lite {
             HashMap::new()
         } else {
-            crate::scripts::collect_buff_attr_keys(player.version)
+            crate::scripts::collect_buff_attr_keys(player.version, player.mount)
                 .into_iter()
                 .map(|(id, keys)| (id, keys.into_iter().map(|s| s.to_string()).collect()))
                 .collect()
@@ -8876,7 +8976,7 @@ fn simulate_core_with_trace(
         buff_attr_desc: if req.lite {
             HashMap::new()
         } else {
-            crate::scripts::collect_buff_attr_desc(player.version)
+            crate::scripts::collect_buff_attr_desc(player.version, player.mount)
         },
         formation_attr_keys: if req.lite {
             Vec::new()
@@ -8932,7 +9032,7 @@ async fn equip_search(
     State(state): State<SharedState>,
     Json(filter): Json<equip::SearchFilter>,
 ) -> impl IntoResponse {
-    let items = equip::search_items(&state.equip_data, &filter);
+    let items = equip::search_items(&*state.current_equipment().await, &filter);
     Json(items)
 }
 
@@ -8947,7 +9047,7 @@ async fn equip_detail(
     State(state): State<SharedState>,
     Json(req): Json<EquipIdRequest>,
 ) -> impl IntoResponse {
-    match equip::get_detail(&state.equip_data, req.sub_type, req.id) {
+    match equip::get_detail(&*state.current_equipment().await, req.sub_type, req.id) {
         Some(d) => Json(serde_json::json!({"ok": true, "detail": d})),
         None => Json(serde_json::json!({"ok": false})),
     }
@@ -8962,14 +9062,14 @@ async fn equip_enhances(
     State(state): State<SharedState>,
     Json(req): Json<SubTypeRequest>,
 ) -> impl IntoResponse {
-    Json(equip::get_enhances(&state.equip_data, req.sub_type))
+    Json(equip::get_enhances(&*state.current_equipment().await, req.sub_type))
 }
 
 async fn equip_enchants(
     State(state): State<SharedState>,
     Json(req): Json<SubTypeRequest>,
 ) -> impl IntoResponse {
-    Json(equip::get_enchants_for(&state.equip_data, req.sub_type))
+    Json(equip::get_enchants_for(&*state.current_equipment().await, req.sub_type))
 }
 
 #[derive(Deserialize, Default)]
@@ -8982,7 +9082,7 @@ async fn equip_stones(
     State(state): State<SharedState>,
     Json(req): Json<StoneQuery>,
 ) -> impl IntoResponse {
-    Json(equip::get_stones(&state.equip_data, &req.selectors))
+    Json(equip::get_stones(&*state.current_equipment().await, &req.selectors))
 }
 
 async fn equip_calculate(
@@ -8992,12 +9092,12 @@ async fn equip_calculate(
     // 心法固定增益 + 心法转化 都从 state (school.toml) 注入。req.mount 字段仅作记录，不再决定数值。
     let bs = state.base_stats.read().await.clone();
     let mc = state.mount_conversions.read().await.clone();
-    Json(equip::calculate(&state.equip_data, &req, &bs, &mc))
+    Json(equip::calculate(state.equipment_at_level(mc.level), &req, &bs, &mc))
 }
 
 async fn equip_meta(State(state): State<SharedState>) -> impl IntoResponse {
     // 返回数据元信息：装备数量、心法分布、品级范围等
-    let data = &state.equip_data;
+    let data = state.current_equipment().await;
     let mut schools: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     let mut kinds: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     let mut min_level = u32::MAX;
@@ -9044,13 +9144,15 @@ pub struct HasteTiersQuery {
 /// 加速档位边界查询：根据 `get_actual_frames` 公式直接推导每段加速对应的 haste 区间。
 /// 配装搜索把"目标加速段"作为硬约束时，前端调一次拿表，把 (min, max) 透传给 auto_optimize。
 async fn equip_haste_tiers(
+    State(state): State<SharedState>,
     axum::extract::Query(q): axum::extract::Query<HasteTiersQuery>,
 ) -> Json<serde_json::Value> {
+    let lp = LevelParams::for_version(*state.version.read().await);
     // 默认走 25% 自然截断（`Player::effective_haste_level` 也是这么 clamp 的）
-    let natural_cap = (0.25 * LP_HASTE) as u32;
+    let natural_cap = (0.25 * lp.haste) as u32;
     let cap = q.cap.unwrap_or(natural_cap).min(200_000); // 防滥用
     let to_obj = |orig: u32| -> serde_json::Value {
-        let tiers: Vec<serde_json::Value> = haste_tier_boundaries(orig, cap)
+        let tiers: Vec<serde_json::Value> = haste_tier_boundaries_at_level(orig, cap, lp.level)
             .into_iter()
             .map(|(tier, frames, lo, hi)| {
                 serde_json::json!({
@@ -9069,7 +9171,7 @@ async fn equip_haste_tiers(
     } else {
         // 默认返回 24（1.5s GCD）+ 16（1.0s GCD）两组
         Json(serde_json::json!({
-            "lp_haste": LP_HASTE,
+            "lp_haste": lp.haste,
             "frames_per_sec": FRAMES_PER_SEC,
             "haste_cap": cap,
             "by_base_frames": [to_obj(24), to_obj(16)],
@@ -9118,6 +9220,8 @@ pub struct AutoOptimizeRequest {
     pub boss_attack_interval: f64,
     #[serde(default)]
     pub hanjia_expectation: bool,
+    #[serde(default)]
+    pub dunya_reset_seed: u32,
     /// 铁骨气劲模式（与模拟器 SimulateRequest.tiegu_mode 同语义；默认 2 = 主T·宿敌）
     #[serde(default = "default_tiegu_mode")]
     pub tiegu_mode: u8,
@@ -9461,7 +9565,9 @@ const BIN_STRAIN: u32 = 130; // ≈ floor(LP_STRAIN / 1024)
 ///   前 4 维（crit/crit_eff/overcome/strain）—— 走郭氏阈值固定 bin（LP/1024）
 ///   后 4 维（surplus/attack/agility/strength）—— 走 bucket_size（用户可调，默认 100）
 ///   bucket=0/1 时后 4 维不量化（按整数等级直传）
-fn raw_to_pareto_vec(r: &equip::RawAttrs, bucket: u32) -> [u32; 8] {
+fn raw_to_pareto_vec(r: &equip::RawAttrs, bucket: u32, level: u32) -> [u32; 8] {
+    let lp = LevelParams::for_level(level);
+    let bin = |denom: f64| (denom / 1024.0).floor().max(1.0) as u32;
     let qn = |v: f64, b: u32| -> u32 {
         let x = v as u32;
         if b <= 1 {
@@ -9471,10 +9577,10 @@ fn raw_to_pareto_vec(r: &equip::RawAttrs, bucket: u32) -> [u32; 8] {
         }
     };
     [
-        (r.crit_level as u32) / BIN_CRIT,
-        (r.crit_effect_level as u32) / BIN_CRIT_EFF,
-        (r.overcome_level as u32) / BIN_OVERCOME,
-        (r.strain_level as u32) / BIN_STRAIN,
+        (r.crit_level as u32) / bin(lp.crit),
+        (r.crit_effect_level as u32) / bin(lp.crit_effect),
+        (r.overcome_level as u32) / bin(lp.overcome),
+        (r.strain_level as u32) / bin(lp.strain),
         qn(r.surplus_value, bucket),
         qn(r.base_attack, bucket),
         qn(r.agility, bucket),
@@ -9483,8 +9589,8 @@ fn raw_to_pareto_vec(r: &equip::RawAttrs, bucket: u32) -> [u32; 8] {
 }
 
 /// 哈希键：raw 等级量化后整数化（8 维拼 128 位）+ 套装/特效 fingerprint（64 位）
-fn encode_combo_key(raw: &equip::RawAttrs, set_eff_fp: u64, bucket: u32) -> (u128, u64) {
-    let v = raw_to_pareto_vec(raw, bucket);
+fn encode_combo_key(raw: &equip::RawAttrs, set_eff_fp: u64, bucket: u32, level: u32) -> (u128, u64) {
+    let v = raw_to_pareto_vec(raw, bucket, level);
     let mut k: u128 = 0;
     let put = |k: &mut u128, x: u32, shift: u32, width: u32| {
         let mask = (1u128 << width) - 1;
@@ -9649,7 +9755,7 @@ async fn equip_fit_curve(
             _ => None,
         }
     };
-    for entries in state.equip_data.enhances.values() {
+    for entries in state.current_equipment().await.enhances.values() {
         for entry in entries {
             // 跳过首饰 + 暗器部位（项链 4 / 戒指 5 / 腰坠 7 / 暗器 1）：
             //   这些部位的附魔数值天然偏高（含挑战附魔系列、且整体规模大于身上其它部位），
@@ -9975,7 +10081,7 @@ async fn run_auto_optimize_compute(
     let team_buffs_table = state.team_buffs.read().await;
     let formations_table = state.formations.read().await;
 
-    let equip_data: &equip::EquipData = &state.equip_data;
+    let equip_data: &equip::EquipData = state.equipment_at_level(mc.level);
 
     // 1. 候选物化（装备-only：每槽只 5 个装备候选，不展开加速 enhance pair）
     //    - 加速 enhance 单独存到 haste_enh_list，叶子里枚举 2^N 个"开/关"组合（HAT+SHOES = 4 种）
@@ -10165,7 +10271,7 @@ async fn run_auto_optimize_compute(
     //   → cur_h ∈ [target_min - baseline - max_haste_delta - max_enh_total, target_max - baseline]
     // 多区间：剪枝用 union envelope（min/max 包络更宽，不会漏候选）；leaf strict filter 才用 any 命中
     // 空数组 fallback 成 [0, cap=natural_cap]，等同"无约束"
-    let natural_cap = (0.25 * LP_HASTE) as u32;
+    let natural_cap = (0.25 * LevelParams::for_level(cur_consts.level).haste) as u32;
     let target_ranges: Vec<HasteRange> = if req.target_haste.is_empty() {
         vec![HasteRange {
             min: 0,
@@ -10247,6 +10353,7 @@ async fn run_auto_optimize_compute(
                 None
             },
             hanjia_expectation: Some(req.hanjia_expectation),
+            dunya_reset_seed: req.dunya_reset_seed,
             tiegu_mode: req.tiegu_mode,
             experimental: req.experimental,
             lite: true,
@@ -10596,7 +10703,7 @@ async fn run_auto_optimize_compute(
                 let fp_with_mask = fp
                     .wrapping_mul(0x9e3779b97f4a7c15)
                     .wrapping_add(mask as u64);
-                let key = encode_combo_key(&raw_combo, fp_with_mask, bucket_size);
+                let key = encode_combo_key(&raw_combo, fp_with_mask, bucket_size, ctx.mount_conv.level);
 
                 if !unique.contains_key(&key) {
                     let t_emit = std::time::Instant::now();
@@ -10861,7 +10968,7 @@ async fn run_auto_optimize_compute(
                     } else {
                         let mut pts: Vec<(usize, [u32; 8])> = idxs
                             .into_iter()
-                            .map(|i| (i, raw_to_pareto_vec(&unique_vec[i].3, bucket_size)))
+                            .map(|i| (i, raw_to_pareto_vec(&unique_vec[i].3, bucket_size, cur_consts.level)))
                             .collect();
                         pts.sort_unstable_by(|a, b| {
                             let sa: u64 = a.1.iter().map(|&v| v as u64).sum();
@@ -12024,7 +12131,7 @@ fn spawn_icon_prefetch(
         }
     }
     // BuffDef icon（自身 + 团辅）
-    for def in scripts::all_buff_defs_by_version(version) {
+    for def in all_mounts().into_iter().flat_map(|mount| scripts::all_buff_defs_by_version(version, mount)) {
         if let Some(id) = extract_icon_id(def.icon) {
             ids.insert(id);
         }
@@ -12133,8 +12240,8 @@ async fn main() {
 
     let initial_skills = load_skills(Path::new(&skills_dir(version, mount)));
     let talents = load_talents(Path::new(&talents_file(version, mount)));
-    let recipes = load_recipes(Path::new(&recipes_file(version)));
-    let team_buffs = load_team_buffs(Path::new(&team_buffs_file(version)));
+    let recipes = load_recipes(Path::new(&recipes_file_for_mount(version, mount)));
+    let team_buffs = load_team_buffs(Path::new(&team_buffs_file_for_mount(version, mount)));
     let formations = load_formations(Path::new(&formations_file(version)));
     let agent_provenance = agent::ToolProvenance::from_runtime_data(
         version,
@@ -12155,6 +12262,10 @@ async fn main() {
             agent::provider::ProviderCatalog::offline_default()
         }
     };
+    agent_providers.custom.configure(
+        user_data_path("agent_custom_provider.json"),
+        std::env::var("JX3_PUBLIC_DEPLOYMENT").as_deref() != Ok("1"),
+    );
     println!(
         "[agent] 已加载 {} 个 provider profile",
         agent_providers.len()
@@ -12183,7 +12294,11 @@ async fn main() {
     };
 
     // 加载装备数据（优先 equip.json；否则回退 equip/*.tab 并自动生成 JSON 缓存）
-    let equip_data = equip::load_equip_smart(Path::new(data_root()));
+    let formal_equipment_root = Path::new(data_root()).join("level130");
+    let equip_data = equip::load_equip_smart(if formal_equipment_root.exists() {
+        &formal_equipment_root
+    } else { Path::new(data_root()) });
+    let equip_data_level50 = equip::load_equip_smart(&Path::new(data_root()).join("level50"));
 
     // 后台预拉取缺失的 icon 到本地缓存（数据 move 到 SharedState 之前取引用）
     // worker 模式（JX3_NO_BROWSER）下跳过：预拉取会同步加载两套心法技能表收集 icon ID，
@@ -12214,6 +12329,8 @@ async fn main() {
         agent_provenance: Arc::new(RwLock::new(agent_provenance)),
         agent_providers: Arc::new(agent_providers),
         agent_runs,
+        harness_jobs: harness::job::JobManager::new(),
+        harness_runs: harness::run_store::RunManager::new(user_data_dir()),
         exact_jobs: Arc::new(macro_exact_http::Manager::default()),
         agent_sessions,
         agent_knowledge,
@@ -12235,6 +12352,7 @@ async fn main() {
         rl_analyze: rl::analysis::AnalyzeState::new(),
         rl_pretrain: rl::pretrain::PretrainState::new(),
         equip_data: Arc::new(equip_data),
+        equip_data_level50: Arc::new(equip_data_level50),
         auto_search: Arc::new(std::sync::Mutex::new(AutoSearchProgress::default())),
         auto_search_cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         auto_search_pause: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -12271,6 +12389,22 @@ async fn main() {
         .route("/api/icon/:id", get(icon_proxy))
         .route("/api/formations", get(list_formations))
         .route("/api/simulate", post(simulate))
+        .route("/api/harness/jobs", get(harness::http::list).post(harness::http::create)
+            .layer(axum::extract::DefaultBodyLimit::max(2 * 1024 * 1024)))
+        .route("/api/harness/jobs/:id", get(harness::http::status))
+        .route("/api/harness/jobs/:id/events", get(harness::http::events))
+        .route("/api/harness/jobs/:id/cancel", post(harness::http::cancel))
+        .route("/api/harness/jobs/:id/artifacts", get(harness::http::artifacts))
+        .route("/api/harness/capabilities", get(harness::run_http::capabilities))
+        .route("/api/harness/runs", get(harness::run_http::list).post(harness::run_http::create)
+            .layer(axum::extract::DefaultBodyLimit::max(2 * 1024 * 1024)))
+        .route("/api/harness/runs/:id", get(harness::run_http::status))
+        .route("/api/harness/runs/:id/events", get(harness::run_http::events))
+        .route("/api/harness/runs/:id/cancel", post(harness::run_http::cancel))
+        .route("/api/harness/runs/:id/resume", post(harness::run_http::resume))
+        .route("/api/harness/runs/:id/artifacts", get(harness::run_http::artifacts))
+        .route("/api/harness/runs/:id/apply", post(harness::run_http::apply))
+        .route("/api/harness/runs/:id/undo", post(harness::run_http::undo))
         .route("/api/macro/diagnose", post(macro_diagnostic::handler).layer(axum::extract::DefaultBodyLimit::max(8 * 1024 * 1024)))
         .route(
             "/api/agent/tools/scenario",
@@ -12291,6 +12425,18 @@ async fn main() {
         .route(
             "/api/agent/providers",
             get(agent::provider::providers_handler),
+        )
+        .route(
+            "/api/agent/providers/custom",
+            get(agent::provider::custom::get_handler)
+                .put(agent::provider::custom::save_handler)
+                .delete(agent::provider::custom::delete_handler)
+                .layer(axum::extract::DefaultBodyLimit::max(16 * 1024)),
+        )
+        .route(
+            "/api/agent/providers/custom/test",
+            post(agent::provider::custom::test_handler)
+                .layer(axum::extract::DefaultBodyLimit::max(16 * 1024)),
         )
         .route("/api/agent/runs", post(agent::run::create_run_handler))
         .route(
@@ -12365,7 +12511,7 @@ async fn main() {
         .route("/api/optimizer/analyze", post(optimizer_analyze))
         .route(
             "/api/optimizer/start",
-            post(optimizer::runtime::start_handler).layer(axum::middleware::from_fn_with_state(state.clone(), macro_exact_http::legacy_admission)),
+            post(optimizer::runtime::start_handler).layer(axum::middleware::from_fn_with_state(state.clone(), harness::http::legacy_admission)),
         )
         .route(
             "/api/optimizer/stop",
@@ -12409,7 +12555,7 @@ async fn main() {
         )
         .route("/api/rl/env/:id/info", get(rl::http::info_handler))
         .route("/api/rl/env/:id/close", post(rl::http::close_handler))
-        .route("/api/rl/train/start", post(rl::training::start_handler).layer(axum::middleware::from_fn_with_state(state.clone(), macro_exact_http::legacy_admission)))
+        .route("/api/rl/train/start", post(rl::training::start_handler).layer(axum::middleware::from_fn_with_state(state.clone(), harness::http::legacy_admission)))
         .route("/api/rl/train/stop", post(rl::training::stop_handler))
         .route("/api/rl/train/status", get(rl::training::status_handler))
         .route("/api/rl/train/stream", get(rl::training::stream_handler))
@@ -12419,7 +12565,7 @@ async fn main() {
             get(rl::training::get_runtime_params_handler)
                 .post(rl::training::set_runtime_params_handler),
         )
-        .route("/api/rl/analyze/start", post(rl::analysis::start_handler).layer(axum::middleware::from_fn_with_state(state.clone(), macro_exact_http::legacy_admission)))
+        .route("/api/rl/analyze/start", post(rl::analysis::start_handler).layer(axum::middleware::from_fn_with_state(state.clone(), harness::http::legacy_admission)))
         .route("/api/rl/analyze/stop", post(rl::analysis::stop_handler))
         .route("/api/rl/analyze/status", get(rl::analysis::status_handler))
         .route("/api/rl/analyze/stream", get(rl::analysis::stream_handler))
@@ -12427,7 +12573,7 @@ async fn main() {
             "/api/rl/analyze/latest_actions",
             get(rl::analysis::latest_actions_handler),
         )
-        .route("/api/rl/pretrain/start", post(rl::pretrain::start_handler).layer(axum::middleware::from_fn_with_state(state.clone(), macro_exact_http::legacy_admission)))
+        .route("/api/rl/pretrain/start", post(rl::pretrain::start_handler).layer(axum::middleware::from_fn_with_state(state.clone(), harness::http::legacy_admission)))
         .route("/api/rl/pretrain/stop", post(rl::pretrain::stop_handler))
         .route("/api/rl/pretrain/status", get(rl::pretrain::status_handler))
         .route("/api/rl/pretrain/stream", get(rl::pretrain::stream_handler))
@@ -12441,7 +12587,7 @@ async fn main() {
         .route("/api/equip/calculate", post(equip_calculate))
         .route("/api/equip/meta", get(equip_meta))
         .route("/api/equip/haste_tiers", get(equip_haste_tiers))
-        .route("/api/equip/auto_optimize", post(equip_auto_optimize).layer(axum::middleware::from_fn_with_state(state.clone(), macro_exact_http::legacy_admission)))
+        .route("/api/equip/auto_optimize", post(equip_auto_optimize).layer(axum::middleware::from_fn_with_state(state.clone(), harness::http::legacy_admission)))
         .route(
             "/api/equip/auto_optimize/progress",
             get(equip_auto_optimize_progress),

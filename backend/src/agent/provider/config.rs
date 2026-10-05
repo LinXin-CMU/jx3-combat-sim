@@ -43,6 +43,7 @@ struct ProviderConfigFile {
 #[derive(Debug, Clone)]
 pub struct ProviderCatalog {
     profiles: Vec<ProviderProfile>,
+    pub custom: super::custom::CustomProviderStore,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -62,6 +63,7 @@ pub struct ProviderListResponse {
 impl ProviderCatalog {
     pub fn offline_default() -> Self {
         Self {
+            custom: super::custom::CustomProviderStore::default(),
             profiles: vec![ProviderProfile {
                 id: "offline".to_string(),
                 label: "离线测试".to_string(),
@@ -114,6 +116,7 @@ impl ProviderCatalog {
         validate_profiles(&config.profiles)?;
         Ok(Self {
             profiles: config.profiles,
+            custom: super::custom::CustomProviderStore::default(),
         })
     }
 
@@ -125,7 +128,7 @@ impl ProviderCatalog {
     where
         F: Fn(&str) -> Option<String>,
     {
-        ProviderListResponse {
+        let mut result = ProviderListResponse {
             schema_version: PROVIDER_LIST_SCHEMA_V1,
             profiles: self
                 .profiles
@@ -145,10 +148,17 @@ impl ProviderCatalog {
                         },
                 })
                 .collect(),
+        };
+        if let Some(profile) = self.custom.safe_profile() {
+            result.profiles.push(profile);
         }
+        result
     }
 
     pub fn create_provider(&self, profile_id: &str) -> Result<Box<dyn LlmProvider>, ProviderError> {
+        if profile_id == super::custom::CUSTOM_PROFILE_ID {
+            return self.custom.create_provider();
+        }
         let profile = self
             .profiles
             .iter()
@@ -232,7 +242,8 @@ fn validate_profiles(profiles: &[ProviderProfile]) -> Result<(), ProviderError> 
     }
     let mut ids = HashSet::new();
     for profile in profiles {
-        if !super::protocol::valid_identifier(&profile.id) || !ids.insert(profile.id.as_str()) {
+        if profile.id == super::custom::CUSTOM_PROFILE_ID
+            || !super::protocol::valid_identifier(&profile.id) || !ids.insert(profile.id.as_str()) {
             return Err(ProviderError::configuration(
                 "provider_profile_id_invalid",
                 "provider profile ids must be unique safe identifiers",
@@ -318,7 +329,7 @@ fn validate_base_url(value: Option<&str>) -> Result<(), ProviderError> {
 }
 
 pub(super) fn is_loopback_host(host: &str) -> bool {
-    host.eq_ignore_ascii_case("localhost") || host == "127.0.0.1" || host == "::1"
+    host.eq_ignore_ascii_case("localhost") || host == "127.0.0.1" || host == "::1" || host == "[::1]"
 }
 
 fn valid_env_name(value: &str) -> bool {

@@ -734,7 +734,7 @@ pub(super) fn resume_tool_queries(events: &[AgentSessionEventV1], scenario_hash:
             for call in debug.tool_calls.iter().rev().filter(|call| call.ok) {
                 if !matches!(call.tool_name.as_str(),
                     "simulate_scenario" | "analyze_timeline" |
-                    "inspect_timeline_events" | "inspect_rotation_input") { continue; }
+                    "inspect_timeline_events" | "inspect_rotation_input" | "lookup_skill_definitions") { continue; }
                 let key = format!("{}:{}", call.tool_name, call.arguments);
                 if seen.insert(key) {
                     queries.push((call.tool_name.clone(), call.arguments.clone()));
@@ -747,6 +747,13 @@ pub(super) fn resume_tool_queries(events: &[AgentSessionEventV1], scenario_hash:
 }
 
 fn build_prior_context(events: &[AgentSessionEventV1]) -> Option<String> {
+    let requests: Vec<_> = events.iter().filter(|event| event.kind == "user_message")
+        .filter_map(|event| event.question.as_deref()).map(clarification_answer).collect();
+    // User intent is independent of the assistant's interpretation and survives
+    // dropping old report turns. Keep the opening request plus recent updates.
+    let user_messages: Vec<_> = requests.iter().enumerate()
+        .filter(|(index, _)| *index == 0 || *index >= requests.len().saturating_sub(6))
+        .map(|(_, text)| clipped(text)).collect();
     let turns = events
         .iter()
         .rev()
@@ -781,6 +788,7 @@ fn build_prior_context(events: &[AgentSessionEventV1]) -> Option<String> {
                     "question": clipped(&report.question),
                     "status": status_name(&result.status),
                     "summary": clipped(&report.content.summary),
+                    "body_markdown": clipped(&report.content.body_markdown),
                     "artifacts": &report.content.artifacts,
                     "findings": report.content.findings.iter().take(4).map(|finding| serde_json::json!({
                         "title": clipped(&finding.title),
@@ -802,7 +810,7 @@ fn build_prior_context(events: &[AgentSessionEventV1]) -> Option<String> {
         })
         .take(MAX_CONTEXT_TURNS)
         .collect::<Vec<_>>();
-    if turns.is_empty() {
+    if turns.is_empty() && user_messages.is_empty() {
         return None;
     }
     let mut chronological = turns;
@@ -818,6 +826,7 @@ fn build_prior_context(events: &[AgentSessionEventV1]) -> Option<String> {
         "schema_version": "agent-session-context/v1",
         "purpose": "conversation_continuity",
         "fact_status": "historical_assistant_interpretation",
+        "user_messages": user_messages,
         "status_meaning": "status 记录当时运行状态；玩法解释仍需结合当前机制与证据核对。",
         "turns": chronological,
         "artifacts": drafts.items(),
@@ -832,6 +841,15 @@ fn build_prior_context(events: &[AgentSessionEventV1]) -> Option<String> {
         }
     }
     serde_json::to_string(&context).ok()
+}
+
+/// Older browsers wrapped a reply in the assistant's entire question. That
+/// question is context, not an additional user request or accepted premise.
+pub(super) fn clarification_answer(text: &str) -> &str {
+    if text.starts_with("针对你的问题：") {
+        if let Some((_, answer)) = text.split_once("\n我的回答：") { return answer.trim(); }
+    }
+    text
 }
 
 fn clipped(value: &str) -> String {
@@ -1072,6 +1090,10 @@ fn json_response<T: Serialize>(status: StatusCode, value: T) -> Response {
     );
     response
 }
+
+#[cfg(test)]
+#[path = "../../tests/agent/user_intent.rs"]
+mod user_intent_tests;
 
 #[cfg(test)]
 mod tests {

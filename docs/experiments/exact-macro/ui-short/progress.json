@@ -1,0 +1,315 @@
+[
+  {
+    "status": "running",
+    "phase": "preparing",
+    "elapsed_ms": 1.9578999999999998,
+    "comparison": null
+  },
+  {
+    "status": "running",
+    "phase": "target",
+    "elapsed_ms": 1059.474,
+    "comparison": null
+  },
+  {
+    "status": "running",
+    "phase": "solving",
+    "elapsed_ms": 1412.0151,
+    "comparison": null
+  },
+  {
+    "status": "running",
+    "phase": "solving",
+    "elapsed_ms": 4252.6765,
+    "comparison": {
+      "actual_count": 34,
+      "exact_prefix": 6,
+      "first_difference": {
+        "actual": {
+          "channel_duration": null,
+          "channel_ticks": null,
+          "is_main": false,
+          "name": "血怒",
+          "sequence_index": null,
+          "skill_id": 13040,
+          "time": 5.0
+        },
+        "expected": {
+          "channel_duration": null,
+          "channel_ticks": null,
+          "is_main": true,
+          "name": "斩刀",
+          "sequence_index": 6,
+          "skill_id": 13054,
+          "time": 6.0
+        },
+        "index": 6
+      },
+      "max_time_error_on_order_prefix": 0.0,
+      "order_prefix": 6,
+      "reproduced": false,
+      "state_prefix": 6,
+      "target_count": 23,
+      "time_tolerance_seconds": 1e-07
+    }
+  },
+  {
+    "pause_resume_and_restore": "passed"
+  },
+  {
+    "status": "running",
+    "phase": "resumed",
+    "elapsed_ms": 6248.8922999999995,
+    "comparison": {
+      "actual_count": 34,
+      "exact_prefix": 6,
+      "first_difference": {
+        "actual": {
+          "channel_duration": null,
+          "channel_ticks": null,
+          "is_main": false,
+          "name": "血怒",
+          "sequence_index": null,
+          "skill_id": 13040,
+          "time": 5.0
+        },
+        "expected": {
+          "channel_duration": null,
+          "channel_ticks": null,
+          "is_main": true,
+          "name": "斩刀",
+          "sequence_index": 6,
+          "skill_id": 13054,
+          "time": 6.0
+        },
+        "index": 6
+      },
+      "max_time_error_on_order_prefix": 0.0,
+      "order_prefix": 6,
+      "reproduced": false,
+      "state_prefix": 6,
+      "target_count": 23,
+      "time_tolerance_seconds": 1e-07
+    }
+  },
+  {
+    "status": "running",
+    "phase": "solving",
+    "elapsed_ms": 9434.988000000001,
+    "comparison": {
+      "actual_count": 28,
+      "exact_prefix": 8,
+      "first_difference": {
+        "actual": {
+          "channel_duration": null,
+          "channel_ticks": null,
+          "is_main": false,
+          "name": "血怒",
+          "sequence_index": null,
+          "skill_id": 13040,
+          "time": 6.5
+        },
+        "expected": {
+          "channel_duration": null,
+          "channel_ticks": null,
+          "is_main": true,
+          "name": "阵云结晦",
+          "sequence_index": 8,
+          "skill_id": 30769,
+          "time": 7.5
+        },
+        "index": 8
+      },
+      "max_time_error_on_order_prefix": 0.0,
+      "order_prefix": 8,
+      "reproduced": false,
+      "state_prefix": 8,
+      "target_count": 23,
+      "time_tolerance_seconds": 1e-07
+    }
+  },
+  {
+    "status": "running",
+    "phase": "solving",
+    "elapsed_ms": 13339.5895,
+    "comparison": {
+      "actual_count": 33,
+      "exact_prefix": 10,
+      "first_difference": {
+        "actual": {
+          "channel_duration": null,
+          "channel_ticks": null,
+          "is_main": false,
+          "name": "盾回",
+          "sequence_index": null,
+          "skill_id": 13051,
+          "time": 10.0
+        },
+        "expected": {
+          "channel_duration": null,
+          "channel_ticks": null,
+          "is_main": true,
+          "name": "绝刀·50怒",
+          "sequence_index": 10,
+          "skill_id": 13055,
+          "time": 10.5
+        },
+        "index": 10
+      },
+      "max_time_error_on_order_prefix": 0.0,
+      "order_prefix": 10,
+      "reproduced": false,
+      "state_prefix": 10,
+      "target_count": 23,
+      "time_tolerance_seconds": 1e-07
+    }
+  },
+  {
+    "status": "running",
+    "phase": "solving",
+    "elapsed_ms": 18304.166599999997,
+    "comparison": {
+      "actual_count": 31,
+      "exact_prefix": 11,
+      "first_difference": {
+        "actual": {
+          "channel_duration": null,
+          "channel_ticks": null,
+          "is_main": false,
+          "name": "盾回",
+          "sequence_index": null,
+          "skill_id": 13051,
+          "time": 10.5
+        },
+        "expected": {
+          "channel_duration": null,
+          "channel_ticks": null,
+          "is_main": true,
+          "name": "绝刀·50怒",
+          "sequence_index": 11,
+          "skill_id": 13055,
+          "time": 12.0
+        },
+        "index": 11
+      },
+      "max_time_error_on_order_prefix": 0.0,
+      "order_prefix": 11,
+      "reproduced": false,
+      "state_prefix": 11,
+      "target_count": 23,
+      "time_tolerance_seconds": 1e-07
+    }
+  },
+  {
+    "status": "running",
+    "phase": "solving",
+    "elapsed_ms": 29983.9538,
+    "comparison": {
+      "actual_count": 29,
+      "exact_prefix": 22,
+      "first_difference": {
+        "actual": {
+          "channel_duration": null,
+          "channel_ticks": null,
+          "is_main": false,
+          "name": "盾回",
+          "sequence_index": null,
+          "skill_id": 13051,
+          "time": 22.5
+        },
+        "expected": {
+          "channel_duration": null,
+          "channel_ticks": null,
+          "is_main": true,
+          "name": "绝刀·20怒",
+          "sequence_index": 22,
+          "skill_id": 13055,
+          "time": 24.0
+        },
+        "index": 22
+      },
+      "max_time_error_on_order_prefix": 0.0,
+      "order_prefix": 22,
+      "reproduced": false,
+      "state_prefix": 22,
+      "target_count": 23,
+      "time_tolerance_seconds": 1e-07
+    }
+  },
+  {
+    "status": "running",
+    "phase": "solving",
+    "elapsed_ms": 38838.1781,
+    "comparison": {
+      "actual_count": 28,
+      "exact_prefix": 23,
+      "first_difference": {
+        "actual": {
+          "channel_duration": null,
+          "channel_ticks": null,
+          "is_main": false,
+          "name": "盾回",
+          "sequence_index": null,
+          "skill_id": 13051,
+          "time": 24.0
+        },
+        "expected": null,
+        "index": 23
+      },
+      "max_time_error_on_order_prefix": 0.0,
+      "order_prefix": 23,
+      "reproduced": false,
+      "state_prefix": 23,
+      "target_count": 23,
+      "time_tolerance_seconds": 1e-07
+    }
+  },
+  {
+    "status": "running",
+    "phase": "compressing",
+    "elapsed_ms": 51931.6087,
+    "comparison": {
+      "actual_count": 23,
+      "exact_prefix": 23,
+      "first_difference": null,
+      "max_time_error_on_order_prefix": 0.0,
+      "order_prefix": 23,
+      "reproduced": true,
+      "state_prefix": 23,
+      "target_count": 23,
+      "time_tolerance_seconds": 1e-07
+    }
+  },
+  {
+    "status": "running",
+    "phase": "best",
+    "elapsed_ms": 54064.2525,
+    "comparison": {
+      "actual_count": 23,
+      "exact_prefix": 23,
+      "first_difference": null,
+      "max_time_error_on_order_prefix": 0.0,
+      "order_prefix": 23,
+      "reproduced": true,
+      "state_prefix": 23,
+      "target_count": 23,
+      "time_tolerance_seconds": 1e-07
+    }
+  },
+  {
+    "status": "exact",
+    "phase": "finished",
+    "elapsed_ms": 138307.69019999998,
+    "comparison": {
+      "actual_count": 23,
+      "exact_prefix": 23,
+      "first_difference": null,
+      "max_time_error_on_order_prefix": 0.0,
+      "order_prefix": 23,
+      "reproduced": true,
+      "state_prefix": 23,
+      "target_count": 23,
+      "time_tolerance_seconds": 1e-07
+    }
+  }
+]

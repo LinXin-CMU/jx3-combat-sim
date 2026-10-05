@@ -1,5 +1,6 @@
-﻿id   = 13387
+id   = 13387
 name = "惊沙"
+description = "“盾毅”后可施展，将目标下压砸地，击倒8尺范围内最多5个被击僵直状态的目标3秒。"
 
 icon = "https://icon.jx3box.com/icon/6349.png"
 # 盾毅后可施展，将目标下压砸地
@@ -22,6 +23,6 @@ rank           = 1
 name           = "惊沙"
 icon = "https://icon.jx3box.com/icon/6349.png"
 requires_combo = "盾毅_2"
-base_damage  = 0
-attack_coeff = 0
+base_damage_range = [11.0, 12.0]
+attack_coeff = 0.06950210029786932
 weapon_coeff = 0

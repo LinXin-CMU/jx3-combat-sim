@@ -45,6 +45,8 @@ pub struct CreateAgentRunRequest {
     pub question: String,
     pub provider_profile: String,
     #[serde(default)]
+    pub acceptance: Option<super::completion::TaskAcceptanceV1>,
+    #[serde(default)]
     pub session_id: Option<String>,
     #[serde(default)]
     pub task_hint: Option<AnalysisTaskType>,
@@ -517,6 +519,10 @@ pub async fn create_run_handler(
             "question must be non-empty and within the configured limit",
         );
     }
+    if request.acceptance.as_ref().is_some_and(|value| value.validate().is_err()) {
+        return error_response(StatusCode::BAD_REQUEST, None, "invalid_acceptance",
+            "acceptance checks exceed the supported range");
+    }
     if contains_likely_secret(&request.question) {
         return error_response(
             StatusCode::BAD_REQUEST,
@@ -557,6 +563,7 @@ pub async fn create_run_handler(
     };
     let run_id = state.agent_runs.next_run_id();
     let input = AgentRunInput {
+        acceptance: request.acceptance,
         run_id: run_id.clone(),
         question: request.question,
         scenario: scenario.clone(),
@@ -770,6 +777,7 @@ mod tests {
         let scenario = runtime.fixture_scenario();
         let run_id = "run-manager-success".to_string();
         let input = AgentRunInput {
+            acceptance: None,
             resume_tools: Vec::new(),
             run_id: run_id.clone(),
             question: "分析当前循环。".to_string(),
@@ -861,6 +869,7 @@ mod tests {
         let (manager, root) = test_manager("cancel");
         let runtime = AgentRuntime::fixture();
         let first = AgentRunInput {
+            acceptance: None,
             resume_tools: Vec::new(),
             run_id: "run-active-first".to_string(),
             question: "等待取消。".to_string(),
@@ -884,6 +893,7 @@ mod tests {
 
         let second_runtime = AgentRuntime::fixture();
         let second = AgentRunInput {
+            acceptance: None,
             resume_tools: Vec::new(),
             run_id: "run-active-second".to_string(),
             question: "不应启动。".to_string(),

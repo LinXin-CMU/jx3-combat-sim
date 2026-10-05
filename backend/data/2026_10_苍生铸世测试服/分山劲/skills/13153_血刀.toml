@@ -1,7 +1,7 @@
-﻿id   = 13153
+id   = 13153
 name = "血刀"
 icon = "https://icon.jx3box.com/icon/6440.png"
-description = "奇穴 / 擎刀 / 消耗10怒气 / 闪刀命中后可施展两次 / 传播流血"
+description = "消耗10点怒气，“闪刀”命中目标后方可施展，可对12尺范围内最多5个目标造成100%的武器伤害外加{{damage:血刀}}外功伤害，若当前目标附带自身的流血效果，则对血刀命中的所有目标都将增加一层流血效果。"
 
 # 奇穴技能（第三重·血刀）
 # 消耗 10 怒气 / "闪刀"命中后可施展两次
@@ -22,6 +22,6 @@ rank           = 1
 name           = "血刀"
 icon = "https://icon.jx3box.com/icon/6440.png"
 requires_combo = "闪刀_后续"
-base_damage  = 362.0      # (345 + 379) / 2
-attack_coeff = 3.53750
+base_damage_range = [34.0, 37.0]
+attack_coeff = 1.968299480435659
 weapon_coeff = 1.0

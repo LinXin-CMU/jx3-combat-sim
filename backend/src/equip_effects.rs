@@ -144,6 +144,14 @@ pub fn shen_bing_wu_shuang_for(weapon_id: u32) -> Option<(u32, f64)> {
         .map(|(i, (_, v))| ((i as u32) + 1, *v))
 }
 
+pub fn shen_bing_wu_shuang_at_level(weapon_id: u32, player_level: u32) -> Option<(u32, f64)> {
+    let (rank, legacy) = shen_bing_wu_shuang_for(weapon_id)?;
+    // 与上面的武器顺序相同；50级采用对应档位的无双等级。
+    const LEVEL50: [f64; 16] = [7.0, 8.0, 9.0, 9.0, 10.0, 11.0, 11.0, 12.0, 13.0, 15.0,
+        9.0, 10.0, 10.0, 11.0, 13.0, 14.0];
+    Some((rank, if player_level == 50 { LEVEL50[(rank - 1) as usize] } else { legacy }))
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 暗影千机赛季 5 件大附魔（仅 4 件影响 DPS：帽 / 腰 / 腕 / 鞋）
 // ─────────────────────────────────────────────────────────────────────────────
@@ -365,7 +373,7 @@ pub fn on_battle_start(player: &mut Player) {
     // strain rate（用于 裤·高级 conditional）：
     let strain_pct = slots.get(&StrainBasePercentAdd).copied().unwrap_or(0.0) / 1024.0;
     let cur_strain_lvl = base.strain_level + slots.get(&StrainBase).copied().unwrap_or(0.0);
-    let cur_strain_rate = (cur_strain_lvl / crate::LP_STRAIN) * (1.0 + strain_pct);
+    let cur_strain_rate = (cur_strain_lvl / crate::level_params::LevelParams::for_level(player.constants.level).strain) * (1.0 + strain_pct);
 
     // 黄字帽 38934 max-pick
     if player.has_enchant(YE_HAT_3471) {

@@ -2,7 +2,9 @@
 /* Hide the retired entry before the sequential scripts mount the shared shell. */
 #sim_ai_fab { display: none !important; }
 .assistant-shell { position: fixed; z-index: 950; display: flex; flex-direction: column; min-width: 0; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 18px; box-shadow: 0 24px 90px #0005, 0 3px 12px #0002; isolation: isolate; }
-.assistant-shell[hidden], .assistant-panel[hidden] { display: none !important; }
+.assistant-shell[hidden], .assistant-panel[hidden], .assistant-tabs button[hidden],
+[data-page="page-harness"][hidden], [data-quick-page="page-harness"][hidden],
+[data-hub-goto="page-harness"][hidden], #page-harness[hidden] { display: none !important; }
 .assistant-handle { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 15px 16px 13px; cursor: grab; touch-action: none; user-select: none; border-radius: 18px 18px 0 0; background: linear-gradient(135deg, var(--surface), var(--surface2)); }
 .assistant-brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .assistant-sigil { display: grid; place-items: center; color: var(--gold); width: 32px; height: 36px; font-size: 33px; }

@@ -1,7 +1,7 @@
-﻿id   = 13424
+id   = 13424
 name = "撼地"
 icon = "https://icon.jx3box.com/icon/6350.png"
-description = "门派轻功 / 5尺范围眩晕3秒 / 每命中回复5怒气"
+description = "门派轻功，对目标造成100%的武器伤害外加{{damage:撼地}}外功伤害。腾空跳向目标区域，对半径5尺范围内最多5个目标造成眩晕，持续3秒。每命中一个目标回复5点怒气。"
 
 # 门派轻功 / 5尺范围最多5目标眩晕3秒
 # 每命中一目标回复5点怒气
@@ -36,6 +36,6 @@ haste    = false
 rank         = 1
 name         = "撼地"
 icon = "https://icon.jx3box.com/icon/6350.png"
-base_damage  = 105.0      # (100 + 110) / 2
-attack_coeff = 0.6250
+base_damage_range = [10.0, 11.0]
+attack_coeff = 0.06950210029786932
 weapon_coeff = 1.0

@@ -1,7 +1,7 @@
 id   = 13054
 name = "斩刀"
 icon = "https://icon.jx3box.com/icon/6318.png"
-description = "擎刀 / CD10秒 / 消耗15怒气 / 20尺突进 / 移除虚弱添加流血 / 锁足3秒"
+description = "消耗15点怒气，跳跃至目标位置并将目标击下马并锁足3.5秒，造成100%的武器伤害外加{{damage:斩刀}}外功伤害。命中有自身虚弱或流血效果的目标，使目标获得流血效果，持续24秒。"
 
 # 姿态: 擎刀 / 距离: 20尺突进 / CD: 10秒 / GCD: 1.5秒
 # 消耗 15 怒气，冲向目标，使目标下马并锁足 3 秒
@@ -38,6 +38,6 @@ haste    = false
 rank         = 1
 name         = "斩刀"
 icon = "https://icon.jx3box.com/icon/6318.png"
-base_damage  = 233.0      # (228 + 238) / 2
-attack_coeff = 7.48125
+base_damage_range = [22.8, 23.7]
+attack_coeff = 0.8319401405654957
 weapon_coeff = 1.0

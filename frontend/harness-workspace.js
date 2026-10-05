@@ -152,7 +152,7 @@
         ...(sequence.includes('__macro__') ? { macro_text: buildMacroText() } : {}),
         ...(pureMacro && macroLastDuration > 0 ? { macro_duration: macroLastDuration } : {}),
         attributes: getSimAttrs(), target: getTarget(), initial_rage: adminInitialRage,
-        boss_attack_interval: getBossAttackInterval(), hanjia_expectation: isHanjiaExpectationEnabled(), ...(typeof getDunyaResetOptions === "function" ? getDunyaResetOptions() : {}),
+        boss_attack_interval: getBossAttackInterval(), hanjia_expectation: isHanjiaExpectationEnabled(), ...getDunyaResetOptions(),
         tiegu_mode: getTieguMode(), experimental: isExperimental(), equipment: getEquipmentMap(),
         team_buffs: getTeamBuffs(), formation: getCurrentFormation(), pre_releases: getPreReleases() };
       const equipmentConfig = root.Jx3Equip?.getCurrentConfig?.();

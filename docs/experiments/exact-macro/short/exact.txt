@@ -1,0 +1,12 @@
+/cast [bufftime:盾飞<12.500000&sun>24] 绝刀
+/fcast [rage>0&sun>44] 雁门迢递
+/fcast [rage<100] 斩刀
+/cast [last_skill~=盾猛&rage>0] 盾刀
+/cast [last_skill~=盾猛&rage>0] 阵云结晦
+/cast [rage<100&rage>0] 盾压
+/fcast [buff:威压=5&last_skill~=血怒] 月照连营
+/fcast [rage<20] 盾猛
+/cast [last_skill=斩刀&skill_energy:盾飞>1] 血怒
+/fcast 绝刀
+/fcast [bufftime:缓深>4.000000&rage<35] 盾回
+/fcast [buff:威压=5&bufftime:威压>28.500000] 盾飞

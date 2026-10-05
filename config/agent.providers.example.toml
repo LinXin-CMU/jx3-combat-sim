@@ -33,14 +33,14 @@ model = "deepseek-v4-pro"
 base_url = "https://api.deepseek.com"
 api_key_env = "JX3_DEEPSEEK_API_KEY"
 chat_compatibility = "deepseek"
-enabled = false
+enabled = true
 
 [[profiles]]
 id = "deepseek-v4-flash"
-label = "DeepSeek V4.1 Flash"
+label = "DeepSeek V4 Flash"
 adapter = "openai_compatible_chat"
-model = "deepseek-v4.1-flash-expires-on-0910"
+model = "deepseek-v4-flash"
 base_url = "https://api.deepseek.com"
 api_key_env = "JX3_DEEPSEEK_API_KEY"
 chat_compatibility = "deepseek"
-enabled = false
+enabled = true

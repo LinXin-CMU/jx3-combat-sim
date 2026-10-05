@@ -51,7 +51,7 @@ $profiles = @(
   [pscustomobject]@{ id = 'deepseek-v4-pro'; input_price = 0.435; output_price = 0.87 },
   [pscustomobject]@{ id = 'deepseek-v4-flash'; input_price = 0.14; output_price = 0.28 }
 )
-$allowedTools = @('get_current_scenario', 'search_knowledge_base', 'simulate_scenario', 'compare_scenarios', 'analyze_timeline')
+$allowedTools = @('lookup_skill_definitions', 'get_current_scenario', 'search_knowledge_base', 'simulate_scenario', 'compare_scenarios', 'analyze_timeline')
 $machineTerms = @('simulate_scenario', 'compare_scenarios', 'search_knowledge_base', 'json_pointer', 'evidence_id', 'fact_eligible', 'source_url', 'scenario_hash', 'engine_string')
 
 function Assert-True {

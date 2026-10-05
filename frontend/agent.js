@@ -71,11 +71,11 @@
     analysis_plan_selected: '准备分析上下文',
     evidence_coverage_checked: '检查证据覆盖',
     reasoning_state_updated: '更新问题推导状态',
-    reasoning_critique_started: '执行发布前批判检查',
-    reasoning_critique_failed: '批判检查要求修订',
-    reasoning_critique_passed: '批判检查通过',
-    report_validation_started: '校验报告证据',
-    report_validation_passed: '证据校验通过',
+    reasoning_critique_started: '复核报告规则',
+    reasoning_critique_failed: '报告复核要求修订',
+    reasoning_critique_passed: '报告规则复核通过',
+    report_validation_started: '校验报告结构、数值与引用',
+    report_validation_passed: '报告结构、数值与引用校验通过',
     model_context_compacted: '压缩模型上下文',
     model_context_handoff: '重建紧凑上下文',
     model_context_limit_evidence_preserved: '上下文已安全截停',
@@ -94,7 +94,7 @@
     provider_empty_evidence_preserved: '保留已有证据',
     knowledge_searches_coalesced: '合并冗余检索',
     knowledge_only_client_scope: '限定为知识问答',
-    completed: '分析完成',
+    completed: '报告已生成',
     partially_verified: '部分通过',
     needs_user_input: '等待你的回答',
     refused: '安全拒绝',
@@ -109,7 +109,7 @@
   };
 
   const statusLabels = {
-    created: '已创建', running: '运行中', completed: '已完成', partially_verified: '部分通过', needs_user_input: '等待回答', refused: '已拒绝',
+    created: '已创建', running: '运行中', completed: '报告已生成', partially_verified: '部分通过', needs_user_input: '等待回答', refused: '已拒绝',
     cancelled: '已取消', interrupted: '已中断', evidence_insufficient: '未形成可靠结论',
     budget_exhausted: '预算耗尽', provider_failed: 'Provider 故障',
     protocol_failed: '协议故障', timed_out: '超时', finished: '已结束',
@@ -119,6 +119,7 @@
     distill_macro: '蒸馏宏 · 生成规则初稿',
     get_current_scenario: '读取当前场景',
     ask_user_question: '向你确认关键信息',
+    lookup_skill_definitions: '查阅技能与奇穴定义',
     search_knowledge_base: '检索版本知识库',
     simulate_scenario: '运行基线模拟',
     compare_scenarios: '对比候选方案',
@@ -304,9 +305,11 @@
     return wrap;
   }
 
+  const scopedValidationKinds = new Set(['reasoning_critique_started', 'reasoning_critique_failed', 'reasoning_critique_passed', 'report_validation_started', 'report_validation_passed', 'completed', 'partially_verified']);
+
   function thinkingText(event) {
     const kind = event?.trace_kind || event?.kind;
-    if (event?.overview && ['planning', 'analysis_context_prepared', 'analysis_plan_selected', 'evidence_coverage_checked',
+    if (event?.overview && !scopedValidationKinds.has(kind) && ['planning', 'analysis_context_prepared', 'analysis_plan_selected', 'evidence_coverage_checked',
       'reasoning_state_updated', 'reasoning_critique_started',
       'tool_started', 'model_started', 'decision_checkpoint'].includes(kind)) return event.overview;
     if (kind === 'planning') return '正在拆解问题并选择验证路径…';
@@ -321,9 +324,9 @@
         : '当前证据还不足以发布修改方案，正在补做同场景候选对照。';
     }
     if (kind === 'reasoning_state_updated') return '正在更新本题的证据检查点与下一步动作…';
-    if (kind === 'reasoning_critique_started') return '正在检查结论是否真正回答问题并满足证据边界…';
-    if (kind === 'reasoning_critique_failed') return '结论未通过任务完成度检查，正在依据已有证据修订…';
-    if (kind === 'reasoning_critique_passed') return '语义与证据检查通过，正在发布结论…';
+    if (kind === 'reasoning_critique_started') return '正在复核报告字段、证据引用与规则约束…';
+    if (kind === 'reasoning_critique_failed') return '报告未通过当前自动规则复核，正在依据已有证据修订…';
+    if (kind === 'reasoning_critique_passed') return '报告规则复核通过，正在发布分析…';
     if (kind === 'model_context_compacted') return '正在压缩旧轮次与工具输出，完整证据仍保留在后台…';
     if (kind === 'model_context_handoff') return '正在用最新证据状态重建紧凑上下文…';
     if (kind === 'tool_started') return `正在${toolLabel(event.tool_name)}…`;
@@ -356,9 +359,9 @@
     }
     const status = result?.status;
     if (status === 'completed') {
-      setStatus(recovered ? '分析完成 · 已恢复验证结论' : '分析完成 · 结论已绑定证据并保存');
+      setStatus(recovered ? '分析结束 · 已恢复报告' : '分析结束 · 报告已保存');
     } else if (status === 'partially_verified') {
-      setStatus(recovered ? '分析完成 · 已恢复部分验证结论' : '分析完成 · 已保留通过逐项校验的结论');
+      setStatus(recovered ? '分析结束 · 已恢复部分通过校验的报告' : '分析结束 · 已保留通过逐项校验的内容');
     } else if (status === 'needs_user_input') {
       setStatus('分析已暂停 · 回答上方问题后可在当前会话继续');
     } else if (status === 'evidence_insufficient') {
@@ -409,7 +412,7 @@
     try { return await response.json(); } catch (_) { return null; }
   }
 
-  async function loadProviders() {
+  async function loadProviders(selectedId) {
     try {
       const response = await fetch('/api/agent/providers', { cache: 'no-store' });
       if (!response.ok) throw new Error('Provider 列表不可用');
@@ -417,6 +420,7 @@
       const profiles = Array.isArray(body.profiles) ? body.profiles : [];
       let preferred = '';
       try { preferred = localStorage.getItem('agent_provider_profile') || ''; } catch (_) {}
+      if (selectedId) preferred = selectedId;
       const available = profiles.find(profile => profile.id === preferred && profile.available)
         || profiles.find(profile => profile.available && profile.id !== 'offline')
         || profiles.find(profile => profile.available);
@@ -433,6 +437,7 @@
         if (available) select.value = available.id;
       });
       syncProviderModel();
+      if (selectedId && available) selectProvider(els.provider);
     } catch (error) {
       setStatus(error.message || 'Provider 列表加载失败', true);
     }
@@ -547,7 +552,7 @@
     title.appendChild(element('span', '', '可验证执行轨迹 · 阶段概述'));
     const actions = element('span', 'agent-card-actions');
     actions.appendChild(element('span', 'agent-trace-run-id', runId || '—'));
-    actions.appendChild(cardCopyButton('复制思维链', () => traceCardText(wrap, false), false));
+    actions.appendChild(cardCopyButton('复制执行轨迹', () => traceCardText(wrap, false), false));
     title.appendChild(actions);
     const note = element('p', 'agent-trace-note', '展示阶段目标、工具动作、证据产出与校验结果；不展示模型隐藏推理。');
     const steps = element('div', 'agent-trace-steps');
@@ -566,7 +571,7 @@
       return `证据覆盖 · ${{ sufficient: '充分', partial: '部分', insufficient: '不足' }[event?.code] || '检查完成'}`;
     }
     if (kind === 'reasoning_state_updated') return event?.code ? `当前检查点 · ${event.code}` : '检查点已更新';
-    if (kind === 'reasoning_critique_passed') return '语义契约已满足';
+    if (kind === 'reasoning_critique_passed') return '自动规则通过 · 语义仍待评审';
     if (kind === 'model_started') {
       return {
         tool_selection: '规划下一步',
@@ -602,8 +607,9 @@
   }
 
   function traceStageOverview(event) {
-    if (event?.overview) return event.overview;
     const kind = event?.trace_kind || event?.kind;
+    // Historical server prose must not promote structural checks to semantic acceptance.
+    if (event?.overview && !scopedValidationKinds.has(kind)) return event.overview;
     const evidenceCount = Array.isArray(event?.evidence_ids) ? event.evidence_ids.length : 0;
     const toolStarted = {
       get_current_scenario: '读取服务端冻结的场景快照，锁定版本、心法、配置与输入口径。',
@@ -634,6 +640,8 @@
       planning: '识别问题类型、可用工具与本轮预算，选择最小可验证路径。',
       knowledge_only_client_scope: '该问题限定为纯知识检索，不调用尚未实现的无界端战斗模拟。',
       validating: '逐项核对报告结构、指标值、单位、证据 ID 与数据路径。',
+      report_validation_started: '逐项核对报告结构、指标值、单位、证据 ID 与数据路径。',
+      report_validation_passed: '报告结构、数值与引用已通过自动校验；该结果不判定定性解释是否充分。',
       report_repair_requested: '报告结构未通过校验；执行一次有界修复，不新增事实或证据。',
       report_citations_normalized: '补全可确定的指标引用关系，保持模拟器原值不变。',
       report_claims_sanitized: '移除未通过数值或引用校验的表述，只发布可验证部分。',
@@ -643,9 +651,9 @@
       no_new_evidence_finish: '本轮只复用了已有确定性结果；证据已经收敛，直接进入回答。',
       decision_checkpoint: '记录当前观察、证据缺口、工具选择理由与下一步判定条件。',
       reasoning_state_updated: '逐项显示哪些判断已经有证据、哪些可以开始分析、哪些仍需补证。',
-      reasoning_critique_started: '从任务完成度、证据归属、因果强度、范围和干预必要性检查报告。',
-      reasoning_critique_failed: '报告通过了格式校验，但没有完成本题推导契约；只基于已有证据修订。',
-      reasoning_critique_passed: '报告已经回答当前任务，并通过语义与证据边界检查。',
+      reasoning_critique_started: '复核报告字段、引用与当前自动规则；该检查不代替回答充分性与因果解释的评审。',
+      reasoning_critique_failed: '报告未满足当前自动规则；依据已有证据修订，不据此判定任务是否完成。',
+      reasoning_critique_passed: '报告通过当前自动规则复核；回答是否充分、因果解释是否成立仍需评审。',
       model_context_compacted: '仅压缩发送给模型的副本；后台完整证据、复现记录和校验路径不变。',
       model_context_handoff: '旧对话被替换为当前问题、分析计划、紧凑证据和最新检查点，避免上下文无限累积。',
       model_context_limit_evidence_preserved: '请求在本地硬上限前停止，未把超长内容发送给供应商。',
@@ -653,8 +661,8 @@
       evidence_gap_requires_tool: event?.tool_name === 'analyze_timeline'
         ? '必须先取得基线时间轴诊断，才能判断循环哪里做得好、哪里存在风险。'
         : '修改方案还缺少同场景候选对照，暂不发布为已验证结论。',
-      completed: '结构、数值与引用均通过校验，发布可溯源结论。',
-      partially_verified: '部分内容未通过校验；仅发布已验证结论并保留限制说明。',
+      completed: '报告已生成；结构、数值与引用的校验结果不等同于任务已完整解决。',
+      partially_verified: '部分内容未通过结构、数值或引用校验；保留通过的内容与限制说明。',
       evidence_insufficient: '现有输出无法满足证据规则；不发布未经验证的结论。',
       budget_exhausted: '本轮已达到预设预算；保留现有证据与诊断信息后停止。',
       budget_limit_reached: '本次新实验未执行；保留已有证据并转入受限报告，不中断整段对话。',
@@ -729,7 +737,8 @@
 
     finishActiveTraceStep(trace);
     const suffix = event.tool_name ? ` · ${toolLabel(event.tool_name)}` : '';
-    const label = event.label || (kind === 'tool_started' ? `调用工具${suffix}` : `${traceLabels[kind] || kind}${suffix}`);
+    const label = scopedValidationKinds.has(kind) ? traceLabels[kind]
+      : event.label || (kind === 'tool_started' ? `调用工具${suffix}` : `${traceLabels[kind] || kind}${suffix}`);
     const step = createTraceStep('agent-trace-step', label, traceStageOverview(event), traceStepMeta(event), false);
     const terminal = ['completed', 'partially_verified', 'needs_user_input', 'refused', 'cancelled', 'evidence_insufficient',
       'budget_exhausted', 'provider_failed', 'protocol_failed', 'timed_out'].includes(kind);
@@ -791,8 +800,51 @@
     return traceLabels[kind] || statusLabels[kind] || kind;
   }
 
+  const completionStatusLabels = { checks_passed: '客观检查通过', checks_incomplete: '客观依据待补齐', needs_review: '含待评审内容' };
+  const completionCheckLabels = { passed: '已通过', missing: '待补齐', needs_review: '待评审' };
+  const artifactCheckLabels = { simulation_matched: '文本与实测一致', not_tested: '未实测', invalid_syntax: '语法未通过', not_executable: '非可执行文本' };
+
+  function taskCompletionLines(result) {
+    const completion = result?.task_completion;
+    if (!completion || typeof completion !== 'object') return [];
+    const lines = [];
+    if (completion.objective) lines.push(`目标：${completion.objective}`);
+    lines.push(`客观验收：${completionStatusLabels[completion.status] || '尚未判定'}`);
+    if (completion.semantic_review_required) lines.push('自动检查只覆盖列出的交付条件；回答充分性与因果解释仍需评审。');
+    for (const check of Array.isArray(completion.checks) ? completion.checks : []) {
+      lines.push(`检查 · ${check.label || check.id || '未命名检查'}：${completionCheckLabels[check.status] || '尚未判定'}。${check.detail || ''}`);
+      if (Array.isArray(check.evidence_ids) && check.evidence_ids.length) lines.push(`关联证据：${check.evidence_ids.join(', ')}`);
+    }
+    for (const artifact of Array.isArray(completion.artifacts) ? completion.artifacts : []) {
+      lines.push(`交付物 · ${artifact.title || '未命名交付物'}${artifact.language ? `（${artifact.language}）` : ''}：${artifactCheckLabels[artifact.status] || '尚未判定'}。${artifact.detail || ''}`);
+      if (artifact.content_sha256) lines.push(`文本 SHA-256：${artifact.content_sha256}`);
+      if (Array.isArray(artifact.evidence_ids) && artifact.evidence_ids.length) lines.push(`关联证据：${artifact.evidence_ids.join(', ')}`);
+    }
+    return lines;
+  }
+
+  function appendTaskCompletion(parent, result, compact) {
+    const lines = taskCompletionLines(result);
+    if (!lines.length) return;
+    const details = element('details', `${compact ? 'sim-ai-result-boundaries' : 'agent-boundaries'} agent-task-completion`);
+    details.dataset.status = result.task_completion.status || 'unknown';
+    details.appendChild(element('summary', '', `验证依据 · ${completionStatusLabels[result.task_completion.status] || '尚未判定'}`));
+    lines.forEach(line => {
+      const paragraph = element('p', '', line);
+      paragraph.style.overflowWrap = 'anywhere';
+      details.appendChild(paragraph);
+    });
+    parent.appendChild(details);
+  }
+
+  function appendTaskCompletionSummary(lines, result) {
+    const completion = taskCompletionLines(result);
+    if (completion.length) lines.push('', '## 验证依据', ...completion.map(line => `- ${line}`));
+  }
+
   function appendDiagnostics(parent, result, compact) {
     if (!parent || !result) return;
+    appendTaskCompletion(parent, result, compact);
     const trace = Array.isArray(result.trace) ? result.trace : [];
     const lastTool = [...trace].reverse().find(event => event.kind === 'tool_finished'
       && !event.code && Array.isArray(event.evidence_ids) && event.evidence_ids.length)?.tool_name;
@@ -1074,6 +1126,11 @@
     const text = normalizeTimelineProse(readableProse(value, metrics));
     const root = element(tagName === 'p' ? 'div' : tagName, `${className || ''} agent-prose`);
     parent.appendChild(root);
+    const article = root.classList.contains('agent-freeform-answer');
+    const paragraph = [];
+    const flushParagraph = () => {
+      if (paragraph.length) appendInlineProse(root, 'p', '', paragraph.splice(0).join(' '));
+    };
     const lines = text.split(/\r?\n/);
     // Protect anchor pipes before splitting Markdown table cells.
     const cells = line => {
@@ -1085,9 +1142,10 @@
     const lists = [];
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim();
-      if (!line) continue;
+      if (!line) { flushParagraph(); continue; }
       const marker = /^(\s*)(?:(\d{1,9})([.)])|([-*+]))\s+(.*)$/.exec(lines[i]);
       if (marker) {
+        flushParagraph();
         const indent = marker[1].replace(/\t/g, '    ').length;
         const kind = marker[2] ? 'ol' : 'ul';
         const delimiter = marker[3] || marker[4];
@@ -1114,10 +1172,12 @@
       }
       lists.length = 0;
       if (/^```/.test(line)) {
+        flushParagraph();
         const code = [];
         while (++i < lines.length && !/^```/.test(lines[i])) code.push(lines[i]);
         root.appendChild(element('pre', '', code.join('\n')));
       } else if (i + 1 < lines.length && lines[i + 1].includes('|') && cells(lines[i + 1]).every(cell => /^:?-{3,}:?$/.test(cell))) {
+        flushParagraph();
         const wrap = element('div', 'agent-prose-table');
         const table = element('table');
         const header = element('tr');
@@ -1131,11 +1191,19 @@
         }
         wrap.appendChild(table); root.appendChild(wrap);
       } else if (/^#{1,6}\s+/.test(line)) {
-        appendInlineProse(root, 'h4', '', line.replace(/^#{1,6}\s+/, ''));
+        flushParagraph();
+        const level = /^#+/.exec(line)[0].length;
+        appendInlineProse(root, article ? `h${level}` : 'h4', '', line.replace(/^#{1,6}\s+/, ''));
+      } else if (article && /^(?:-{3,}|\*{3,}|_{3,})$/.test(line)) {
+        flushParagraph();
+        root.appendChild(element('hr'));
+      } else if (article) {
+        paragraph.push(line);
       } else {
         appendInlineProse(root, 'span', 'agent-prose-line', line);
       }
     }
+    flushParagraph();
     return root;
   }
 
@@ -1358,13 +1426,23 @@
         || latestRunBySession.get(currentSessionId) !== result.run_id) return;
       const answer = selection === 'custom' ? custom.value.trim() : options[selection]?.label;
       if (!answer) return;
-      const question = `针对你的问题：${clarification.question}\n我的回答：${answer}`;
+      const question = answer;
       if (compact) await startDockRun(question);
       else await startRun(question);
       updateClarificationControls();
     });
     parent.appendChild(form);
     queueMicrotask(updateClarificationControls);
+  }
+
+  function appendAnswer(card, content, metrics, compact) {
+    const body = String(content?.body_markdown || '').trim();
+    appendRichProse(card, 'div', body ? 'agent-freeform-answer' : (compact ? 'sim-ai-result-summary' : 'agent-report-summary'), body || content?.summary, metrics);
+    if (!body || !(content?.findings?.length || content?.recommendations?.length)) return card;
+    const evidence = element('details', compact ? 'sim-ai-result-boundaries' : 'agent-boundaries');
+    evidence.appendChild(element('summary', '', '依据与指标'));
+    card.appendChild(evidence);
+    return evidence;
   }
 
   function renderReport(result) {
@@ -1408,7 +1486,7 @@
     const head = element('div', 'agent-report-head');
     head.appendChild(element('b', '', evidenceInsufficient
       ? '本轮未形成可靠结论'
-      : partiallyVerified ? '部分验证分析报告' : '已验证分析报告'));
+      : report.content?.body_markdown ? '分析回复' : partiallyVerified ? '部分通过校验的分析报告' : '分析报告'));
     const actions = element('span', 'agent-card-actions');
     actions.appendChild(element('span', '', `${report.provider_profile} / ${report.model} · ${result.accounting?.duration_ms || 0}ms`));
     actions.appendChild(cardCopyButton('复制结论', () => buildSummary(result), false));
@@ -1428,7 +1506,7 @@
       if (result.error?.code) notice.title = `首个校验码：${result.error.code}`;
       card.appendChild(notice);
     }
-    appendRichProse(card, 'div', 'agent-report-summary', report.content?.summary, allMetrics);
+    const findingsParent = appendAnswer(card, report.content, allMetrics, false);
     appendEquipmentComparisons(card, report.equipment_comparisons || [], false);
 
     (report.content?.findings || []).forEach(finding => {
@@ -1436,7 +1514,7 @@
       appendRichProse(block, 'h4', '', finding.title, finding.metrics);
       appendRichProse(block, 'p', '', finding.explanation, finding.metrics);
       appendMetricGrid(block, finding.metrics, 'agent-metrics');
-      card.appendChild(block);
+      findingsParent.appendChild(block);
     });
 
     appendRotationChanges(card, report.content?.rotation_changes || [], allMetrics, false);
@@ -1453,7 +1531,7 @@
         `${readableProse(item.title, allMetrics)}：${readableProse(item.rationale, allMetrics)}`,
         allMetrics,
       ));
-      card.appendChild(block);
+      findingsParent.appendChild(block);
     }
     appendKnowledgeSources(card, report.sources || [], false);
     const limitations = report.content?.limitations || [];
@@ -1468,7 +1546,7 @@
       card.appendChild(block);
     }
     appendDiagnostics(card, result, false);
-    card.appendChild(element('div', 'agent-evidence', `scenario ${result.scenario_hash} · prompt ${result.prompt_version} / ${result.prompt_sha256} · evidence ${(report.evidence_ids || []).join(', ') || 'none'}`));
+    if (!report.content?.body_markdown) card.appendChild(element('div', 'agent-evidence', `scenario ${result.scenario_hash} · prompt ${result.prompt_version} / ${result.prompt_sha256} · evidence ${(report.evidence_ids || []).join(', ') || 'none'}`));
     els.transcript.appendChild(card);
     scrollTranscript();
   }
@@ -1661,7 +1739,7 @@
     head.appendChild(element('span', '', '可验证分析流程 · 阶段概述'));
     const actions = element('span', 'agent-card-actions');
     actions.appendChild(element('span', 'sim-ai-progress-run-id', runId || '准备中'));
-    actions.appendChild(cardCopyButton('复制思维链', () => traceCardText(wrap, true), true));
+    actions.appendChild(cardCopyButton('复制执行轨迹', () => traceCardText(wrap, true), true));
     head.appendChild(actions);
     const note = element('p', 'sim-ai-progress-note', '显示动作、证据与校验状态，不显示隐藏推理。');
     const steps = element('div', 'sim-ai-progress-steps');
@@ -1715,7 +1793,8 @@
     }
     finishActiveTraceStep(trace);
     const suffix = event.tool_name ? ` · ${toolLabel(event.tool_name)}` : '';
-    const label = event.label || (kind === 'tool_started' ? `调用工具${suffix}` : `${traceLabels[kind] || kind}${suffix}`);
+    const label = scopedValidationKinds.has(kind) ? traceLabels[kind]
+      : event.label || (kind === 'tool_started' ? `调用工具${suffix}` : `${traceLabels[kind] || kind}${suffix}`);
     const step = createTraceStep('sim-ai-progress-step', label, traceStageOverview(event), traceStepMeta(event), true);
     const terminal = ['completed', 'partially_verified', 'needs_user_input', 'refused', 'cancelled', 'evidence_insufficient',
       'budget_exhausted', 'provider_failed', 'protocol_failed', 'timed_out'].includes(kind);
@@ -1789,8 +1868,8 @@
       card.appendChild(notice);
     } else if (partiallyVerified) {
       const notice = element('div', 'sim-ai-result-notice');
-      notice.appendChild(element('b', '', '已保留可信部分'));
-      notice.appendChild(element('span', '', '个别表述未通过数值校验，不影响下方已验证结论。'));
+      notice.appendChild(element('b', '', '已保留通过校验的部分'));
+      notice.appendChild(element('span', '', '个别表述未通过数值或引用校验，已单独隐藏；下方分析仍可继续讨论。'));
       if (result.error?.code) notice.title = `首个校验码：${result.error.code}`;
       card.appendChild(notice);
     }
@@ -1800,14 +1879,14 @@
       : result?.status === 'provider_failed'
         ? providerErrorText(result?.error)
         : result.error?.message || '本次任务没有生成可展示的结论。';
-    appendRichProse(card, 'div', 'sim-ai-result-summary', summary, allMetrics);
+    const findingsParent = appendAnswer(card, report?.content || {summary}, allMetrics, true);
     appendEquipmentComparisons(card, report?.equipment_comparisons || [], true);
-    (report?.content?.findings || []).slice(0, 4).forEach(finding => {
+    (report?.content?.findings || []).slice(0, report?.content?.body_markdown ? undefined : 4).forEach(finding => {
       const block = element('div', 'sim-ai-result-finding');
       appendRichProse(block, 'b', '', finding.title, finding.metrics);
       appendRichProse(block, 'p', '', finding.explanation, finding.metrics);
       appendMetricGrid(block, (finding.metrics || []).slice(0, 4), 'sim-ai-result-metrics');
-      card.appendChild(block);
+      findingsParent.appendChild(block);
     });
     appendRotationChanges(card, report?.content?.rotation_changes || [], allMetrics, true);
     appendDraftArtifacts(card, report?.content?.artifacts || [], true);
@@ -1831,7 +1910,6 @@
   const simulationQuestions = [
     ['循环诊断', '这套循环做得好的地方和最主要的问题是什么？'],
     ['攻略解读', '结合当前版本攻略，解释这套循环的核心思路。'],
-    ['蒸馏成宏', '把当前循环蒸馏成宏，调优并实测，给我最终版本和与原循环的差异。'],
     ['对比已存宏', '我想对比已保存的宏，先列出可选方案。'],
   ];
 
@@ -2277,6 +2355,20 @@
 
   function buildSummary(result) {
     const report = result.report;
+    if (report?.content?.body_markdown) {
+      const lines = [plainAgentText(report.content.body_markdown)];
+      for (const artifact of report.content.artifacts || []) {
+        const fence = '`'.repeat(Math.max(3, ...Array.from((artifact.content || '').matchAll(/`+/g), match => match[0].length + 1)));
+        lines.push('', artifact.title || '', '', fence, artifact.content || '', fence);
+      }
+      for (const limitation of report.content.limitations || []) lines.push('', plainAgentText(limitation));
+      for (const source of report.sources || []) {
+        const href = safeExternalUrl(source.source_url || source.yuque_url);
+        if (href) lines.push('', `[${source.title || '参考资料'}](${href})`);
+      }
+      appendTaskCompletionSummary(lines, result);
+      return lines.join('\n');
+    }
     const lines = [
       '# 苍云战斗分析 Agent 实验摘要',
       `- status: ${result.status}`,
@@ -2337,6 +2429,7 @@
         if (href) lines.push(`- [${source.title || '未命名资料'}](${href}) · ${source.season || '版本未标注'} · ${versionLabels[source.version_match] || source.version_match || '匹配状态未知'}`);
       });
     }
+    appendTaskCompletionSummary(lines, result);
     return lines.join('\n');
   }
 
@@ -2357,7 +2450,7 @@
         note: '这是可分享的工程调试投影，不包含供应商密钥、原始响应、隐藏推理或服务端私有路径。',
       },
       identity: {
-        session_id: result?.session_id || null,
+        session_id: result?.session_id || currentSessionId || null,
         run_id: result?.run_id || null,
         question: debug.question || safeReport?.question || null,
         status: result?.status || null,
@@ -2383,6 +2476,7 @@
       },
       trace: result?.trace || null,
       clarification: result?.clarification || null,
+      task_completion: result?.task_completion || null,
       report: safeReport,
       compatibility: result?.debug
         ? 'full'
@@ -2443,6 +2537,7 @@
     const next = els.equipPage?.classList.contains('active') ? 'equipment'
       : els.simPage?.classList.contains('active') ? 'simulation' : null;
     if (!next) {
+      if (window.Jx3Assistant) { updateScenarioState(); return; }
       if (els.dockFab) els.dockFab.hidden = true;
       if (els.dock?.classList.contains('open') && !activeRun) setDockOpen(false);
       return;
@@ -2473,6 +2568,7 @@
 
   window.Jx3AgentDock = { setEmbeddedVisible: (open, focus) => setDockOpen(open, focus, true), refresh: updateScenarioState };
   els.provider.addEventListener('change', () => selectProvider(els.provider));
+  window.addEventListener('jx3-agent-providers-changed', event => loadProviders(event.detail?.selectedId));
   els.dockProvider?.addEventListener('change', () => selectProvider(els.dockProvider));
   els.run.addEventListener('click', startRun);
   els.cancel.addEventListener('click', cancelRun);
@@ -2524,6 +2620,7 @@
     );
   });
   document.addEventListener('keydown', event => {
+    if (document.querySelector('dialog[open]')) return;
     if (event.key === 'Escape' && els.dock?.classList.contains('open') && !activeRun) {
       setDockOpen(false);
     }

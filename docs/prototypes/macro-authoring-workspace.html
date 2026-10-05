@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>写宏工作台 · 交互草图</title>
+  <style>
+    :root{color-scheme:light;--bg:#f2efe7;--panel:#fffcf6;--paper:#f8f5ed;--ink:#37352f;--muted:#777468;--line:#e4ddcf;--gold:#987332;--gold-light:#f3e8cc;--red:#a34838;--red-light:#fbebe5;--blue:#4b707d;--blue-light:#eaf2f3;--green:#527056;--shadow:0 5px 22px #52472b08}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.55 "Microsoft YaHei","PingFang SC",sans-serif}button,select,textarea{font:inherit}button,select{border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:6px}button{padding:7px 11px;cursor:pointer;transition:background .15s,border-color .15s}button:hover:not(:disabled){background:var(--gold-light);border-color:#b9a27b}button:disabled{cursor:default;opacity:.45}button:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid #b89b5770;outline-offset:2px}.primary{background:var(--gold);border-color:var(--gold);color:white;font-weight:600}.primary:hover:not(:disabled){background:#7c5c27;border-color:#7c5c27}small,.muted{color:var(--muted)}.mini{font-size:12px;padding:4px 8px}.tag{display:inline-flex;align-items:center;padding:2px 8px;border-radius:4px;background:#e9e4d8;color:#655e50;font-size:11px;white-space:nowrap}.tag.gold{background:var(--gold-light);color:#78591f}.tag.blue{background:var(--blue-light);color:var(--blue)}.tag.red{background:var(--red-light);color:var(--red)}.tag.green{background:#e9efdf;color:var(--green)}
+    .demo-banner{background:#494235;color:#f8eed5;text-align:center;font-size:12px;padding:7px 20px;letter-spacing:.3px}.app-header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:20px 28px 15px;max-width:1600px;margin:auto}.brand{display:flex;align-items:center;gap:12px}.brand-mark{display:grid;place-items:center;background:#897042;color:#fff3d6;width:39px;height:39px;border-radius:10px;font-size:22px}.brand h1{font-size:18px;font-weight:600;margin:0}.brand p{margin:2px 0 0;color:var(--muted);font-size:11px;letter-spacing:1px}.mode{display:flex;gap:3px;padding:3px;background:#e9e4d9;border-radius:7px}.mode span{padding:5px 13px;color:var(--muted);font-size:12px}.mode .active{background:var(--panel);color:#78591f;border-radius:5px;box-shadow:0 1px 3px #443e3512}
+    main{max-width:1600px;padding:0 28px 28px;margin:auto}.workspace-toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}.environment{display:flex;gap:5px;flex-wrap:wrap}.toolbar-action{margin-left:auto;display:flex;align-items:center;gap:9px}.scope-select{padding:7px 9px;font-size:12px}.status{font-size:12px;color:var(--muted);display:flex;gap:6px;align-items:center}.status:before{content:"";width:6px;height:6px;background:#9e998d;border-radius:50%}.status.dirty{color:#946124}.status.dirty:before{background:#b78742}.status.done{color:var(--green)}.status.done:before{background:var(--green)}
+    .comparison{border:1px solid var(--line);border-radius:10px;background:var(--panel);box-shadow:var(--shadow);overflow:hidden}.comparison-header{display:flex;align-items:center;gap:12px;justify-content:space-between;padding:13px 16px;border-bottom:1px solid var(--line)}.comparison-header h2,.panel-title{font-size:14px;font-weight:600;margin:0}.legend{display:flex;align-items:center;gap:11px;flex-wrap:wrap;font-size:11px;color:var(--muted)}.legend-item{display:flex;gap:5px;align-items:center}.swatch{height:9px;width:9px;display:inline-block;border-radius:2px}.swatch.missing{background:#fbebe5;border:1px dashed #b66453}.swatch.extra{background:#b45a43}.swatch.drift{background:#6b8b96}.comparison-columns{display:grid;grid-template-columns:1fr 1fr}.timeline-pane{padding:14px 16px 15px;min-width:0}.timeline-pane+ .timeline-pane{border-left:1px solid var(--line);background:#fdfaf4}.pane-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}.pane-heading h3{margin:0;font-size:13px;font-weight:600}.pane-heading p{margin:3px 0 0;color:var(--muted);font-size:11px}.timeline{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;min-height:255px;align-content:start}.skill-card{position:relative;text-align:left;min-width:0;min-height:79px;padding:9px 10px;background:#fcf9f1;border:1px solid #e9e1d2;border-radius:6px}.skill-card:hover{border-color:#bda26d}.skill-card.selected{border-color:var(--gold);background:#f4e9cc;box-shadow:inset 0 0 0 1px #98733225}.skill-top{display:flex;align-items:center;gap:7px}.skill-icon{width:29px;height:29px;display:grid;place-items:center;flex-shrink:0;border-radius:5px;background:#ddd2b5;color:#6a5738;font:600 17px/1 "Microsoft YaHei",sans-serif}.skill-icon.red{background:#ead3c4;color:#8a503b}.skill-icon.blue{background:#d7e1db;color:#526d68}.skill-icon.dark{background:#d8d5cb;color:#615d4e}.skill-name{font-size:13px;font-weight:600}.time{font-size:10px;color:var(--muted);margin-left:auto;white-space:nowrap}.skill-sub{font-size:10px;margin-top:7px;color:#81796b;white-space:nowrap}.skill-index{font-size:10px;color:var(--muted);margin-right:3px}.selection-marker{position:absolute;right:6px;bottom:5px;font-size:9px;color:#8a6629}.skill-card.ghost{border-style:dashed;background:transparent;color:#a49b8b;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:3px}.skill-card.missing{border-style:dashed;border-color:#c78e7d;background:var(--red-light);color:var(--red)}.skill-card.extra{border-color:#c5816d;background:#faeee7}.skill-card.extra .skill-icon{background:#b26048;color:white}.skill-card.drift{border-color:#8da8ae;background:var(--blue-light)}.skill-card.linked{box-shadow:0 0 0 2px #967332;outline:2px solid transparent;outline-offset:2px}.empty-state{grid-column:1/-1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;min-height:251px;border:1px dashed #d9d0bf;border-radius:7px;text-align:center;padding:25px;color:var(--muted)}.empty-symbol{width:42px;height:42px;display:grid;place-items:center;border:1px solid #d4cbb8;border-radius:50%;font-size:21px;color:#b09a72}.empty-state strong{color:#6f6555;font-size:13px}.empty-state p{font-size:12px;max-width:330px;margin:0}.compare-footer{padding:10px 16px;border-top:1px solid var(--line);display:flex;align-items:center;gap:10px;font-size:11px;color:var(--muted);flex-wrap:wrap}.compare-footer .push{margin-left:auto}.outdated{background:#fcf2df;color:#8c692d;padding:8px 16px;font-size:12px;border-bottom:1px solid #ebdcc0}.hidden{display:none!important}
+    .lower-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}.panel{border:1px solid var(--line);border-radius:10px;background:var(--panel);box-shadow:var(--shadow);min-width:0;overflow:hidden}.panel-heading{padding:13px 16px;display:flex;justify-content:space-between;align-items:center;gap:10px;border-bottom:1px solid var(--line)}.inline-actions{display:flex;gap:5px}.editor-body{display:flex;background:#f9f6ef;min-height:254px;padding:12px 0}.line-numbers{width:43px;flex-shrink:0;color:#aba28f;font:12px/28px Consolas,monospace;text-align:right;padding:0 10px 0 0;white-space:pre;user-select:none;border-right:1px solid #e8e0d0;overflow:hidden;max-height:232px}.macro-input{resize:vertical;display:block;flex:1;min-width:0;min-height:232px;max-height:430px;border:0;border-radius:0;background:transparent;color:#5c533f;padding:0 14px;font:13px/28px Consolas,"Microsoft YaHei",monospace;white-space:pre;tab-size:2;outline-offset:-3px}.editor-footer{border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:9px 15px;font-size:11px;color:var(--muted)}.editor-note{padding:11px 15px;border-top:1px solid var(--line);font-size:11px;background:#fdfbf7;color:var(--muted)}.suggestion-body{padding:13px 16px}.target-title{font-size:15px;font-weight:600;margin:4px 0}.target-meta{font-size:11px;color:var(--muted);margin:4px 0 12px}.suggestion-card{background:#f8f3e7;border:1px solid #e7d9b9;border-radius:7px;overflow:hidden}.suggestion-title{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid #eadfc7;font-size:12px}.candidate-code{margin:0;padding:10px 12px;color:#66532c;font:12px/1.9 Consolas,"Microsoft YaHei",monospace;white-space:pre-wrap;overflow-wrap:anywhere}.suggestion-action{display:flex;gap:8px;align-items:center;justify-content:space-between;padding:9px 12px;border-top:1px solid #eadfc7}.suggestion-action small{font-size:10px}.suggestion-body details{margin-top:12px;font-size:12px}.suggestion-body summary{color:#776341;cursor:pointer}.step-explanations{padding:10px 0 0;display:grid;gap:9px}.step-explanation{padding-left:11px;border-left:2px solid #d8c9a8}.step-explanation strong{font-size:12px}.step-explanation p{font-size:11px;color:var(--muted);margin:3px 0 0}.suggestion-disclaimer{font-size:11px;color:var(--muted);margin:11px 0 0}
+    .diagnostic{margin-top:14px}.diagnostic-body{display:grid;grid-template-columns:.9fr 1.1fr;gap:25px;padding:14px 16px}.diagnostic-intro{font-size:12px;margin:0 0 10px}.evidence-grid{display:grid;grid-template-columns:1.1fr 1fr 1fr;gap:0;font-size:11px;border:1px solid var(--line);border-radius:6px;overflow:hidden}.evidence-grid span{padding:6px 9px;border-bottom:1px solid var(--line);background:#fcf9f2}.evidence-grid span:nth-last-child(-n+3){border-bottom:0}.evidence-grid .col-head{font-weight:600;background:#f1ecdf}.evidence-grid .difference{color:var(--red);font-weight:600}.reason-title{font-size:12px;margin:0 0 7px;font-weight:600}.reason-copy{font-size:12px;color:#70685a;margin:0 0 10px}.evidence-line{padding:8px 10px;background:#f5eee2;border-radius:5px;color:#765b30;font:11px/1.8 Consolas,"Microsoft YaHei",monospace;white-space:pre-wrap}.diagnostic-placeholder{padding:17px;font-size:12px;color:var(--muted)}.page-foot{display:flex;justify-content:space-between;gap:15px;color:#8c8475;font-size:10px;padding:13px 2px 0}.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);padding:10px 18px;background:#494235;color:#fff7e7;border-radius:7px;box-shadow:0 6px 30px #302d2922;font-size:12px;z-index:5;max-width:90vw}
+    @media(min-width:1450px){.timeline{grid-template-columns:repeat(3,minmax(0,1fr))}.skill-card{min-height:87px}.empty-state{min-height:275px}}
+    @media(max-width:950px){main{padding:0 16px 24px}.app-header{padding:17px 16px 13px}.timeline-pane{padding:12px}.timeline{grid-template-columns:repeat(2,minmax(0,1fr))}.skill-sub{font-size:9px}.toolbar-action{margin-left:0}.comparison-header{align-items:flex-start}.legend{max-width:280px;justify-content:flex-end;gap:6px}.diagnostic-body{gap:15px}.environment .tag{font-size:10px}}
+    @media(max-width:680px){.comparison-columns,.lower-grid,.diagnostic-body{grid-template-columns:1fr}.timeline-pane+ .timeline-pane{border-left:0;border-top:1px solid var(--line)}.timeline{grid-template-columns:repeat(3,minmax(0,1fr));min-height:0}.skill-card{padding:7px;min-height:82px}.skill-top{gap:4px;flex-wrap:wrap}.skill-icon{width:24px;height:24px;font-size:14px}.skill-name{font-size:11px}.time{font-size:9px;margin-left:0}.skill-sub{white-space:normal}.comparison-header{display:block}.legend{max-width:none;justify-content:flex-start;margin-top:7px}.mode span{padding:5px 8px;font-size:11px}.brand h1{font-size:16px}.brand p{font-size:10px}.brand-mark{width:32px;height:32px;font-size:19px}.toolbar-action{flex-wrap:wrap;width:100%}.toolbar-action .primary{margin-left:auto}.page-foot{flex-direction:column;gap:3px}.diagnostic-body{gap:18px}.empty-state{min-height:200px}.demo-banner{font-size:10px}.compare-footer .push{margin-left:0}.editor-body{min-height:220px}}
+  </style>
+</head>
+<body>
+  <div class="demo-banner">交互草图 · 示例数据，未连接模拟器　／　所有条件、状态和结果均为预置演示，不代表真实计算</div>
+  <header class="app-header">
+    <div class="brand"><div class="brand-mark" aria-hidden="true">苍</div><div><h1>写宏工作台</h1><p>苍云器灵 · 从目标循环到可验证的宏</p></div></div>
+    <div class="mode" aria-label="当前模式"><span>编辑序列</span><span class="active" aria-current="page">写宏模式</span></div>
+  </header>
+  <main>
+    <div class="workspace-toolbar">
+      <div class="environment" aria-label="共同环境示例">
+        <span class="tag gold">共同环境 · 示例</span><span class="tag">苍生铸世测试服</span><span class="tag">分山劲</span><span class="tag">60 秒</span><span class="tag">装备 / 奇穴 / 延迟一致</span>
+      </div>
+      <div class="toolbar-action">
+        <span class="status" id="runStatus" role="status">未运行</span>
+        <select class="scope-select" id="scope" aria-label="对照范围"><option value="whole">整宏对照</option><option value="segment">选段调试</option></select>
+        <button class="primary" id="runButton">运行对照 <span style="font-size:10px;opacity:.8">· 演示</span></button>
+      </div>
+    </div>
+
+    <section class="comparison" aria-label="模板与宏运行对照">
+      <div class="comparison-header">
+        <h2>循环对照 <span class="tag" id="resultScope" style="margin-left:6px">等待运行</span></h2>
+        <div class="legend" aria-label="差异图例"><span class="legend-item"><i class="swatch missing"></i>缺失</span><span class="legend-item"><i class="swatch extra"></i>多放</span><span class="legend-item"><i class="swatch drift"></i>同技能时间 / 资源不同</span></div>
+      </div>
+      <div id="outdatedNotice" class="outdated hidden">草稿或范围已修改。下方保留上次演示结果，再次运行后才对应当前版本。</div>
+      <div class="comparison-columns">
+        <div class="timeline-pane">
+          <div class="pane-heading"><div><h3>模板循环</h3><p id="templateHint">点击选单个技能，Shift + 点击选连续组合</p></div><span class="tag" id="selectionTag">已选 3 个技能</span></div>
+          <div class="timeline" id="referenceTimeline" aria-label="模板循环技能"></div>
+        </div>
+        <div class="timeline-pane">
+          <div class="pane-heading"><div><h3>宏实际循环 / redline</h3><p id="actualHint">运行后按照对应事件对齐，插入留空槽</p></div><button class="mini" id="firstDifference" disabled>定位第一处差异</button></div>
+          <div class="timeline" id="actualTimeline" aria-label="宏运行示例"></div>
+        </div>
+      </div>
+      <div class="compare-footer"><span id="compareSummary">参考循环已就绪 · 宏草稿尚未对照</span><span class="push" id="scopeNote">整宏：从共同初始环境运行完整草稿；当前画布只展示一个示例片段。</span></div>
+    </section>
+
+    <div class="lower-grid">
+      <section class="panel" aria-label="宏草稿编辑器">
+        <div class="panel-heading"><h2 class="panel-title">宏草稿 <span class="tag" id="draftVersion" style="margin-left:5px">v1</span></h2><div class="inline-actions"><button class="mini" id="undoButton" disabled>撤销</button><button class="mini" id="copyButton">复制宏</button></div></div>
+        <div class="editor-body"><div class="line-numbers" id="lineNumbers" aria-hidden="true"></div><textarea class="macro-input" id="macroInput" aria-label="编辑宏草稿" spellcheck="false" wrap="off">/cast [nobuff:血怒] 血怒
+/cast [sun&gt;=100] 阵云
+/cast [sun&gt;=100] 月照
+/cast [sun&lt;100] 雁门
+/cast 盾刀</textarea></div>
+        <div class="editor-footer"><span id="charCount"></span><span id="cursorPosition">第 1 行，第 1 列</span><span class="tag gold" id="draftState">未验证</span></div>
+        <div class="editor-note">建议插入在当前光标所在行之前，可撤销。复制保留完整草稿；本草图仅在当前页面内保留内容。</div>
+      </section>
+
+      <section class="panel" aria-label="所选目标与建议">
+        <div class="panel-heading"><h2 class="panel-title">所选目标与建议</h2><span class="tag gold">预置示例</span></div>
+        <div class="suggestion-body">
+          <div class="target-title" id="targetTitle"></div><div class="target-meta" id="targetMeta"></div>
+          <div class="suggestion-card">
+            <div class="suggestion-title"><strong id="candidateTitle">多行片段示例</strong><span class="tag" id="candidateTag">未运行验证</span></div>
+            <pre class="candidate-code" id="candidateCode"></pre>
+            <div class="suggestion-action"><small>插入时保留草稿已有内容</small><button class="mini primary" id="insertButton">插入草稿</button></div>
+          </div>
+          <details id="stepDetails"><summary>展开各步条件与优先级说明</summary><div class="step-explanations" id="stepExplanations"></div></details>
+          <p class="suggestion-disclaimer">多选时给整段多行方案。实际产品需联合检查前行抢占、连贯执行及组合外误放；本页不进行条件搜索。</p>
+        </div>
+      </section>
+    </div>
+
+    <section class="panel diagnostic" aria-label="差异诊断">
+      <div class="panel-heading"><h2 class="panel-title">差异定位 <span class="tag" id="diagnosticTag" style="margin-left:5px">等待运行</span></h2><button class="mini" id="locateLine" disabled>定位关联宏行</button></div>
+      <div id="diagnosticEmpty" class="diagnostic-placeholder">运行后点击右侧差异，查看对应宏行、两侧状态及示例原因。优先修正第一处分歧，再重新运行。</div>
+      <div class="diagnostic-body hidden" id="diagnosticBody">
+        <div><p class="diagnostic-intro" id="diagnosticIntro"></p><div class="evidence-grid" id="evidenceGrid"></div></div>
+        <div><p class="reason-title" id="reasonTitle"></p><p class="reason-copy" id="reasonCopy"></p><div class="evidence-line" id="evidenceLine"></div><p class="muted" style="font-size:10px;margin:8px 0 0">示例决策解释；正式结果需由执行器记录条件、可释放性及优先命中行，不能由技能顺序倒推。</p></div>
+      </div>
+    </section>
+    <footer class="page-foot"><span>目标循环 → 选技能 / 组合 → 编写草稿 → 运行对照 → 点击差异修正</span><span>交互草图 · 仅演示前 9 秒 · 不保存、不联网</span></footer>
+  </main>
+  <div class="toast hidden" id="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    'use strict';
+    const $ = id => document.getElementById(id);
+    const skills = [
+      { name: '血怒', time: 0, sun: 100, rage: 10, icon: '怒', color: 'red' },
+      { name: '阵云', time: 0, sun: 100, rage: 30, icon: '阵', color: 'dark' },
+      { name: '月照', time: 1.5, sun: 70, rage: 30, icon: '月', color: 'blue' },
+      { name: '雁门', time: 3, sun: 40, rage: 40, icon: '雁', color: 'red' },
+      { name: '盾刀', time: 4.5, sun: 10, rage: 40, icon: '刀', color: 'dark' },
+      { name: '阵云', time: 6, sun: 100, rage: 50, icon: '阵', color: 'dark' },
+      { name: '月照', time: 7.5, sun: 70, rage: 50, icon: '月', color: 'blue' },
+      { name: '雁门', time: 9, sun: 40, rage: 60, icon: '雁', color: 'red' }
+    ];
+    const candidateBySkill = {
+      '血怒': '/cast [nobuff:血怒] 血怒',
+      '阵云': '/cast [sun>=100] 阵云',
+      '月照': '/cast [sun>=60&sun<100] 月照',
+      '雁门': '/cast [sun<60] 雁门',
+      '盾刀': '/cast 盾刀'
+    };
+    const explanationBySkill = {
+      '血怒': '示例使用 Buff 状态控制入口；正式候选还需核查冷却、可释放性及重复命中。',
+      '阵云': '示例以暴怒阈值识别入口。排在前面的宏行仍可能先命中，需要整段运行验证。',
+      '月照': '示例中阵云后暴怒降至 70，使用区间识别下一步。必须检查其它时刻是否也处于这个区间。',
+      '雁门': '示例中月照后暴怒降至 40。仅判断阈值并不能保证前两步已经发生。',
+      '盾刀': '示例作为无条件兜底。优先级高于它的行均未成功执行时才可能到达此行。'
+    };
+    // These fixtures deliberately demonstrate interaction only; they never evaluate the draft.
+    const fixtures = [
+      { ref: 0, type: 'same' }, { ref: 1, type: 'same' },
+      { ref: 2, type: 'missing', line: 3 },
+      { ref: 3, type: 'drift', line: 4, actual: { time: 3.5, sun: 70, rage: 30 } },
+      { ref: null, after: 3, type: 'extra', line: 5, actual: { name: '盾刀', time: 4, sun: 40, rage: 30, icon: '刀', color: 'dark' } },
+      { ref: 4, type: 'same' }, { ref: 5, type: 'same' }, { ref: 6, type: 'same' }, { ref: 7, type: 'same' }
+    ];
+    let selection = [1, 2, 3];
+    let anchor = 1;
+    let revision = 1;
+    let lastDraft = $('macroInput').value;
+    let undoStack = [];
+    let run = null;
+    let focusFixture = null;
+    let pendingRun = null;
+    let toastTimer;
+
+    function announce(message) {
+      $('toast').textContent = message;
+      $('toast').classList.remove('hidden');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => $('toast').classList.add('hidden'), 3000);
+    }
+
+    function isStale() {
+      if (!run) return false;
+      return run.revision !== revision || run.scope !== $('scope').value ||
+        (run.scope === 'segment' && run.selection.join(',') !== selection.join(','));
+    }
+
+    function updateStatus() {
+      const stale = isStale();
+      $('runStatus').textContent = pendingRun ? '正在载入示例' : !run ? '未运行' : stale ? '草稿 / 范围已改' : '已演示 · 非验证';
+      $('runStatus').className = 'status' + (run ? (stale ? ' dirty' : ' done') : '');
+      $('draftState').textContent = !run ? '未验证' : stale ? '已改 · 待重新运行' : '示例已载入 · 未真实验证';
+      $('outdatedNotice').classList.toggle('hidden', !stale);
+      $('draftVersion').textContent = 'v' + revision;
+      $('scopeNote').textContent = $('scope').value === 'whole'
+        ? '整宏：从共同初始环境运行完整草稿；当前画布只展示一个示例片段。'
+        : '选段：从所选区间入口状态调试；局部结果不代表整宏复现。';
+    }
+
+    function relevantFixtures() {
+      if (!run || run.scope === 'whole') return fixtures;
+      return fixtures.filter(item => item.ref === null ? run.selection.includes(item.after) : run.selection.includes(item.ref));
+    }
+
+    function makeSkillCard(skill, index, side, fixtureIndex, type) {
+      const card = document.createElement('button');
+      card.className = 'skill-card ' + (type || '');
+      card.dataset.fixture = fixtureIndex;
+      if (index !== null) card.dataset.skill = index;
+      if (side === 'reference' && selection.includes(index)) card.classList.add('selected');
+      if (focusFixture === fixtureIndex) card.classList.add('linked');
+      const top = document.createElement('div');
+      top.className = 'skill-top';
+      const icon = document.createElement('span');
+      icon.className = 'skill-icon ' + skill.color;
+      icon.textContent = skill.icon;
+      const title = document.createElement('span');
+      title.className = 'skill-name';
+      title.textContent = skill.name;
+      const time = document.createElement('span');
+      time.className = 'time';
+      time.textContent = skill.time.toFixed(1) + 's';
+      top.append(icon, title, time);
+      const sub = document.createElement('div');
+      sub.className = 'skill-sub';
+      sub.textContent = (index === null ? '+ ' : '#' + (index + 1) + ' · ') + '暴怒 ' + skill.sun + ' / 怒气 ' + skill.rage;
+      card.append(top, sub);
+      if (side === 'reference') {
+        card.setAttribute('aria-pressed', String(selection.includes(index)));
+        card.title = '点击选择 ' + skill.name + '；Shift + 点击连续多选';
+        card.addEventListener('click', event => {
+          if (event.shiftKey) {
+            const start = Math.min(anchor, index), end = Math.max(anchor, index);
+            selection = Array.from({ length: end - start + 1 }, (_, offset) => start + offset);
+          } else { anchor = index; selection = [index]; }
+          focusFixture = null;
+          renderTimelines(); renderSuggestions(); updateStatus();
+        });
+        if (selection.includes(index)) {
+          const mark = document.createElement('span');
+          mark.className = 'selection-marker'; mark.textContent = '已选'; card.append(mark);
+        }
+      } else {
+        card.title = type === 'same' ? '示例：这一位置与参考一致' : '查看此处差异及对应宏行';
+        card.addEventListener('click', () => showDiagnostic(fixtureIndex));
+      }
+      return card;
+    }
+
+    function ghost(text, detail, type) {
+      const card = document.createElement('div');
+      card.className = 'skill-card ghost ' + (type || '');
+      const title = document.createElement('span'); title.textContent = text;
+      const sub = document.createElement('small'); sub.textContent = detail;
+      card.append(title, sub);
+      return card;
+    }
+
+    function renderTimelines() {
+      const reference = $('referenceTimeline'), actual = $('actualTimeline');
+      reference.replaceChildren(); actual.replaceChildren();
+      const visible = run ? relevantFixtures() : fixtures.filter(item => item.ref !== null);
+      visible.forEach(item => {
+        const fixtureIndex = fixtures.indexOf(item);
+        if (item.ref === null) {
+          const slot = ghost('对齐留空', '宏在此处多放一次技能');
+          slot.dataset.fixture = fixtureIndex;
+          if (focusFixture === fixtureIndex) slot.classList.add('linked');
+          reference.append(slot);
+        } else reference.append(makeSkillCard(skills[item.ref], item.ref, 'reference', fixtureIndex));
+        if (!run) return;
+        if (item.type === 'missing') {
+          const card = document.createElement('button');
+          card.className = 'skill-card ghost missing';
+          card.dataset.fixture = fixtureIndex;
+          if (focusFixture === fixtureIndex) card.classList.add('linked');
+          const name = document.createElement('strong'); name.textContent = '− 缺失 ' + skills[item.ref].name;
+          const note = document.createElement('small'); note.textContent = '点击查看条件与抢占行';
+          card.append(name, note);
+          card.addEventListener('click', () => showDiagnostic(fixtureIndex));
+          actual.append(card);
+        } else {
+          const skill = { ...(item.ref === null ? {} : skills[item.ref]), ...(item.actual || {}) };
+          actual.append(makeSkillCard(skill, item.ref, 'actual', fixtureIndex, item.type));
+        }
+      });
+      if (!run) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.innerHTML = '<div class="empty-symbol" aria-hidden="true">⇄</div><strong>写下宏，看它实际会怎样执行</strong><p>点击「运行对照」体验 redline 定位。此草图只载入固定示例，不会执行或校验你写的宏。</p>';
+        actual.append(empty);
+      }
+      $('selectionTag').textContent = '已选 ' + selection.length + ' 个技能';
+      $('templateHint').textContent = run && run.scope === 'segment'
+        ? '上次选段结果 · 当前选择可继续调整；切换整宏可返回全局'
+        : '点击选单个技能，Shift + 点击选连续组合';
+      if (run) {
+        const missing = visible.filter(x => x.type === 'missing').length;
+        const extra = visible.filter(x => x.type === 'extra').length;
+        const drift = visible.filter(x => x.type === 'drift').length;
+        $('compareSummary').textContent = '预置示例 · 缺失 ' + missing + ' · 多放 ' + extra + ' · 时间 / 资源差异 ' + drift;
+        $('resultScope').textContent = run.scope === 'whole' ? '整宏示例 · 草稿 v' + run.revision : '局部示例 · 不代表整宏复现';
+        $('actualHint').textContent = '固定演示结果 · 未根据当前宏文本计算';
+        $('firstDifference').disabled = !visible.some(x => x.type !== 'same');
+      }
+    }
+
+    function currentCandidate() { return selection.map(index => candidateBySkill[skills[index].name]).join('\n'); }
+
+    function renderSuggestions() {
+      const names = selection.map(index => skills[index].name);
+      $('targetTitle').textContent = names.join(' → ');
+      let occurrences = 0;
+      for (let start = 0; start <= skills.length - names.length; start++) {
+        if (names.every((name, offset) => skills[start + offset].name === name)) occurrences++;
+      }
+      $('targetMeta').textContent = '所选 #' + (selection[0] + 1) + (selection.length > 1 ? '–#' + (selection[selection.length - 1] + 1) : '') + ' · 示例模板中连续出现 ' + occurrences + ' 次';
+      $('candidateTitle').textContent = selection.length === 1 ? '单技能 · 单行宏示例' : '连续组合 · 完整多行片段示例';
+      $('candidateCode').textContent = currentCandidate();
+      $('candidateTag').textContent = selection.length + ' 行 · 未验证';
+      $('stepExplanations').replaceChildren();
+      selection.forEach((index, offset) => {
+        const element = document.createElement('div'); element.className = 'step-explanation';
+        const title = document.createElement('strong'); title.textContent = '第 ' + (offset + 1) + ' 行 · ' + skills[index].name;
+        const copy = document.createElement('p'); copy.textContent = explanationBySkill[skills[index].name];
+        element.append(title, copy); $('stepExplanations').append(element);
+      });
+    }
+
+    function updateEditor() {
+      const editor = $('macroInput');
+      const lines = editor.value.split('\n');
+      $('lineNumbers').textContent = lines.map((_, index) => index + 1).join('\n');
+      const before = editor.value.slice(0, editor.selectionStart).split('\n');
+      $('cursorPosition').textContent = '第 ' + before.length + ' 行，第 ' + (Array.from(before[before.length - 1]).length + 1) + ' 列';
+      $('charCount').textContent = Array.from(editor.value).length + ' 字符（含换行） · ' + lines.length + ' 行';
+      $('undoButton').disabled = undoStack.length === 0;
+      $('lineNumbers').scrollTop = editor.scrollTop;
+    }
+
+    function changed() {
+      if ($('macroInput').value !== lastDraft) {
+        undoStack.push(lastDraft);
+        lastDraft = $('macroInput').value;
+        revision++;
+      }
+      updateEditor(); updateStatus();
+    }
+
+    function showDiagnostic(fixtureIndex) {
+      const item = fixtures[fixtureIndex];
+      focusFixture = fixtureIndex;
+      renderTimelines();
+      $('diagnosticEmpty').classList.add('hidden'); $('diagnosticBody').classList.remove('hidden');
+      const typeLabels = { missing: '缺失', extra: '多放', drift: '时间 / 资源不同', same: '此处一致' };
+      $('diagnosticTag').textContent = typeLabels[item.type] + ' · 示例';
+      $('diagnosticTag').className = 'tag ' + (item.type === 'drift' ? 'blue' : item.type === 'same' ? 'green' : 'red');
+      let expected = item.ref === null ? null : skills[item.ref];
+      let actual = item.type === 'missing' ? { time: 1.5, sun: 70, rage: 30 } : { ...(expected || {}), ...(item.actual || {}) };
+      $('diagnosticIntro').textContent = item.type === 'missing' ? '第一处分歧：模板需要月照，宏在对应决策点跳过了它。' : item.type === 'extra' ? '宏多放了一次盾刀。模板一侧留空，后续技能继续对齐。' : item.type === 'drift' ? '技能相同，但施放时间与释放前资源已发生偏移。' : '此示例位置的技能、时间及展示资源一致。';
+      const table = $('evidenceGrid'); table.replaceChildren();
+      const values = [
+        ['对照字段', '参考释放前', item.type === 'missing' ? '宏决策点' : '实际释放前'],
+        ['技能', expected ? expected.name : '无', item.type === 'missing' ? '未释放月照' : actual.name],
+        [item.type === 'missing' ? '采样时刻' : '施放时刻', expected ? expected.time.toFixed(1) + ' s' : '—', actual.time.toFixed(1) + ' s'],
+        ['暴怒 / sun', expected ? expected.sun : '—', actual.sun],
+        ['怒气 / rage', expected ? expected.rage : '—', actual.rage]
+      ];
+      values.forEach((row, rowIndex) => row.forEach((value, column) => {
+        const cell = document.createElement('span'); cell.textContent = value;
+        if (!rowIndex) cell.className = 'col-head';
+        else if (column === 2 && String(row[1]) !== String(row[2])) cell.className = 'difference';
+        table.append(cell);
+      }));
+      const reasons = {
+        missing: ['第 3 行条件未满足，第 4 行先成功执行', '示例中的暴怒为 70，第 3 行要求至少 100，条件为假；后面的雁门条件成立。先修改这一处分歧，再检查后续偏移。', 'L3  /cast [sun>=100] 月照  → 条件为假\nL4  /cast [sun<100] 雁门   → 成功执行'],
+        drift: ['前面的月照缺失后，状态与时间发生偏移', '示例中的雁门晚了 0.5 秒，暴怒多 30、怒气少 10。它可能是前一处分歧的后续表现，需要先修正更早的缺失再运行。', 'L4  /cast [sun<100] 雁门\n时间 +0.5 s · 暴怒 +30 · 怒气 −10'],
+        extra: ['第 5 行兜底在额外决策点成功执行', '示例展示多放时如何对齐。正式诊断需要检查上方各行的条件与可释放性，解释执行器为何到达兜底行。', 'L5  /cast 盾刀  → 示例多放一次\n参考侧无对应释放，保留空槽继续对齐'],
+        same: ['对应事件一致', '该示例位置没有展示差异；局部一致不能代替整份宏的运行验证。', '示例事件匹配：技能 / 时刻 / 暴怒 / 怒气一致']
+      };
+      $('reasonTitle').textContent = reasons[item.type][0]; $('reasonCopy').textContent = reasons[item.type][1]; $('evidenceLine').textContent = reasons[item.type][2];
+      $('locateLine').disabled = !item.line;
+      $('locateLine').textContent = item.line ? '定位第 ' + item.line + ' 行' : '无关联差异行';
+    }
+
+    $('macroInput').addEventListener('input', changed);
+    ['click', 'keyup', 'select', 'scroll'].forEach(event => $('macroInput').addEventListener(event, updateEditor));
+    $('scope').addEventListener('change', updateStatus);
+
+    $('insertButton').addEventListener('click', () => {
+      const editor = $('macroInput');
+      const cursor = editor.selectionStart;
+      const insertionPoint = cursor === 0 ? 0 : editor.value.lastIndexOf('\n', cursor - 1) + 1;
+      const snippet = currentCandidate() + '\n';
+      editor.value = editor.value.slice(0, insertionPoint) + snippet + editor.value.slice(insertionPoint);
+      editor.focus(); editor.setSelectionRange(insertionPoint, insertionPoint + snippet.length);
+      changed();
+      announce('已在光标所在行前插入 ' + selection.length + ' 行；原草稿已保留，可撤销。');
+    });
+
+    $('undoButton').addEventListener('click', () => {
+      if (!undoStack.length) return;
+      $('macroInput').value = undoStack.pop(); lastDraft = $('macroInput').value; revision++;
+      updateEditor(); updateStatus(); announce('已撤销上一次草稿修改。');
+    });
+
+    $('copyButton').addEventListener('click', async () => {
+      const editor = $('macroInput');
+      try {
+        if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(editor.value);
+        else {
+          const start = editor.selectionStart, end = editor.selectionEnd;
+          editor.focus(); editor.select();
+          const copied = document.execCommand('copy');
+          editor.setSelectionRange(start, end);
+          if (!copied) throw new Error('Clipboard unavailable');
+        }
+        announce('已复制完整草稿。此草图尚未验证宏的正确性。');
+      } catch (_) {
+        editor.focus(); editor.select(); updateEditor(); announce('浏览器未开放剪贴板，已选中宏文本，请按 Ctrl+C 复制。');
+      }
+    });
+
+    $('runButton').addEventListener('click', () => {
+      if (pendingRun) return;
+      if (!$('macroInput').value.trim()) { announce('先在编辑区写下宏，再体验运行对照。'); $('macroInput').focus(); return; }
+      // Snapshot scope, selected interval and revision. Edits during loading remain visibly stale.
+      const snapshot = { revision, scope: $('scope').value, selection: [...selection], text: $('macroInput').value };
+      $('runButton').disabled = true;
+      pendingRun = setTimeout(() => {
+        run = snapshot; pendingRun = null; focusFixture = null;
+        $('runButton').disabled = false;
+        renderTimelines(); updateStatus();
+        const first = relevantFixtures().find(item => item.type !== 'same');
+        if (first) showDiagnostic(fixtures.indexOf(first));
+        else {
+          $('diagnosticBody').classList.add('hidden'); $('diagnosticEmpty').classList.remove('hidden');
+          $('diagnosticEmpty').textContent = '所选范围的预置示例没有差异；这不是当前草稿的真实验证结果。';
+          $('diagnosticTag').textContent = '局部示例无差异'; $('locateLine').disabled = true;
+        }
+        announce('已载入固定演示结果；此结果没有执行或校验当前草稿。');
+      }, 350);
+      updateStatus();
+    });
+
+    $('firstDifference').addEventListener('click', () => {
+      const first = relevantFixtures().find(item => item.type !== 'same');
+      if (!first) return;
+      const index = fixtures.indexOf(first); showDiagnostic(index);
+      $('actualTimeline').querySelector('[data-fixture="' + index + '"]').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      announce('两侧已同步高亮第一处差异，详情显示在下方。');
+    });
+
+    $('locateLine').addEventListener('click', () => {
+      const item = fixtures[focusFixture];
+      if (!item || !item.line) return;
+      if (run && run.revision !== revision) { announce('草稿已修改，旧结果行号已失效。请重新运行对照。'); return; }
+      const editor = $('macroInput');
+      const lines = editor.value.split('\n');
+      if (lines.length < item.line) { announce('预置示例关联第 ' + item.line + ' 行，当前草稿没有该行。'); return; }
+      const start = lines.slice(0, item.line - 1).reduce((sum, line) => sum + line.length + 1, 0);
+      editor.focus(); editor.setSelectionRange(start, start + lines[item.line - 1].length);
+      editor.scrollTop = Math.max(0, (item.line - 3) * 28); updateEditor();
+      editor.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      announce('已定位预置示例关联的第 ' + item.line + ' 行；此草图不建立真实执行映射。');
+    });
+
+    renderTimelines(); renderSuggestions(); updateEditor(); updateStatus();
+  </script>
+</body>
+</html>
